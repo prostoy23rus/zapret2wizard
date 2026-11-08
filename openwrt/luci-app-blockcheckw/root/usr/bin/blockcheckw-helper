@@ -3973,6 +3973,7 @@ case "$1" in
     install_engine) cmd_install_engine ;;
     selftest) shift; cmd_selftest "$@" ;;
     class) shift; cmd_class "$@" ;;
+    autosetup) shift; cmd_autosetup "$@" ;;
     *)
         echo "Usage: $0 {start|status|stop|apply|activate|delete_strategy|test|speedtest|info|logs|check_update|update|uninstall|diag|ensure_hostlists|read_hostlist|add_hostlist_domain|remove_hostlist_domain|write_hostlist|metrics|toggle|conflicts|doctor}"
         exit 1

@@ -1,0 +1,144 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "packaging/**"
+      - "openwrt/**"
+      - ".github/workflows/build.yml"
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  scanner:
+    name: scanner ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-unknown-linux-musl
+            openwrt_arch: aarch64_cortex-a53
+            engine: linux-arm64
+          - target: armv7-unknown-linux-musleabihf
+            openwrt_arch: arm_cortex-a7
+            engine: linux-arm
+          - target: x86_64-unknown-linux-musl
+            openwrt_arch: x86_64
+            engine: linux-x86_64
+          - target: mips-unknown-linux-musl
+            openwrt_arch: mips_24kc
+            engine: linux-mips
+          - target: mipsel-unknown-linux-musl
+            openwrt_arch: mipsel_24kc
+            engine: linux-mipsel
+          - target: mips64-unknown-linux-musl
+            openwrt_arch: mips64_octeonplus
+            engine: linux-mips64
+          - target: riscv64gc-unknown-linux-musl
+            openwrt_arch: riscv64_generic
+            engine: linux-riscv64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build blockcheckw (musl)
+        uses: houseabsolute/actions-rust-cross@v1
+        with:
+          command: build
+          target: ${{ matrix.target }}
+          args: "--release --locked"
+          strip: true
+
+      - name: Stage scanner
+        run: |
+          mkdir -p out
+          cp target/${{ matrix.target }}/release/blockcheckw out/blockcheckw-${{ matrix.openwrt_arch }}
+          ls -l out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scanner-${{ matrix.openwrt_arch }}
+          path: out/blockcheckw-${{ matrix.openwrt_arch }}
+          retention-days: 14
+
+  package:
+    name: package ${{ matrix.openwrt_arch }}
+    needs: scanner
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - openwrt_arch: aarch64_cortex-a53
+            engine: linux-arm64
+          - openwrt_arch: arm_cortex-a7
+            engine: linux-arm
+          - openwrt_arch: x86_64
+            engine: linux-x86_64
+          - openwrt_arch: mips_24kc
+            engine: linux-mips
+          - openwrt_arch: mipsel_24kc
+            engine: linux-mipsel
+          - openwrt_arch: riscv64_generic
+            engine: linux-riscv64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Download scanner
+        uses: actions/download-artifact@v4
+        with:
+          name: scanner-${{ matrix.openwrt_arch }}
+          path: out
+
+      - name: Build apk-tools (mkpkg)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential git zlib1g-dev libssl-dev libzstd-dev lua5.4
+          sudo ln -sf /usr/bin/lua5.4 /usr/bin/lua5.3
+          git clone -q --depth 1 --branch v3.0.5 https://github.com/alpinelinux/apk-tools.git /tmp/apk-tools
+          cd /tmp/apk-tools && make -j"$(nproc)" >/tmp/apkbuild.log 2>&1 || true
+          ls -l src/apk
+
+      - name: Build bundle and apk
+        env:
+          LD_LIBRARY_PATH: /tmp/apk-tools/src
+        run: |
+          python3 packaging/build.py \
+            --repo . \
+            --arch "${{ matrix.openwrt_arch }}" \
+            --engine "openwrt/engine/nfqws2-${{ matrix.engine }}" \
+            --scanner "out/blockcheckw-${{ matrix.openwrt_arch }}" \
+            --out dist
+          APK_BIN=/tmp/apk-tools/src/apk \
+            sh packaging/build-apk.sh \
+            --bundle "dist/zapret2wizard-$(python3 -c 'import json;print(json.load(open("openwrt/version.json"))["version"])')-${{ matrix.openwrt_arch }}-bundle.tar.gz" \
+            --out dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages-${{ matrix.openwrt_arch }}
+          path: dist/*
+          retention-days: 14
+
+  release:
+    name: attach to release
+    needs: package
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: packages-*
+          merge-multiple: true
+          path: dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*

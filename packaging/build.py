@@ -137,6 +137,15 @@ set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
 echo "=== Zapret2Wizard bundle installer ==="
 
+# Предустановочная проверка: лучше отказаться здесь, чем ставить неработающее.
+if [ "$SKIP_PREFLIGHT" != "1" ] && [ -f "$HERE/preflight.sh" ]; then
+    if ! sh "$HERE/preflight.sh"; then
+        echo
+        echo "Установка остановлена: роутер не подходит. Повторить без проверки: SKIP_PREFLIGHT=1 sh install.sh"
+        exit 1
+    fi
+fi
+
 if [ ! -d "$HERE/payload" ]; then
     echo "  распаковываю payload..."
     tar -xf "$HERE/payload.tar" -C "$HERE"
@@ -181,8 +190,22 @@ sleep 2
 echo "  установлено. Проверка:"
 /usr/bin/blockcheckw-helper doctor 2>/dev/null | head -14 || true
 echo
-echo "Откройте LuCI → Службы → Zapret2Wizard и запустите поиск."
+# Если стратегий ещё нет — предлагаем автонастройку (занимает 5-10 минут).
+STRATS=$(uci show zapret2wizard 2>/dev/null | grep -c '=strategy')
+if [ "${STRATS:-0}" -eq 0 ] && [ "$AUTOSETUP" != "0" ]; then
+    echo "Стратегий пока нет. Запускаю автонастройку в фоне (5-10 минут),"
+    echo "прогресс будет виден на странице службы: Службы → Zapret2Wizard."
+    (/usr/bin/blockcheckw-helper autosetup >/tmp/bcw_autosetup.log 2>&1 &) || true
+else
+    echo "Откройте LuCI → Службы → Zapret2Wizard."
+fi
 """
+
+
+def _preflight_text() -> str:
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "preflight.sh")
+    with open(path, "r", encoding="utf-8") as f:
+        return f.read()
 
 
 def build_bundle(items, version: str, arch: str, out_path: str):
@@ -212,6 +235,7 @@ def build_bundle(items, version: str, arch: str, out_path: str):
         with tarfile.open(fileobj=f, mode="w:gz", format=tarfile.GNU_FORMAT) as tar:
             for name, content in [
                 (f"zapret2wizard-{version}-{arch}/install.sh", BUNDLE_INSTALLER),
+        (f"zapret2wizard-{version}-{arch}/preflight.sh", _preflight_text()),
                 (f"zapret2wizard-{version}-{arch}/payload.tar", payload_bytes),
                 (f"zapret2wizard-{version}-{arch}/README.txt",
                  f"Zapret2Wizard {version} (autonomous bundle, {arch})\n\n"
@@ -280,6 +304,7 @@ def main():
     bundle = os.path.join(args.out, f"zapret2wizard-{version}-{args.arch}-bundle.tar.gz")
     build_bundle(items, version, args.arch, bundle)
     print("bundle:", bundle, os.path.getsize(bundle), "bytes")
+
 
 
 if __name__ == "__main__":
