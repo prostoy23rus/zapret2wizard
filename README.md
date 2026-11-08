@@ -25,6 +25,22 @@
 
 ## Установка
 
+### Одной командой (SSH на роутере)
+
+```sh
+sh -c "$(curl -sSL https://raw.githubusercontent.com/prostoy23rus/zapret2wizard/main/install.sh)"
+```
+
+Если GitHub недоступен — то же через CDN:
+
+```sh
+sh -c "$(curl -sSL https://cdn.jsdelivr.net/gh/prostoy23rus/zapret2wizard@main/install.sh)"
+```
+
+Скрипт сам определит архитектуру, поставит зависимости, скачает движок, сканер и интерфейс, прогонит `preflight` и, если стратегий ещё нет, запустит автонастройку.
+
+### Пакетами и бандлом
+
 **Скачать:** [последний релиз](https://github.com/prostoy23rus/zapret2wizard/releases/latest) — там лежат `.apk`, `.ipk` и автономный бандл.
 
 | Прошивка | Чем ставить | Команда |

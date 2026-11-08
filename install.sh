@@ -100,6 +100,21 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
+# 1.5. Предустановочная проверка совместимости
+if [ "${SKIP_PREFLIGHT:-0}" != "1" ]; then
+    if fetch_file "packaging/preflight.sh" /tmp/bcw_preflight.sh 8; then
+        if ! sh /tmp/bcw_preflight.sh; then
+            rm -f /tmp/bcw_preflight.sh
+            echo -e "${RED}[ERROR] Устройство не подходит для установки.${NC}"
+            echo -e "${YELLOW}Повторить без проверки:${NC} SKIP_PREFLIGHT=1 sh -c \"\$(curl -sSL <адрес install.sh>)\""
+            exit 1
+        fi
+        rm -f /tmp/bcw_preflight.sh
+    else
+        echo -e "${YELLOW}[WARN] Не удалось скачать preflight.sh — продолжаю без проверки.${NC}"
+    fi
+fi
+
 # 2. Определение окружения OpenWrt
 if [ ! -f /etc/openwrt_release ] && [ ! -f /etc/os-release ]; then
     echo -e "${YELLOW}[WARN] Файл /etc/openwrt_release не найден. Возможно, это не OpenWrt.${NC}"
@@ -469,6 +484,14 @@ fi
 
 # Очистка временных файлов
 rm -rf "$TMP_DIR"
+
+# Автонастройка: если стратегий нет — подобрать в фоне
+STRATS=$(uci show zapret2wizard 2>/dev/null | grep -c '=strategy')
+if [ "${STRATS:-0}" -eq 0 ] && [ "${AUTOSETUP:-1}" != "0" ] && [ -x /usr/bin/blockcheckw-helper ]; then
+    echo -e "${BLUE}ℹ${NC} Стратегий нет — запускаю автонастройку в фоне (5-20 минут)."
+    echo -e "   Прогресс: LuCI -> Службы -> Zapret2Wizard. Лог: /tmp/bcw_autosetup.log"
+    (/usr/bin/blockcheckw-helper autosetup >/tmp/bcw_autosetup.log 2>&1 &) || true
+fi
 
 # Определение локального IP-адреса роутера
 ROUTER_IP=$(uci get network.lan.ipaddr 2>/dev/null || echo "192.168.1.1")
