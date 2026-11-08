@@ -808,14 +808,14 @@ return view.extend({
 			btnUninstall
 		]);
 
-		var headerCard = E('div', { class: 'bcw-card', style: 'padding: 16px 20px;' }, [
+		var headerCard = E('div', { class: 'bcw-card', style: 'padding: 14px 18px;' }, [
 			E('div', { style: 'display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px;' }, [
 				E('div', {}, [
-					E('h2', { class: 'bcw-header-title', style: 'margin: 0; font-size: 21px; display: flex; align-items: center; gap: 8px;' }, [
-						'⚡ Zapret2Wizard — Мастер автономного обхода DPI (Zapret2)'
+					E('h2', { class: 'bcw-header-title', style: 'margin: 0; font-size: 18px; display: flex; align-items: center; gap: 8px;' }, [
+						'Zapret2Wizard'
 					]),
-					E('div', { class: 'bcw-header-sub', style: 'font-size: 13px; opacity: 0.8; margin-top: 4px;' }, [
-						'Быстрый подбор рабочих параметров DPI для роутера, сборка отказоустойчивых Circular-связок и внедрение в 1 клик.'
+					E('div', { class: 'bcw-header-sub', style: 'font-size: 12.5px; opacity: 0.8; margin-top: 2px;' }, [
+						'Автономный обход DPI для домашней сети'
 					])
 				]),
 				headerRightActions
@@ -829,6 +829,67 @@ return view.extend({
 			style: 'padding: 14px 20px; background: rgba(0, 209, 178, 0.08); border: 1px solid #00d1b2; display: none;'
 		});
 		mainLayout.appendChild(updateBannerCard);
+
+		// ── Полоса состояния (вариант «Пульт») ──
+		var dashStyles = E('style');
+		dashStyles.textContent = [
+			'.bcw-dash-row{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:16px;align-items:start;}',
+			'.bcw-dash-row > *{min-width:0;}',
+			'.bcw-dash-row .bcw-actions-grid{display:flex;flex-direction:column;gap:8px;}',
+			'.bcw-dash-row .bcw-action-btn{width:100%;justify-content:center;}',
+			'.bcw-header-actions .bcw-header-btn,.bcw-header-actions .bcw-status-pill{font-size:12.5px;padding:6px 10px;min-height:0;}',
+			'.bcw-header-actions .bcw-theme-select{font-size:12.5px;padding:6px 8px;}',
+			'@media(max-width:1000px){.bcw-dash-row{grid-template-columns:1fr;}}',
+			'.bcw-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:0 0 16px;}',
+			'@media(max-width:900px){.bcw-stats{grid-template-columns:repeat(2,minmax(0,1fr));}}',
+			'.bcw-stat{background:var(--bcw-bg-card,#171c24);border:1px solid var(--bcw-border-divider,#2a313d);border-radius:10px;padding:12px 14px;}',
+			'.bcw-stat .k{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--bcw-text-muted,#93a0b4);}',
+			'.bcw-stat .v{margin-top:5px;font-size:14px;font-weight:600;color:var(--bcw-text-title,#e7ecf3);}',
+			'.bcw-tiles-grid{display:flex;flex-direction:column;gap:0;margin:0;}',
+			'.bcw-tile-btn{display:grid;grid-template-columns:34px minmax(0,1fr) auto;gap:12px;align-items:center;padding:12px 16px;border:0;border-bottom:1px solid var(--bcw-border-divider,#2a313d);border-radius:0;background:transparent;cursor:pointer;}',
+			'.bcw-tile-btn:last-child{border-bottom:0;}',
+			'.bcw-tile-btn:hover{background:var(--bcw-bg-card-sub,#1d232d);}',
+			'.bcw-tile-btn.active{background:rgba(76,141,255,.10);box-shadow:inset 3px 0 0 #4c8dff;}',
+			'.bcw-tile-icon{width:30px;height:30px;border-radius:8px;background:var(--bcw-bg-card-sub,#1d232d);display:grid;place-items:center;font-size:15px;}',
+			'.bcw-tile-text{min-width:0;text-align:left;}',
+			'.bcw-tile-name{font-weight:600;font-size:13.5px;color:var(--bcw-text-title,#e7ecf3);text-align:left;}',
+			'.bcw-tile-meta{font-size:11.5px;color:var(--bcw-text-muted,#93a0b4);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}',
+			'.bcw-chip{font-size:11.5px;padding:3px 9px;border-radius:999px;border:1px solid var(--bcw-border-divider,#2a313d);color:var(--bcw-text-muted,#93a0b4);white-space:nowrap;}',
+			'.bcw-chip.ok{color:#35c07a;border-color:rgba(53,192,122,.35);background:rgba(53,192,122,.10);}',
+			'.bcw-chip.warn{color:#f0b13f;border-color:rgba(240,177,63,.35);background:rgba(240,177,63,.10);}'
+		].join('\n');
+		container.appendChild(dashStyles);
+
+		function blockTypeHuman(t) {
+			if (!t) return 'не проверялось';
+			var map = { sni_blocked: 'SNI blocked', throttled: 'лимит скорости', not_blocked: 'не заблокирован', ip_blocked: 'по IP', dns_blocked: 'по DNS' };
+			return map[t] || String(t).replace(/_/g, ' ');
+		}
+		var enabledCount = 0, totalDomains = 0;
+		var svcAll = (zapretInfo && zapretInfo.services) || {};
+		Object.keys(svcAll).forEach(function(k) { if (svcAll[k] && svcAll[k].enabled) enabledCount++; });
+		((zapretInfo && zapretInfo.hostlists) || []).forEach(function(h) {
+			if (h && h.key !== 'exclude' && h.domains_count) totalDomains += h.domains_count;
+		});
+		var statsStrip = E('div', { class: 'bcw-stats' }, [
+			E('div', { class: 'bcw-stat' }, [
+				E('div', { class: 'k' }, 'Провайдер'),
+				E('div', { class: 'v' }, (statusData && statusData.isp) ? statusData.isp : 'не определён')
+			]),
+			E('div', { class: 'bcw-stat' }, [
+				E('div', { class: 'k' }, 'Блокировка'),
+				E('div', { class: 'v' }, blockTypeHuman(statusData && statusData.block_type))
+			]),
+			E('div', { class: 'bcw-stat' }, [
+				E('div', { class: 'k' }, 'Сервисов включено'),
+				E('div', { class: 'v' }, enabledCount + ' из ' + Object.keys(svcAll).length)
+			]),
+			E('div', { class: 'bcw-stat' }, [
+				E('div', { class: 'k' }, 'Доменов под обходом'),
+				E('div', { class: 'v' }, String(totalDomains))
+			])
+		]);
+		mainLayout.appendChild(statsStrip);
 
 		// Target Selection Section (Tiles Grid)
 		// tcp16 — служебная техника для проверки DPI-лимита ~16 КБ. В интерфейсе
@@ -848,14 +909,48 @@ return view.extend({
 		var chipButtonsMap = {};
 		var tilesGridEl = E('div', { class: 'bcw-tiles-grid' });
 
+		// Счётчики доменов и статусы для строк сервисов (вариант «Пульт»)
+		var hlCounts = {};
+		((zapretInfo && zapretInfo.hostlists) || []).forEach(function(h) {
+			if (h && h.key) hlCounts[h.key] = h.domains_count;
+		});
+		function rowKeyOf(id) {
+			return id === 'builtin' ? 'user' : String(id).replace(/^preset_/, '');
+		}
+		function rowMetaOf(ch) {
+			var key = rowKeyOf(ch.id);
+			var parts = [];
+			if (hlCounts[key] !== undefined) parts.push(hlCounts[key] + ' доменов');
+			var svc = (zapretInfo && zapretInfo.services) ? zapretInfo.services[key] : null;
+			if (svc && svc.meta) parts.push(svc.meta);
+			if (ch.id === 'domains') parts.push('свой домен или список');
+			if (ch.id === 'test_strategy') parts.push('ручная проверка строки десинка');
+			if (!parts.length) parts.push(key === 'user' ? 'общие сайты' : '—');
+			return parts.join(' · ');
+		}
+		function rowChipOf(ch) {
+			var key = rowKeyOf(ch.id);
+			var svc = (zapretInfo && zapretInfo.services) ? zapretInfo.services[key] : null;
+			if (ch.id === 'domains' || ch.id === 'test_strategy') return null;
+			if (!svc) return { cls: 'mute', text: 'не настроен' };
+			if (svc.enabled) return { cls: 'ok', text: 'защищён' };
+			return { cls: 'warn', text: 'выключен' };
+		}
+
 		quickChipsList.forEach(function(ch) {
+			var chip = rowChipOf(ch);
+			var children = [
+				E('div', { class: 'bcw-tile-icon' }, ch.icon),
+				E('div', { class: 'bcw-tile-text' }, [
+					E('div', { class: 'bcw-tile-name' }, ch.name),
+					E('div', { class: 'bcw-tile-meta' }, rowMetaOf(ch))
+				])
+			];
+			if (chip) children.push(E('span', { class: 'bcw-chip ' + chip.cls }, chip.text));
 			var btn = E('div', {
 				class: 'bcw-tile-btn' + (currentTarget === ch.id ? ' active' : ''),
 				click: function() { selectTarget(ch.id); }
-			}, [
-				E('div', { class: 'bcw-tile-icon' }, ch.icon),
-				E('div', { class: 'bcw-tile-name' }, ch.name)
-			]);
+			}, children);
 			chipButtonsMap[ch.id] = btn;
 			tilesGridEl.appendChild(btn);
 		});
@@ -1400,6 +1495,25 @@ return view.extend({
 			});
 			mainTabPanels[def.id] = panel;
 		});
+
+		// «Пульт»: панель сканера превращаем в две колонки —
+		// слева цели и их настройки, справа управление подбором.
+		var scanPanel = mainTabPanels['scan'];
+		if (scanPanel && scanPanel.children.length >= 2) {
+			var dashRow = E('div', { class: 'bcw-dash-row' });
+			var dashLeft = E('div', {});
+			var dashRight = E('div', { style: 'display:flex;flex-direction:column;gap:16px;' });
+			var moved = 0;
+			while (scanPanel.firstChild) {
+				var node = scanPanel.firstChild;
+				scanPanel.removeChild(node);
+				(moved === 0 ? dashLeft : dashRight).appendChild(node);
+				moved++;
+			}
+			dashRow.appendChild(dashLeft);
+			dashRow.appendChild(dashRight);
+			scanPanel.appendChild(dashRow);
+		}
 
 		function switchMainTab(id) {
 			if (!mainTabPanels[id]) id = 'scan';
