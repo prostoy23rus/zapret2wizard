@@ -96,6 +96,7 @@ blockcheckw-helper doctor      # окружение: nftables, движок, с�
 blockcheckw-helper selftest    # живая проверка: статус, HTTP-код, байты, DNS, контрольный сайт
 blockcheckw-helper class       # 9 базовых приёмов desync → класс ТСПУ и рекомендация
 blockcheckw-helper autosetup   # подбор YouTube и Discord с нуля
+blockcheckw-helper evolve      # синтез новых комбинаций + память по провайдеру
 blockcheckw-helper toggle <сервис>  # включить/выключить обход для сервиса
 blockcheckw-helper update      # обновление с GitHub
 ```
