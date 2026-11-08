@@ -2632,6 +2632,14 @@ cmd_doctor() {
 
     if command -v nft >/dev/null 2>&1; then add_check "nftables" 1 "$(command -v nft)" ""; else add_check "nftables" 0 "nft не найден" "Установите nftables (пакет nftables)"; fi
 
+    local fo=$(uci -q get firewall.@defaults[0].flow_offloading)
+    local fohw=$(uci -q get firewall.@defaults[0].flow_offloading_hw)
+    if [ "$fo" = "1" ] || [ "$fohw" = "1" ]; then
+        add_check "flow offloading" 0 "включён — обход не будет работать" "Перезапустите службу: /etc/init.d/zapret2wizard restart"
+    else
+        add_check "flow offloading" 1 "отключён" ""
+    fi
+
     local engine=""
     for p in /usr/bin/nfqws2 /opt/zapret2/nfq2/nfqws2 /usr/bin/nfqws; do
         [ -x "$p" ] && { engine="$p"; break; }
@@ -2781,6 +2789,8 @@ cmd_selftest() {
     echo "fake-блобов:       $(ls /usr/share/zapret2wizard/fake/*.bin 2>/dev/null | wc -l)"
     echo "доменов в списках: $(cat /etc/zapret2wizard/ipset/zapret_hosts_*.txt 2>/dev/null | grep -vc '^#')"
     echo
+    echo "flow offloading:   $(uci -q get firewall.@defaults[0].flow_offloading)/$(uci -q get firewall.@defaults[0].flow_offloading_hw)"
+    echo
     echo "--- живая проверка ($target) ---"
     local out
     out=$(cmd_test "$target" "" 2>/dev/null | tail -n 1)
@@ -2791,6 +2801,20 @@ cmd_selftest() {
     echo "http-код:          ${code:-?}"
     echo "получено байт:     ${size:-0}"
     echo
+    echo "--- контроль: обычный сайт и DNS ---"
+    local ctrl_code ctrl_time
+    ctrl_code=$(curl -s -o /dev/null -m 8 -w '%{http_code}' https://ya.ru 2>/dev/null || echo 000)
+    echo "ya.ru (контроль):  ${ctrl_code}"
+    local yt_ip
+    yt_ip=$(nslookup www.youtube.com 2>/dev/null | awk '/^Address: /{print $2; exit}')
+    echo "DNS youtube.com:   ${yt_ip:-не резолвится}"
+    case "$yt_ip" in
+        0.0.0.0|127.*|8.6.*|8.47.*) echo "                   ВНИМАНИЕ: похоже на подмену DNS провайдером" ;;
+    esac
+
+    echo "--- ошибки движка ---"
+    logread 2>/dev/null | grep -iE 'nfqws|zapret2wizard' | tail -5 || echo "(нет записей)"
+
     echo "--- последние строки лога ---"
     tail -n 6 /tmp/blockcheckw_run.log 2>/dev/null || echo "(лог пуст)"
 }

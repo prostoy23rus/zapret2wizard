@@ -192,7 +192,22 @@ check_config() {
 	[ -x "$UCI2CONFIG" ] && "$UCI2CONFIG" --check
 }
 
+# Flow offloading заставляет ядро пропускать пакеты мимо nfqueue,
+# из-за чего десинк не применяется. Отключаем его для работы обхода.
+disable_flow_offloading() {
+    local cur=$(uci -q get firewall.@defaults[0].flow_offloading)
+    local curhw=$(uci -q get firewall.@defaults[0].flow_offloading_hw)
+    if [ "$cur" = "1" ] || [ "$curhw" = "1" ]; then
+        uci set firewall.@defaults[0].flow_offloading='0' 2>/dev/null
+        uci set firewall.@defaults[0].flow_offloading_hw='0' 2>/dev/null
+        uci commit firewall 2>/dev/null
+        /etc/init.d/firewall reload >/dev/null 2>&1 || true
+        logger -t zapret2wizard "flow offloading отключён: иначе DPI-обход не работает"
+    fi
+}
+
 prepare_environment() {
+    disable_flow_offloading
 	# Ensure runtime folders and hostlists
 	mkdir -p /etc/zapret2wizard/ipset /tmp/zapret2
 	if [ -d "$SHARE_DIR/ipset" ]; then
