@@ -55,3 +55,41 @@ opkg install --force-overwrite /tmp/luci-app-blockcheckw_<ver>-1_<arch>.ipk
 `mipsel`, `mips64`, `riscv64`, `ppc`. Сканер `blockcheckw` собирается из
 исходников — см. `docs/BUILD-AARCH64.md`; готовый бинарник нужен под каждую
 архитектуру отдельно (для aarch64 он собирается в WSL).
+
+## Пакет .apk (OpenWrt 25.x)
+
+Формат apk v3 нельзя собрать вручную — его создаёт `apk mkpkg` из apk-tools 3.
+В прошивке этого applet-а нет, поэтому сборка идёт на хосте:
+
+```sh
+# 1. собрать apk-tools 3 (один раз)
+git clone -q --depth 1 --branch v3.0.5 https://github.com/alpinelinux/apk-tools.git
+cd apk-tools && make -j4     # нужны gcc, zlib1g-dev, libssl-dev, libzstd-dev, lua5.3
+
+# 2. собрать пакет из готового бандла
+APK_BIN=$PWD/src/apk LD_LIBRARY_PATH=$PWD/src \
+  sh packaging/build-apk.sh \
+    --bundle dist/zapret2wizard-<версия>-<арх>-bundle.tar.gz --out dist
+```
+
+Установка:
+
+```sh
+scp -O dist/zapret2wizard_<версия>-r1_<арх>.apk root@РОУТЕР:/tmp/
+ssh root@РОУТЕР 'apk add --allow-untrusted /tmp/zapret2wizard_<версия>-r1_<арх>.apk'
+```
+
+`/etc/config/zapret2wizard` объявлен conffiles: при обновлении сохраняется как `.apk-new`, стратегии не теряются.
+
+## Проверка совместимости (preflight)
+
+`packaging/preflight.sh` запускается установщиком бандла и проверяет прошивку,
+архитектуру, nftables и nfqueue, procd/ubus, RAM (>= 60 МБ), место (>= 3 МБ),
+curl/wget, apk/opkg и чужие движки DPI (свои не считаются). Фатальные проблемы
+останавливают установку, предупреждения — нет.
+
+## CI
+
+`.github/workflows/build.yml` собирает `blockcheckw` под 6 архитектур
+(aarch64, armv7, x86_64, mips, mipsel, riscv64), затем бандл и `.apk` для каждой,
+артефакты прикрепляются к релизу.

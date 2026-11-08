@@ -408,6 +408,20 @@ sh -c "$(curl -sSL https://raw.githubusercontent.com/prostoy23rus/zapret2wizard/
 
 Лицензия: [MIT License](LICENSE).
 
+## Установка
+
+| Прошивка | Чем ставить | Команда |
+|---|---|---|
+| OpenWrt 25.x (apk) | пакет `.apk` | `apk add --allow-untrusted /tmp/zapret2wizard_<версия>-r1_<арх>.apk` |
+| OpenWrt 24.10 и старше (opkg) | `.ipk` или бандл | `opkg install --force-overwrite /tmp/luci-app-blockcheckw_<версия>-1_<арх>.ipk` |
+| любая | автономный бандл | `tar -xzf bundle.tar.gz -C /tmp && cd /tmp/zapret2wizard-* && sh install.sh` |
+
+Перед установкой бандл запускает `preflight.sh`: проверяет прошивку, архитектуру, nftables, nfqueue, память, место, curl и чужие движки DPI. Обойти проверку: `SKIP_PREFLIGHT=1 sh install.sh`.
+
+Если стратегий ещё нет, после установки сам запускается подбор для YouTube и Discord (`autosetup`, 5-20 минут). Отключить: `AUTOSETUP=0 sh install.sh`.
+
+Пакеты для других архитектур собирает CI (`.github/workflows/build.yml`): aarch64, armv7, x86_64, mips, mipsel, riscv64.
+
 ## Если обход не работает
 
 Проверьте одной командой:
