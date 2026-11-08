@@ -2652,6 +2652,89 @@ cmd_doctor() {
     [ "$ok" = "1" ]
 }
 
+# Определяет каталог бинарников zapret2 под архитектуру роутера.
+_engine_arch_dir() {
+    case "$(uname -m)" in
+        aarch64|arm64) echo "linux-arm64" ;;
+        armv7*|armv6*|arm) echo "linux-arm" ;;
+        x86_64|amd64) echo "linux-x86_64" ;;
+        i386|i686) echo "linux-x86" ;;
+        mips64*) echo "linux-mips64" ;;
+        mips) echo "linux-mips" ;;
+        mipsel) echo "linux-mipsel" ;;
+        riscv64) echo "linux-riscv64" ;;
+        ppc|powerpc) echo "linux-ppc" ;;
+        *) echo "" ;;
+    esac
+}
+
+# Скачивает и устанавливает движок nfqws2 с зеркал GitHub.
+cmd_install_engine() {
+    if [ -x /usr/bin/nfqws2 ]; then
+        printf '{"success":true,"already":true,"path":"/usr/bin/nfqws2"}\n'
+        return 0
+    fi
+
+    local dir
+    dir=$(_engine_arch_dir)
+    if [ -z "$dir" ]; then
+        printf '{"success":false,"error":"Unsupported architecture: %s"}\n' "$(uname -m)"
+        return 1
+    fi
+
+    local tag="v1.0.7"
+    local tarball="zapret2-${tag}.tar.gz"
+    local url="https://github.com/bol-van/zapret2/releases/download/${tag}/${tarball}"
+    local work="/tmp/bcw_engine_$$"
+    mkdir -p "$work" 2>/dev/null
+
+    local attempt mirror got=""
+    for attempt in 1 2 3; do
+        for mirror in "$url" "https://ghproxy.net/$url" "https://gh-proxy.com/$url"; do
+            rm -f "$work/pkg.tgz" "$work/nfqws2"
+            if ! curl -fsSL -k --connect-timeout 8 -m 180 "$mirror" -o "$work/pkg.tgz" 2>/dev/null; then
+                continue
+            fi
+            [ -s "$work/pkg.tgz" ] || continue
+
+            # основной путь: распаковать только нужный файл
+            tar -xz -O --wildcards "*/binaries/${dir}/nfqws2" < "$work/pkg.tgz" > "$work/nfqws2" 2>/dev/null
+            if [ "$(wc -c < "$work/nfqws2" 2>/dev/null || echo 0)" -lt 50000 ]; then
+                # запасной путь: распаковать архив целиком и взять файл по пути
+                rm -rf "$work/x"
+                mkdir -p "$work/x"
+                tar -xzf "$work/pkg.tgz" -C "$work/x" 2>/dev/null
+                local found
+                found=$(find "$work/x" -path "*/binaries/${dir}/nfqws2" -type f 2>/dev/null | head -1)
+                [ -n "$found" ] && cp -f "$found" "$work/nfqws2" 2>/dev/null
+            fi
+
+            if [ "$(wc -c < "$work/nfqws2" 2>/dev/null || echo 0)" -gt 50000 ]; then
+                got="$mirror"
+                break
+            fi
+        done
+        [ -n "$got" ] && break
+        sleep 2
+    done
+
+    if [ -z "$got" ]; then
+        rm -rf "$work"
+        printf '{"success":false,"error":"Не удалось скачать nfqws2 ни с одного зеркала","arch":"%s"}\n' "$dir"
+        return 1
+    fi
+
+    cp -f "$work/nfqws2" /usr/bin/nfqws2
+    chmod +x /usr/bin/nfqws2
+    mkdir -p /opt/zapret2/nfq2 2>/dev/null
+    [ -e /opt/zapret2/nfq2/nfqws2 ] || ln -sf /usr/bin/nfqws2 /opt/zapret2/nfq2/nfqws2 2>/dev/null
+    local size=$(wc -c < /usr/bin/nfqws2 2>/dev/null || echo 0)
+    rm -rf "$work"
+
+    history_add "engine" "" "Установлен движок nfqws2 ($dir)"
+    printf '{"success":true,"installed":true,"arch":"%s","size":%s,"mirror":"%s"}\n' "$dir" "$size" "$got"
+}
+
 cmd_info() {
     ensure_all_hostlists
     local zapret_running=$(get_dpi_service_status)
@@ -3500,6 +3583,7 @@ case "$1" in
     toggle) shift; cmd_toggle_service "$@" ;;
     conflicts) cmd_conflicts ;;
     doctor) cmd_doctor ;;
+    install_engine) cmd_install_engine ;;
     *)
         echo "Usage: $0 {start|status|stop|apply|activate|delete_strategy|test|speedtest|info|logs|check_update|update|uninstall|diag|ensure_hostlists|read_hostlist|add_hostlist_domain|remove_hostlist_domain|write_hostlist|metrics|toggle|conflicts|doctor}"
         exit 1
