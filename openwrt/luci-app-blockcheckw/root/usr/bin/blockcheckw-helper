@@ -289,6 +289,21 @@ ensure_all_hostlists() {
     if [ "$(cat "$HOSTLISTS_MARKER" 2>/dev/null)" = "$HOSTLISTS_REV" ] && _hostlists_ready; then
         return 0
     fi
+
+    # Сначала разворачиваем полные списки из пакета (43/66/10/9/6 доменов),
+    # иначе на чистой установке останутся только минимальные наборы.
+    local ipset_seed="/etc/zapret2wizard/ipset"
+    mkdir -p "$ipset_seed" 2>/dev/null
+    local f src
+    for f in youtube discord x instagram twitch user user_exclude; do
+        [ -s "$ipset_seed/zapret_hosts_$f.txt" ] && continue
+        for src in "/usr/share/zapret2wizard/ipset/zapret_hosts_$f.txt" "/usr/share/zapret2wizard/ipset/zapret_hosts_$f.txt.default"; do
+            if [ -s "$src" ]; then
+                cp -f "$src" "$ipset_seed/zapret_hosts_$f.txt" 2>/dev/null && break
+            fi
+        done
+    done
+
     ensure_firewall_quic_reject
     local ipset_dir="/etc/zapret2wizard/ipset"
     mkdir -p "$ipset_dir" 2>/dev/null

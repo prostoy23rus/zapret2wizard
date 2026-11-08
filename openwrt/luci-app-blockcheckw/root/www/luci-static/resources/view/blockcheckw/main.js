@@ -366,11 +366,18 @@ function bcwShowModal(titleText, bodyNodes, actions) {
 
 return view.extend({
 	load: function() {
-		return Promise.all([
-			checkHelperStatus(),
-			getZapretInfo(),
-			getMetrics()
-		]);
+		// Сначала создаём списки доменов (на чистой установке их ещё нет),
+		// иначе info вернёт нулевые счётчики и статусы «не настроен».
+		function ensureHostlists() {
+			return fs.exec(HELPER_BIN, ['ensure_hostlists']).catch(function() {});
+		}
+		return ensureHostlists().then(function() {
+			return Promise.all([
+				checkHelperStatus(),
+				getZapretInfo(),
+				getMetrics()
+			]);
+		});
 	},
 
 	render: function(data) {
