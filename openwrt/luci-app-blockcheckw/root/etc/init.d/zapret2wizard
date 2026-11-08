@@ -252,8 +252,17 @@ prepare_environment() {
 # Осиротевшие процессы сканера держат тестовый движок на очереди 200 и мешают
 # службе: убираем их до старта.
 kill_orphan_scans() {
-    pkill -9 -f 'blockcheckw check' 2>/dev/null || true
-    pkill -9 -f 'blockcheckw-helper start' 2>/dev/null || true
+    # busybox без pkill: ищем по /proc/cmdline
+    for p in /proc/[0-9]*; do
+        [ -r "$p/cmdline" ] || continue
+        cmd=$(tr '\0' ' ' < "$p/cmdline" 2>/dev/null)
+        case "$cmd" in
+            *"blockcheckw check"*|*"blockcheckw-helper start"*)
+                kill -9 "${p#/proc/}" 2>/dev/null || true
+                ;;
+        esac
+    done
+    rm -rf /var/run/bcw_scan.lock 2>/dev/null || true
 }
 
 guard_conflicts() {

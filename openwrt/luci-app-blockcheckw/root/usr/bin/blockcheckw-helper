@@ -905,6 +905,7 @@ cmd_start() {
     (
         cleanup_subshell() {
             rm -f "$PID_FILE"
+            rm -rf /var/run/bcw_scan.lock 2>/dev/null || true
             # Remove scanner priority bypass rule from fw4 output chain
             local handle=$(nft -a list chain inet fw4 output 2>/dev/null | grep '0x30000000' | awk '{print $NF}')
             [ -n "$handle" ] && nft delete rule inet fw4 output handle "$handle" 2>/dev/null || true
@@ -930,8 +931,13 @@ cmd_start() {
         }
         trap cleanup_subshell EXIT INT TERM
 
-        # Осиротевшие проверки прошлых запусков
-        pkill -9 -f 'blockcheckw check' 2>/dev/null || true
+        # Осиротевшие проверки прошлых запусков (без pkill: его нет в busybox)
+        for _p in /proc/[0-9]*; do
+            [ -r "$_p/cmdline" ] || continue
+            case "$(tr '\0' ' ' < "$_p/cmdline" 2>/dev/null)" in
+                *"blockcheckw check"*) kill -9 "${_p#/proc/}" 2>/dev/null || true ;;
+            esac
+        done
 
         # Kill any zombie/orphan nfqws2 holding queue 200 from previous runs
         local stray_pids=$(ps -w | grep -E 'nfqws2.*--qnum=200' | grep -v grep | awk '{print $1}')
@@ -995,6 +1001,19 @@ cmd_start() {
             echo "[blockcheckw-helper] Error: /usr/bin/blockcheckw missing or not executable" >> "$LOG_FILE"
             exit 1
         fi
+
+        # Одновременные подборы недопустимы: каждый останавливает службу.
+        SCAN_LOCK="/var/run/bcw_scan.lock"
+        if ! mkdir "$SCAN_LOCK" 2>/dev/null; then
+            _old=$(cat "$SCAN_LOCK/pid" 2>/dev/null)
+            if [ -n "$_old" ] && kill -0 "$_old" 2>/dev/null; then
+                echo '{"success":false,"error":"Подбор уже выполняется. Дождитесь завершения."}'
+                exit 1
+            fi
+            rm -rf "$SCAN_LOCK"
+            mkdir "$SCAN_LOCK" 2>/dev/null || true
+        fi
+        echo $$ > "$SCAN_LOCK/pid" 2>/dev/null || true
 
         echo "[blockcheckw-helper] Starting Unified Smart Scan for $domain (target=$target, workers=$workers, auto_apply=$auto_apply)..." >> "$LOG_FILE"
         history_add "scan_start" "$(metric_target_key "$target")" "Начат подбор для $domain"
