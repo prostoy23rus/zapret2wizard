@@ -44,7 +44,12 @@ fetch_file() {
         return 1
     }
 
-    # 1. Direct GitHub Raw with resolve
+    # 1. Обычный GitHub Raw (DNS провайдера). Пиннинг IP ниже — запасной путь,
+    #    потому что у части провайдеров адреса GitHub недоступны.
+    curl -fsSL -k --connect-timeout 4 -m "$timeout" "https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main/$rel_path?$(date +%s)" -o "$tmp_file" 2>/dev/null
+    _save_download && return 0
+
+    # 1b. GitHub Raw с пиннингом IP
     for gh_ip in 185.199.108.133 185.199.111.133 185.199.109.133 185.199.110.133; do
         curl -fsSL -k --connect-timeout 2 -m "$timeout" --resolve "raw.githubusercontent.com:443:$gh_ip" "https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main/$rel_path" -o "$tmp_file" 2>/dev/null
         _save_download && return 0
@@ -335,6 +340,18 @@ fetch_file "openwrt/version.json" /usr/share/blockcheckw/version.json 8
 fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/luci/menu.d/luci-app-blockcheckw.json" /usr/share/luci/menu.d/luci-app-blockcheckw.json 8 || true
 fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/rpcd/acl.d/luci-app-blockcheckw.json" /usr/share/rpcd/acl.d/luci-app-blockcheckw.json 8 || true
 fetch_file "openwrt/luci-app-blockcheckw/root/www/luci-static/resources/view/blockcheckw/main.js" /www/luci-static/resources/view/blockcheckw/main.js 8
+
+# Ключевые файлы обязательны: без них интерфейс не запустится.
+HELPER_SIZE=$(wc -c < /usr/bin/blockcheckw-helper 2>/dev/null || echo 0)
+MAINJS_SIZE=$(wc -c < /www/luci-static/resources/view/blockcheckw/main.js 2>/dev/null || echo 0)
+if [ "${HELPER_SIZE:-0}" -lt 50000 ] || [ "${MAINJS_SIZE:-0}" -lt 100000 ]; then
+    echo -e "${RED}[ERROR] Не удалось скачать helper или main.js с GitHub (получено ${HELPER_SIZE} и ${MAINJS_SIZE} байт).${NC}"
+    echo -e "${YELLOW}Установите автономный бандл — в нём все файлы уже внутри:${NC}"
+    echo -e "  cd /tmp"
+    echo -e "  wget -O bcw.tgz \"https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main/dist/zapret2wizard-\$(cat /usr/share/blockcheckw/version.json 2>/dev/null | grep -o '[0-9]*\\.[0-9]*\\.[0-9]*' | head -1)-aarch64_cortex-a53-bundle.tar.gz\""
+    echo -e "  tar -xzf bcw.tgz && cd zapret2wizard-* && sh install.sh"
+    exit 1
+fi
 
 # Установка Lua скриптов десинхронизации
 for lua_script in zapret-lib.lua zapret-antidpi.lua zapret-auto.lua zapret-obfs.lua zapret-pcap.lua zapret-tests.lua zapret-wgobfs.lua; do
