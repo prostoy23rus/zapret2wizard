@@ -830,6 +830,9 @@ return view.extend({
 		mainLayout.appendChild(updateBannerCard);
 
 		// Target Selection Section (Tiles Grid)
+		// tcp16 — служебная техника для проверки DPI-лимита ~16 КБ. В интерфейсе
+		// её нет намеренно: пресет остаётся доступен бэкенду
+		// (blockcheckw-helper start --target tcp16) и внутренним вызовам.
 		var quickChipsList = [
 			{ id: 'preset_youtube', icon: '📺', name: 'YouTube' },
 			{ id: 'preset_discord', icon: '💬', name: 'Discord' },
@@ -837,7 +840,6 @@ return view.extend({
 			{ id: 'preset_x', icon: '🐦', name: 'X / Twitter' },
 			{ id: 'preset_instagram', icon: '📸', name: 'Instagram' },
 			{ id: 'builtin', icon: '🌐', name: 'Встроенные хосты (33)' },
-			{ id: 'tcp16', icon: '⚡', name: 'TCP 16-20 KB' },
 			{ id: 'domains', icon: '🎯', name: 'Свои домены' },
 			{ id: 'test_strategy', icon: '🧪', name: 'Тест стратегии' }
 		];
