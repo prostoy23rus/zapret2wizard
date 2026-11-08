@@ -376,6 +376,23 @@ rm -rf /tmp/luci-indexcache* /tmp/luci-modulecache*
 /etc/init.d/lighttpd restart >/dev/null 2>&1 || true
 ubus call luci reload >/dev/null 2>&1 || true
 
+# 9. Автозапуск и проверка конфликтов с другими DPI-службами
+echo -e "${BLUE}ℹ${NC} Включение автозапуска и проверка конфликтов..."
+/etc/init.d/zapret2wizard enable >/dev/null 2>&1 || true
+/etc/init.d/zapret2wizard restart >/dev/null 2>&1 || true
+sleep 2
+if [ -x /usr/bin/blockcheckw-helper ]; then
+    CONFLICTS=$(/usr/bin/blockcheckw-helper conflicts 2>/dev/null)
+    case "$CONFLICTS" in
+        *'"ok":true'*)
+            echo -e "${GREEN}✓${NC} Конфликтов нет: служба в приоритете, автозапуск включён."
+            ;;
+        *)
+            echo -e "${YELLOW}⚠${NC} Проверка конфликтов: $CONFLICTS"
+            ;;
+    esac
+fi
+
 # Очистка временных файлов
 rm -rf "$TMP_DIR"
 

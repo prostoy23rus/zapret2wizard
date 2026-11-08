@@ -2541,6 +2541,49 @@ cmd_toggle_service() {
     printf '{"success":true,"target":"%s","enabled":%s,"section":"%s"}\n' "$target" "$new_state" "$base_sec"
 }
 
+# Проверка конфликтов: чужие DPI-службы, посторонние движки, автозапуск.
+cmd_conflicts() {
+    local services="" svc run svc_running=0
+    for svc in zapret2 zapret zapret-manager blockcheck; do
+        [ -x "/etc/init.d/$svc" ] || continue
+        run=0
+        /etc/init.d/"$svc" running >/dev/null 2>&1 && run=1
+        [ "$run" = "1" ] && svc_running=1
+        services="$services{\"name\":\"$svc\",\"running\":$run},"
+    done
+    services="[${services%,}]"
+
+    local ours=0 foreign=0 c p cmd name
+    for c in /proc/[0-9]*/comm; do
+        [ -r "$c" ] || continue
+        name=$(cat "$c" 2>/dev/null)
+        case "$name" in
+            nfqws|nfqws2) ;;
+            *) continue ;;
+        esac
+        p=${c#/proc/}
+        p=${p%/comm}
+        cmd=$(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null)
+        case "$cmd" in
+            *zapret2wizard*) ours=$((ours + 1)) ;;
+            *) foreign=$((foreign + 1)) ;;
+        esac
+    done
+
+    local table=0 autostart=0
+    nft list tables 2>/dev/null | grep -q 'inet zapret2wizard' && table=1
+    ls /etc/rc.d/ 2>/dev/null | grep -q 'zapret2wizard' && autostart=1
+
+    local ok=true
+    [ "$foreign" -eq 0 ] || ok=false
+    [ "$svc_running" -eq 0 ] || ok=false
+    [ "$table" -eq 1 ] || ok=false
+    [ "$autostart" -eq 1 ] || ok=false
+
+    printf '{"success":true,"services":%s,"engines":{"ours":%s,"foreign":%s},"nft_table":%s,"autostart":%s,"conflict_running":%s,"ok":%s}\n' \
+        "$services" "$ours" "$foreign" "$table" "$autostart" "$svc_running" "$ok"
+}
+
 cmd_info() {
     ensure_all_hostlists
     local zapret_running=$(get_dpi_service_status)
@@ -3387,6 +3430,7 @@ case "$1" in
     write_hostlist) shift; cmd_write_hostlist "$@" ;;
     metrics) cmd_metrics ;;
     toggle) shift; cmd_toggle_service "$@" ;;
+    conflicts) cmd_conflicts ;;
     *)
         echo "Usage: $0 {start|status|stop|apply|activate|delete_strategy|test|speedtest|info|logs|check_update|update|uninstall|diag|ensure_hostlists|read_hostlist|add_hostlist_domain|remove_hostlist_domain|write_hostlist|metrics}"
         exit 1

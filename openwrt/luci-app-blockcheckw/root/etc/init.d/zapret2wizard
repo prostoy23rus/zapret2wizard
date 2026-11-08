@@ -223,6 +223,41 @@ prepare_environment() {
 	fi
 }
 
+# Чужие DPI-службы и движки не должны перехватывать наши очереди и метки.
+# Гасим известные конфликтующие службы и освобождаем очередь от посторонних
+# nfqws/nfqws2 (свои определяем по пути zapret2wizard в командной строке).
+guard_conflicts() {
+	local svc
+	for svc in zapret2 zapret zapret-manager blockcheck; do
+		[ -x "/etc/init.d/$svc" ] || continue
+		if /etc/init.d/"$svc" running >/dev/null 2>&1; then
+			logger -t zapret2wizard "conflict: stopping $svc"
+			/etc/init.d/"$svc" stop >/dev/null 2>&1
+		fi
+		/etc/init.d/"$svc" disable >/dev/null 2>&1 || true
+	done
+
+	local c p cmd name
+	for c in /proc/[0-9]*/comm; do
+		[ -r "$c" ] || continue
+		name=$(cat "$c" 2>/dev/null)
+		case "$name" in
+			nfqws|nfqws2) ;;
+			*) continue ;;
+		esac
+		p=${c#/proc/}
+		p=${p%/comm}
+		cmd=$(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null)
+		case "$cmd" in
+			*zapret2wizard*) ;;
+			*)
+				logger -t zapret2wizard "conflict: freeing queue from foreign engine pid=$p"
+				kill -9 "$p" 2>/dev/null || true
+				;;
+		esac
+	done
+}
+
 start_service() {
 	local uci_pkg="zapret2wizard"
 	[ -f /etc/config/zapret2wizard ] || uci_pkg="zapret2"
@@ -235,6 +270,9 @@ start_service() {
 		logger -t zapret2wizard "Service is disabled in /etc/config/$uci_pkg"
 		return 0
 	}
+
+	# Приоритет службы: чужие DPI-демоны не должны держать наши очереди.
+	guard_conflicts
 
 	[ -x "$NFQWS_BIN" ] || {
 		logger -t zapret2wizard "Error: nfqws2 binary not found at $NFQWS_BIN"
