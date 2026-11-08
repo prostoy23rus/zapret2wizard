@@ -3503,7 +3503,7 @@ return view.extend({
 
 			function buildRow(hl) {
 				var count = hl.domains_count || 0;
-				var isOk = (count > 0 && hl.uci_configured);
+				var isOk = (count > 0 && hl.uci_configured !== false);
 
 				var status = E('div', { style: 'font-size: 12px; margin-top: 6px; color: #abb2bf;' }, '');
 				var area = E('textarea', {
@@ -3596,8 +3596,8 @@ return view.extend({
 							E('div', { style: 'text-align: right;' }, [
 								E('div', { style: 'font-weight: bold; color: ' + (count > 0 ? '#98c379' : '#e06c75') + '; font-size: 13px;' },
 									count + ' доменов'),
-								E('div', { style: 'font-size: 11px; color: ' + (hl.uci_configured ? '#61afef' : '#e5c07b') + ';' },
-									hl.uci_configured ? 'Zapret2 подключен' : 'Секция создается...')
+								E('div', { style: 'font-size: 11px; color: ' + (hl.uci_configured === false ? '#e5c07b' : '#61afef') + ';' },
+									hl.uci_configured === false ? 'Секция создается...' : 'Zapret2 подключен')
 							]),
 							btnEdit
 						])

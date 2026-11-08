@@ -3047,7 +3047,9 @@ _info_json_shell() {
         [ -f "$f" ] || continue
         local k=$(basename "$f" .txt); k=${k#zapret_hosts_}
         local c=$(grep -vc '^#' "$f" 2>/dev/null || echo 0)
-        local hobj="{\"key\":\"$k\",\"name\":\"$k\",\"domains_count\":$c}"
+        local used=$(uci -q show zapret2wizard 2>/dev/null | grep -c "hostlist.*list_hosts_$k")
+        local cfg=false; [ "$used" -gt 0 ] && cfg=true
+        local hobj="{\"key\":\"$k\",\"name\":\"$k\",\"domains_count\":$c,\"uci_configured\":$cfg}"
         if [ "$first_h" = "1" ]; then hl_json="$hobj"; first_h=0; else hl_json="$hl_json,$hobj"; fi
     done
     printf '{"zapret2_running":"%s","version":"%s","services":{%s},"all_strategies":[%s],"hostlists":[%s]}\n' \
