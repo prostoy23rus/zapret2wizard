@@ -1310,7 +1310,7 @@ EOF
         # сообщаем, что стратегия применена с оговоркой.
         if [ "$auto_apply" = "1" ] && [ "$found_count" -gt 0 ]; then
             write_status "running" 95 "Автоматическое применение стратегии в Zapret2..."
-            local apply_res="" attempt=0 max_attempts=4 first_cand=""
+            local apply_res="" attempt=0 max_attempts=10 first_cand=""
             local candidates="/tmp/blockcheckw_candidates.$$"
             : > "$candidates"
 
@@ -1351,7 +1351,7 @@ EOF
                 head -n 2 "$OUTPUT_CIRCULAR" >> "$candidates"
             fi
             if [ -f "$OUTPUT_VANILLA" ] && [ -s "$OUTPUT_VANILLA" ]; then
-                head -n 3 "$OUTPUT_VANILLA" >> "$candidates"
+                head -n 8 "$OUTPUT_VANILLA" >> "$candidates"
             fi
 
             while IFS= read -r cand; do
@@ -2005,6 +2005,11 @@ for idx, ep in ipairs(endpoints) do
         })
     else
         local range_opt = (ep.range and ep.range ~= "") and ("--range " .. ep.range) or "--range 0-16383"
+        local exp_bytes = 0
+        if ep.range and ep.range ~= "" then
+            local ra, rb = tostring(ep.range):match("^(%d+)%-(%d+)$")
+            if ra and rb then exp_bytes = tonumber(rb) - tonumber(ra) + 1 end
+        end
         local cmd = string.format("curl -4 -k -s -L %s -w '%%{http_code}|%%{size_download}|%%{speed_download}|%%{time_total}' -o /dev/null --connect-timeout 4 -m 6 '%s' 2>/dev/null", range_opt, ep.url)
         local pipe = io.popen(cmd)
         local out = pipe and pipe:read("*a") or ""
@@ -2027,6 +2032,12 @@ for idx, ep in ipairs(endpoints) do
                 -- Body stream validation against TSPU mid-stream truncation / 16 KB stall (inspired by ByeByeDPI)
                 if size > 0 then
                     is_ok = (elapsed < 5.5)
+                    -- Крупный запрос, а пришло меньше половины — значит ТСПУ оборвал поток
+                    -- (классический стоп на 16 КБ), даже если код 200.
+                    if is_ok and exp_bytes >= 100000 and size < exp_bytes * 0.5 then
+                        is_ok = false
+                        is_truncated = true
+                    end
                 else
                     is_ok = false
                     is_truncated = true

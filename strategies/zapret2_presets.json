@@ -47,7 +47,7 @@
         {
           "name": "Веб-интерфейс (youtube.com)",
           "url": "https://www.youtube.com",
-          "range": "0-32767"
+          "range": "0-262143"
         },
         {
           "name": "Превью и медиа (i.ytimg.com)",
@@ -106,7 +106,7 @@
         {
           "name": "Веб-интерфейс (discord.com)",
           "url": "https://discord.com",
-          "range": "0-32767"
+          "range": "0-262143"
         },
         {
           "name": "API авторизации (discord.com/api)",
@@ -172,7 +172,7 @@
         {
           "name": "Веб-интерфейс (twitch.tv)",
           "url": "https://twitch.tv",
-          "range": "0-32767"
+          "range": "0-262143"
         },
         {
           "name": "Видео-шлюз и CDN (usher.ttvnw.net)",
@@ -214,7 +214,7 @@
         {
           "name": "Портал X (x.com)",
           "url": "https://x.com",
-          "range": "0-32767"
+          "range": "0-262143"
         },
         {
           "name": "Медиа CDN (pbs.twimg.com)",
@@ -255,7 +255,7 @@
         {
           "name": "Шлюз Instagram (gateway.instagram.com)",
           "url": "https://gateway.instagram.com",
-          "range": "0-32767"
+          "range": "0-262143"
         },
         {
           "name": "Медиа CDN (static.cdninstagram.com)",
