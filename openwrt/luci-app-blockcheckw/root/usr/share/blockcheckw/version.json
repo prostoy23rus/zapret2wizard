@@ -1,12 +1,12 @@
 {
-  "version": "0.18.25",
+  "version": "0.18.26",
   "release_date": "2026-11-09",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "Скилл skills/zapret2-desync: параметры desync, выбор стратегии, грабли — по manual.md, llms-full.txt и zapret2-guide",
-    "Справочник docs/ZAPRET2-KNOWLEDGE.md со ссылками на источники",
-    "Добавлены техники tcpseg, fakedsplit, hostfakesplit:midhost, rst:rstack, syndata:tcp_ts_up, multidisorder с seqovl",
-    "class печатает класс ТСПУ и рекомендует семейство стратегий"
+    "Исправлено: после подбора служба не оставалась остановленной — добавлен маркер паузы и автоматическое восстановление",
+    "Сторож подбора: если скан прерван, служба поднимается сама",
+    "info и test сами поднимают службу, если она была остановлена подбором",
+    "Скилл zapret2-desync и новые техники tcpseg, fakedsplit, syndata, rstack"
   ]
 }

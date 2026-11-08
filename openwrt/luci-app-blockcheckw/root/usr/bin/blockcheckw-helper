@@ -120,6 +120,19 @@ if [ ! -f /etc/config/zapret2wizard ] && [ -f /etc/config/zapret2 ]; then
     sed "s/config zapret2 'main'/config zapret2wizard 'main'/g; s|/opt/zapret2/ipset/|/etc/zapret2wizard/ipset/|g" /etc/config/zapret2 > /etc/config/zapret2wizard 2>/dev/null || true
 fi
 
+# Страховка: служба была остановлена на время подбора и не поднялась (скан убит,
+# страница закрыта). Тогда поднимаем её и убираем маркер.
+ensure_dpi_service() {
+    [ -f /tmp/bcw_scan_paused ] || return 0
+    if get_dpi_service_status | grep -q running; then
+        rm -f /tmp/bcw_scan_paused
+        return 0
+    fi
+    /etc/init.d/zapret2wizard start >/dev/null 2>&1
+    rm -f /tmp/bcw_scan_paused
+    logger -t zapret2wizard "служба была остановлена подбором и поднята автоматически"
+}
+
 restart_dpi_service() {
     [ -x /usr/share/zapret2wizard/uci2config ] && /usr/share/zapret2wizard/uci2config >/dev/null 2>&1 || true
     if [ -x /etc/init.d/zapret2wizard ]; then
@@ -913,6 +926,7 @@ cmd_start() {
             if ! get_dpi_service_status | grep -q running || ! nft list tables 2>/dev/null | grep -q 'inet zapret2wizard'; then
                 restart_dpi_service
             fi
+            rm -f /tmp/bcw_scan_paused
         }
         trap cleanup_subshell EXIT INT TERM
 
@@ -987,6 +1001,21 @@ cmd_start() {
             /etc/init.d/zapret2wizard stop >/dev/null 2>&1
             echo "[blockcheckw-helper] Служба остановлена на время подбора" >> "$LOG_FILE"
             history_add "scan_pause" "$(metric_target_key "$target")" "Служба остановлена на время подбора"
+            : > /tmp/bcw_scan_paused
+            # Сторож: если процесс подбора умрёт (перезагрузка страницы, kill), служба
+            # всё равно вернётся. Без этого пользователь оставался без обхода.
+            (
+                i=0
+                while [ -f "$PID_FILE" ] && [ "$i" -lt 60 ]; do
+                    sleep 15
+                    i=$((i + 1))
+                done
+                sleep 5
+                if ! /etc/init.d/zapret2wizard running >/dev/null 2>&1; then
+                    /etc/init.d/zapret2wizard start >/dev/null 2>&1
+                    logger -t zapret2wizard "сторож подбора: служба поднята после завершения сканирования"
+                fi
+            ) &
         fi
 
         write_status "running" 15 "Фаза 1: Экспресс-тест векторов DPI ($domain)..."
@@ -1416,6 +1445,7 @@ EOF
             else
                 # Новых вариантов нет — но это не значит, что обход не работает:
                 # ранее применённая стратегия остаётся в конфиге. Проверяем её.
+                /etc/init.d/zapret2wizard running >/dev/null 2>&1 || /etc/init.d/zapret2wizard start >/dev/null 2>&1
                 local cur_test=$(cmd_test "$target" "" 2>/dev/null | tail -n 1)
                 if printf '%s' "$cur_test" | grep -q '"all_ok":true'; then
                     write_status "done" 100 "Новых стратегий не найдено — текущая конфигурация уже работает" ",\"strategies\":[],\"current_ok\":true"
@@ -2235,6 +2265,7 @@ EOF
 }
 
 cmd_test() {
+    ensure_dpi_service
     local out
     out=$(cmd_test_impl "$@")
     printf '%s\n' "$out"
@@ -2969,6 +3000,7 @@ CLASSLIST
 }
 
 cmd_info() {
+    ensure_dpi_service
     ensure_all_hostlists
     local zapret_running=$(get_dpi_service_status)
 
