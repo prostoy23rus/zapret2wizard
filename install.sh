@@ -432,7 +432,7 @@ chmod 644 /www/luci-static/resources/view/blockcheckw/main.js
 chmod 644 /usr/share/blockcheckw/* /usr/share/luci/menu.d/luci-app-blockcheckw.json /usr/share/rpcd/acl.d/luci-app-blockcheckw.json 2>/dev/null || true
 
 # Инициализация списков хостов для сервисов в Zapret2
-/usr/bin/blockcheckw-helper ensure_hostlists 2>/dev/null || true
+/usr/bin/blockcheckw-helper ensure_hostlists >/dev/null 2>&1 || true
 
 echo -e "${GREEN}✓${NC} Автономная служба Zapret2Wizard успешно настроена и запущена."
 
