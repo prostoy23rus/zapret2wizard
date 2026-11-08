@@ -62,10 +62,10 @@ apply_nft_firewall() {
 	detect_interfaces
 
 	# Atomically replace or clean old table
-	nft delete table inet zapret2 2>/dev/null || true
+	nft delete table inet zapret2wizard 2>/dev/null || true
 
 	nft -f - <<EOF
-table inet zapret2 {
+table inet zapret2wizard {
 	set zapret {
 		type ipv4_addr
 		size 522288
@@ -163,11 +163,11 @@ EOF
 	# OpenWrt Flow Offloading exemptions
 	local fo=$(uci -q get firewall.@defaults[0].flow_offloading)
 	if [ "$fo" = "1" ]; then
-		nft add rule inet zapret2 flow_offload_always flow add @ft 2>/dev/null || true
-		nft add rule inet zapret2 forward_hook meta l4proto "{ tcp, udp }" oifname @wanif jump flow_offload 2>/dev/null || true
-		nft add rule inet zapret2 flow_offload ip daddr == @nozapret goto flow_offload_always 2>/dev/null || true
-		nft add rule inet zapret2 flow_offload jump flow_offload_zapret 2>/dev/null || true
-		nft add rule inet zapret2 flow_offload_zapret goto flow_offload_always 2>/dev/null || true
+		nft add rule inet zapret2wizard flow_offload_always flow add @ft 2>/dev/null || true
+		nft add rule inet zapret2wizard forward_hook meta l4proto "{ tcp, udp }" oifname @wanif jump flow_offload 2>/dev/null || true
+		nft add rule inet zapret2wizard flow_offload ip daddr == @nozapret goto flow_offload_always 2>/dev/null || true
+		nft add rule inet zapret2wizard flow_offload jump flow_offload_zapret 2>/dev/null || true
+		nft add rule inet zapret2wizard flow_offload_zapret goto flow_offload_always 2>/dev/null || true
 	fi
 }
 
@@ -176,7 +176,7 @@ start_fw() {
 }
 
 stop_fw() {
-	nft delete table inet zapret2 2>/dev/null || true
+	nft delete table inet zapret2wizard 2>/dev/null || true
 }
 
 restart_fw() {
@@ -185,7 +185,7 @@ restart_fw() {
 }
 
 list_table() {
-	nft list table inet zapret2 2>/dev/null || echo "Table inet zapret2 is not active"
+	nft list table inet zapret2wizard 2>/dev/null || echo "Table inet zapret2wizard is not active"
 }
 
 check_config() {
@@ -313,7 +313,7 @@ start_service() {
 
 stop_service() {
 	logger -t zapret2wizard "Stopping Zapret2Wizard service and firewall..."
-	nft delete table inet zapret2 2>/dev/null || true
+	nft delete table inet zapret2wizard 2>/dev/null || true
 	rm -f "$PIDDIR/zapret2wizard_"*.pid
 }
 
@@ -326,5 +326,4 @@ reload_service() {
 
 service_triggers() {
 	procd_add_reload_trigger "zapret2wizard"
-	procd_add_reload_trigger "zapret2"
 }

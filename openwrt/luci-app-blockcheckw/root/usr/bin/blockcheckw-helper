@@ -109,12 +109,15 @@ _add_domains_if_missing() {
     chmod 644 "$file" 2>/dev/null
 }
 
+# One-time migration if zapret2wizard config does not exist
+if [ ! -f /etc/config/zapret2wizard ] && [ -f /etc/config/zapret2 ]; then
+    sed "s/config zapret2 'main'/config zapret2wizard 'main'/g; s|/opt/zapret2/ipset/|/etc/zapret2wizard/ipset/|g" /etc/config/zapret2 > /etc/config/zapret2wizard 2>/dev/null || true
+fi
+
 restart_dpi_service() {
+    [ -x /usr/share/zapret2wizard/uci2config ] && /usr/share/zapret2wizard/uci2config >/dev/null 2>&1 || true
     if [ -x /etc/init.d/zapret2wizard ]; then
         /etc/init.d/zapret2wizard restart >/dev/null 2>&1
-    fi
-    if [ -x /etc/init.d/zapret2 ] && [ ! -L /etc/init.d/zapret2 ]; then
-        /etc/init.d/zapret2 restart >/dev/null 2>&1
     fi
 }
 
@@ -122,11 +125,6 @@ get_dpi_service_status() {
     local st=""
     if [ -x /etc/init.d/zapret2wizard ]; then
         st=$(/etc/init.d/zapret2wizard status 2>/dev/null)
-    fi
-    if [ -z "$st" ] || ! echo "$st" | grep -q running; then
-        if [ -x /etc/init.d/zapret2 ]; then
-            st=$(/etc/init.d/zapret2 status 2>/dev/null)
-        fi
     fi
     if [ -z "$st" ]; then
         echo "inactive"
@@ -136,30 +134,20 @@ get_dpi_service_status() {
 }
 
 get_active_uci_pkg() {
-    if [ -f /etc/config/zapret2wizard ]; then
-        echo "zapret2wizard"
-    else
-        echo "zapret2"
-    fi
+    echo "zapret2wizard"
 }
 
 sync_uci_commit() {
-    uci commit zapret2 2>/dev/null || true
-    if [ -f /etc/config/zapret2wizard ]; then
-        uci commit zapret2wizard 2>/dev/null || true
-    fi
+    uci commit zapret2wizard 2>/dev/null || true
 }
 
 _uci_set_list_if_missing() {
     local list_name="$1"
     local list_path="$2"
-    for pkg in zapret2 zapret2wizard; do
-        [ -f "/etc/config/$pkg" ] || continue
-        if ! uci -q get "$pkg.$list_name" >/dev/null; then
-            uci set "$pkg.$list_name=list"
-            uci set "$pkg.$list_name.path=$list_path"
-        fi
-    done
+    if ! uci -q get "zapret2wizard.$list_name" >/dev/null; then
+        uci set "zapret2wizard.$list_name=list"
+        uci set "zapret2wizard.$list_name.path=$list_path"
+    fi
 }
 
 ensure_preset_hostlist() {
@@ -276,10 +264,10 @@ ensure_firewall_quic_reject() {
 
 ensure_all_hostlists() {
     ensure_firewall_quic_reject
-    local ipset_dir="/opt/zapret2/ipset"
+    local ipset_dir="/etc/zapret2wizard/ipset"
     mkdir -p "$ipset_dir" 2>/dev/null
 
-    local before_changes=$(uci changes zapret2 2>/dev/null)
+    local before_changes=$(uci changes zapret2wizard 2>/dev/null)
 
     ensure_preset_hostlist "preset_youtube"
     ensure_preset_hostlist "preset_discord"
@@ -297,14 +285,14 @@ ensure_all_hostlists() {
         fi
         chmod 644 "$excl_file" 2>/dev/null
     fi
-    if ! uci -q get zapret2.list_hosts_user_exclude >/dev/null; then
-        uci set zapret2.list_hosts_user_exclude=list
-        uci set zapret2.list_hosts_user_exclude.path="$excl_file"
+    if ! uci -q get zapret2wizard.list_hosts_user_exclude >/dev/null; then
+        uci set zapret2wizard.list_hosts_user_exclude=list
+        uci set zapret2wizard.list_hosts_user_exclude.path="$excl_file"
     fi
 
-    local after_changes=$(uci changes zapret2 2>/dev/null)
+    local after_changes=$(uci changes zapret2wizard 2>/dev/null)
     if [ "$before_changes" != "$after_changes" ] && [ -n "$after_changes" ]; then
-        uci commit zapret2 2>/dev/null || true
+        uci commit zapret2wizard 2>/dev/null || true
     fi
 }
 

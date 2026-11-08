@@ -2,16 +2,12 @@
 # UCI to shell config generator for zapret2
 # Reads /etc/config/zapret2 and generates /opt/zapret2/config
 
-if [ -d "/etc/zapret2wizard" ] || [ ! -d "/opt/zapret2" ]; then
-    DEFAULT_BASE="/etc/zapret2wizard"
-else
-    DEFAULT_BASE="/opt/zapret2"
-fi
+DEFAULT_BASE="/etc/zapret2wizard"
 ZAPRET_BASE="${ZAPRET_BASE:-$DEFAULT_BASE}"
 mkdir -p "$ZAPRET_BASE" 2>/dev/null || true
 TARGET_CONFIG_FILE="$ZAPRET_BASE/config"
 CONFIG_FILE=""
-LOCK_FILE="/var/lock/zapret2_config.lock"
+LOCK_FILE="/var/lock/zapret2wizard_config.lock"
 CHECK_ONLY=0
 
 case "${1:-}" in
@@ -62,11 +58,13 @@ flock -n 200 || {
 # Check if UCI config exists
 UCI_CFG_DIR="${UCI_CONFIG_DIR:-/etc/config}"
 UCI_PKG="zapret2wizard"
-if [ -f "$UCI_CFG_DIR/zapret2wizard" ]; then
-    UCI_PKG="zapret2wizard"
-elif [ -f "$UCI_CFG_DIR/zapret2" ]; then
-    UCI_PKG="zapret2"
+
+# One-time migration if zapret2wizard config does not exist
+if [ ! -f "$UCI_CFG_DIR/zapret2wizard" ] && [ -f "$UCI_CFG_DIR/zapret2" ]; then
+    echo "Migrating /etc/config/zapret2 to /etc/config/zapret2wizard..."
+    sed "s/config zapret2 'main'/config zapret2wizard 'main'/g; s|/opt/zapret2/ipset/|/etc/zapret2wizard/ipset/|g" "$UCI_CFG_DIR/zapret2" > "$UCI_CFG_DIR/zapret2wizard"
 fi
+
 UCI_CONFIG_FILE="$UCI_CFG_DIR/$UCI_PKG"
 [ -f "$UCI_CONFIG_FILE" ] || {
     echo "No UCI config found ($UCI_CONFIG_FILE), using default config"
@@ -706,12 +704,6 @@ mv "$CONFIG_FILE" "$TARGET_CONFIG_FILE" || {
     echo "Error: cannot replace config: $TARGET_CONFIG_FILE"
     exit 1
 }
-if [ "$TARGET_CONFIG_FILE" = "/etc/zapret2wizard/config" ] && [ -d "/opt/zapret2" ]; then
-    cp -f "$TARGET_CONFIG_FILE" "/opt/zapret2/config" 2>/dev/null || true
-elif [ "$TARGET_CONFIG_FILE" = "/opt/zapret2/config" ]; then
-    mkdir -p "/etc/zapret2wizard" 2>/dev/null || true
-    cp -f "$TARGET_CONFIG_FILE" "/etc/zapret2wizard/config" 2>/dev/null || true
-fi
 CONFIG_FILE=""
 trap - 0 1 2 15
 

@@ -6,8 +6,8 @@
   "changelog": [
     "Единая автономная служба All-in-One: Zapret2 и Zapret2Wizard объединены в одну самодостаточную службу без внешних зависимостей",
     "Собственный бинарник nfqws2, встроенные Lua-скрипты обхода (zapret-antidpi, zapret-auto, zapret-lib), дампы фейков и списки хостов",
-    "Автономный init-скрипт /etc/init.d/zapret2wizard с прямым управлением nftables (table inet zapret2) и многоинстансным procd (main, discord_media, stun)",
-    "Двусторонняя синхронизация UCI конфигурации между /etc/config/zapret2wizard и /etc/config/zapret2 для полной обратной совместимости",
+    "Автономный init-скрипт /etc/init.d/zapret2wizard с прямым управлением nftables (table inet zapret2wizard) и многоинстансным procd (main, discord_media, stun)",
+    "Полная изоляция службы: zapret2wizard работает полностью автономно и независимо от zapret2",
     "Поддержка прямого управления службой, бесшовного переключения и перезапуска через LuCI интерфейс",
     "Интеграция пула Top White-SNI (Госуслуги, ЕСИА, Сбербанк, Альфа-Банк, РЖД, ВК, Авито, Озон) из анализа ТСПУ dpi-detector в пресеты и генетический анализ"
   ]

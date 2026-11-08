@@ -307,28 +307,26 @@ fetch_file "openwrt/luci-app-blockcheckw/root/etc/init.d/zapret2wizard" /etc/ini
 chmod +x /etc/init.d/zapret2wizard /usr/share/zapret2wizard/uci2config /usr/bin/blockcheckw-helper /usr/bin/circular-builder.lua
 ln -sf /usr/bin/blockcheckw-helper /usr/bin/zapret2wizard 2>/dev/null || true
 
-# Настройка конфигурации по умолчанию при отсутствии
-[ -f /etc/config/zapret2wizard ] || fetch_file "openwrt/luci-app-blockcheckw/root/etc/config/zapret2wizard" /etc/config/zapret2wizard 8 || true
-[ -f /etc/config/zapret2 ] || fetch_file "openwrt/luci-app-blockcheckw/root/etc/config/zapret2" /etc/config/zapret2 8 || true
+# Настройка конфигурации zapret2wizard
+if [ ! -f /etc/config/zapret2wizard ]; then
+    if [ -f /etc/config/zapret2 ]; then
+        echo -e "${BLUE}ℹ${NC} Миграция настроек из zapret2 в автономную конфигурацию zapret2wizard..."
+        sed "s/config zapret2 'main'/config zapret2wizard 'main'/g; s|/opt/zapret2/ipset/|/etc/zapret2wizard/ipset/|g" /etc/config/zapret2 > /etc/config/zapret2wizard 2>/dev/null || true
+    fi
+    [ -s /etc/config/zapret2wizard ] || fetch_file "openwrt/luci-app-blockcheckw/root/etc/config/zapret2wizard" /etc/config/zapret2wizard 8 || true
+fi
 
-# Бесшовная интеграция с /etc/init.d/zapret2
-if [ -f /etc/init.d/zapret2 ] && [ ! -L /etc/init.d/zapret2 ] && ! grep -q "zapret2wizard" /etc/init.d/zapret2 2>/dev/null; then
-    echo -e "${YELLOW}ℹ${NC} Миграция старой службы /etc/init.d/zapret2 в режим совместимости..."
+# Остановка и отключение старой службы zapret2 (полная изоляция)
+if [ -f /etc/init.d/zapret2 ]; then
+    echo -e "${BLUE}ℹ${NC} Остановка старой службы zapret2 для предотвращения конфликтов..."
     /etc/init.d/zapret2 stop >/dev/null 2>&1 || true
     /etc/init.d/zapret2 disable >/dev/null 2>&1 || true
+    if grep -q "Compatibility wrapper for Zapret2Wizard" /etc/init.d/zapret2 2>/dev/null; then
+        if [ -f /opt/zapret2/init.d/openwrt/zapret2 ]; then
+            cp -f /opt/zapret2/init.d/openwrt/zapret2 /etc/init.d/zapret2
+        fi
+    fi
 fi
-cat << 'EOF' > /etc/init.d/zapret2
-#!/bin/sh /etc/rc.common
-# Compatibility wrapper for Zapret2Wizard
-exec /etc/init.d/zapret2wizard "$@"
-EOF
-chmod +x /etc/init.d/zapret2
-
-# Симлинки обратной совместимости для путей /opt/zapret2/...
-mkdir -p /opt/zapret2/files /opt/zapret2/init.d/openwrt 2>/dev/null || true
-[ -e /opt/zapret2/files/fake ] || ln -sf /usr/share/zapret2wizard/fake /opt/zapret2/files/fake 2>/dev/null || true
-[ -e /opt/zapret2/lua ] || ln -sf /usr/share/zapret2wizard/lua /opt/zapret2/lua 2>/dev/null || true
-[ -e /opt/zapret2/ipset ] || ln -sf /etc/zapret2wizard/ipset /opt/zapret2/ipset 2>/dev/null || true
 
 # Включение и запуск единой автономной службы
 /etc/init.d/zapret2wizard enable 2>/dev/null || true

@@ -110,13 +110,13 @@ if [ "$REMOVE_QUIC" -eq 1 ]; then
     fi
 fi
 
-# Опциональная очистка секций zapret2, созданных blockcheckw
+# Опциональная очистка настроек Zapret2Wizard
 if [ "$PURGE_ZAPRET" -eq 1 ]; then
-    echo -e "${YELLOW}ℹ${NC} Очистка записей и компонентов Zapret2..."
+    echo -e "${YELLOW}ℹ${NC} Очистка записей и компонентов Zapret2Wizard..."
     rm -rf /etc/zapret2wizard
     rm -f /etc/config/zapret2wizard
     rm -f /usr/bin/nfqws2
-    nft delete table inet zapret2 2>/dev/null || true
+    nft delete table inet zapret2wizard 2>/dev/null || true
     killall -9 nfqws2 2>/dev/null || true
     if command -v uci >/dev/null 2>&1 && [ -f /etc/config/zapret2 ]; then
         for sec in $(uci show zapret2 | grep -E "=section" | cut -d'.' -f2 | cut -d'=' -f1); do

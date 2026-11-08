@@ -2836,12 +2836,12 @@ return view.extend({
 
 			if (!lists || lists.length === 0) {
 				lists = [
-					{ key: 'youtube', name: 'YouTube', file: '/opt/zapret2/ipset/zapret_hosts_youtube.txt', domains_count: 9, uci_configured: true },
-					{ key: 'discord', name: 'Discord', file: '/opt/zapret2/ipset/zapret_hosts_discord.txt', domains_count: 9, uci_configured: true },
-					{ key: 'x', name: 'X (Twitter)', file: '/opt/zapret2/ipset/zapret_hosts_x.txt', domains_count: 10, uci_configured: true },
-					{ key: 'instagram', name: 'Instagram', file: '/opt/zapret2/ipset/zapret_hosts_instagram.txt', domains_count: 9, uci_configured: true },
-					{ key: 'twitch', name: 'Twitch', file: '/opt/zapret2/ipset/zapret_hosts_twitch.txt', domains_count: 6, uci_configured: true },
-					{ key: 'user', name: 'Общие сайты (User)', file: '/opt/zapret2/ipset/zapret_hosts_user.txt', domains_count: 33, uci_configured: true }
+					{ key: 'youtube', name: 'YouTube', file: '/etc/zapret2wizard/ipset/zapret_hosts_youtube.txt', domains_count: 9, uci_configured: true },
+					{ key: 'discord', name: 'Discord', file: '/etc/zapret2wizard/ipset/zapret_hosts_discord.txt', domains_count: 9, uci_configured: true },
+					{ key: 'x', name: 'X (Twitter)', file: '/etc/zapret2wizard/ipset/zapret_hosts_x.txt', domains_count: 10, uci_configured: true },
+					{ key: 'instagram', name: 'Instagram', file: '/etc/zapret2wizard/ipset/zapret_hosts_instagram.txt', domains_count: 9, uci_configured: true },
+					{ key: 'twitch', name: 'Twitch', file: '/etc/zapret2wizard/ipset/zapret_hosts_twitch.txt', domains_count: 6, uci_configured: true },
+					{ key: 'user', name: 'Общие сайты (User)', file: '/etc/zapret2wizard/ipset/zapret_hosts_user.txt', domains_count: 33, uci_configured: true }
 				];
 			}
 
@@ -2901,7 +2901,7 @@ return view.extend({
 			bcwShowModal('📋 Изолированные списки доменов Zapret2', [
 				E('div', { style: 'margin-bottom: 14px; font-size: 13px; color: #abb2bf; line-height: 1.5;' }, [
 					'BlockcheckW автоматически поддерживает и восстанавливает отдельные списки доменов в ',
-					E('code', { style: 'color: #98c379;' }, '/opt/zapret2/ipset/'),
+					E('code', { style: 'color: #98c379;' }, '/etc/zapret2wizard/ipset/'),
 					' при каждом открытии страницы и перед запуском сканирования. Ваши добавленные домены всегда сохраняются.'
 				]),
 				statusContainer
