@@ -385,82 +385,126 @@ return view.extend({
 			'.bcw-applied-banner { animation: bcwFadeIn 0.3s ease; }\n' +
 			'@keyframes bcwFadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }\n' +
 			'\n' +
-			'/* Theme Variables: Default / Dark Theme */\n' +
+			'/* Theme Variables: Footstrap Reference & GitHub Primer Design System */\n' +
 			'.bcw-wrapper, .bcw-wrapper[data-theme="dark"], body[data-bcw-theme="dark"] {\n' +
-			'  --bcw-bg-card: #20232a;\n' +
-			'  --bcw-bg-card-sub: rgba(255, 255, 255, 0.03);\n' +
-			'  --bcw-bg-card-inner: #252830;\n' +
-			'  --bcw-border-card: #323742;\n' +
-			'  --bcw-border-sub: #383e4a;\n' +
-			'  --bcw-border-divider: rgba(255, 255, 255, 0.07);\n' +
-			'  --bcw-text-title: #e5e9f0;\n' +
-			'  --bcw-text-main: #abb2bf;\n' +
-			'  --bcw-text-muted: #7f848e;\n' +
-			'  --bcw-btn-bg: #282c34;\n' +
-			'  --bcw-btn-color: #abb2bf;\n' +
-			'  --bcw-btn-border: #485060;\n' +
-			'  --bcw-btn-hover-bg: #323742;\n' +
+			'  --bcw-font-sans: var(--fs-font-sans, "Manrope", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);\n' +
+			'  --bcw-font-mono: var(--fs-font-mono, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace);\n' +
+			'  --bcw-bg-card: var(--fs-panel, #22272e);\n' +
+			'  --bcw-bg-card-sub: var(--fs-panel2, #2d333b);\n' +
+			'  --bcw-bg-card-inner: var(--fs-panel2, #2d333b);\n' +
+			'  --bcw-border-card: var(--fs-border, #444c56);\n' +
+			'  --bcw-border-sub: var(--fs-border, #373e47);\n' +
+			'  --bcw-border-divider: var(--fs-hairline-color, rgba(255, 255, 255, 0.08));\n' +
+			'  --bcw-text-title: var(--fs-text, #f0f6fc);\n' +
+			'  --bcw-text-main: var(--fs-dim, #adbac7);\n' +
+			'  --bcw-text-muted: var(--fs-faint, #768390);\n' +
+			'  --bcw-accent: var(--fs-accent, #569df5);\n' +
+			'  --bcw-accent-soft: var(--fs-accent-soft, rgba(86, 157, 245, 0.14));\n' +
+			'  --bcw-on-accent: var(--fs-on-accent, #10151c);\n' +
+			'  --bcw-good: var(--fs-good, #5aad5d);\n' +
+			'  --bcw-good-soft: var(--fs-good-soft, rgba(90, 173, 93, 0.14));\n' +
+			'  --bcw-on-good: var(--fs-on-good, #10151c);\n' +
+			'  --bcw-warn: var(--fs-warn, #c79128);\n' +
+			'  --bcw-warn-soft: var(--fs-warn-soft, rgba(199, 145, 40, 0.14));\n' +
+			'  --bcw-danger: var(--fs-danger, #ea7a74);\n' +
+			'  --bcw-danger-soft: var(--fs-danger-soft, rgba(234, 122, 116, 0.14));\n' +
+			'  --bcw-on-danger: var(--fs-on-danger, #10151c);\n' +
+			'  --bcw-track: var(--fs-track, #373e47);\n' +
+			'  --bcw-radius-lg: var(--fs-radius-lg, 12px);\n' +
+			'  --bcw-radius: var(--fs-radius, 10px);\n' +
+			'  --bcw-radius-sm: var(--fs-radius-sm, 8px);\n' +
+			'  --bcw-radius-pill: 999px;\n' +
+			'  --bcw-btn-bg: var(--fs-panel2, #2d333b);\n' +
+			'  --bcw-btn-color: var(--bcw-text-title);\n' +
+			'  --bcw-btn-border: var(--fs-border, #444c56);\n' +
+			'  --bcw-btn-hover-bg: #373e47;\n' +
 			'  --bcw-btn-hover-color: #ffffff;\n' +
-			'  --bcw-tile-bg: #252830;\n' +
-			'  --bcw-tile-border: #383e4a;\n' +
-			'  --bcw-tile-color: #abb2bf;\n' +
-			'  --bcw-tile-hover-bg: #2d313b;\n' +
-			'  --bcw-tile-active-bg: rgba(0, 209, 178, 0.12);\n' +
-			'  --bcw-tile-active-color: #00d1b2;\n' +
-			'  --bcw-code-bg: #181a1f;\n' +
-			'  --bcw-code-color: #98c379;\n' +
-			'  --bcw-code-border: #282c34;\n' +
-			'  --bcw-chk-bg: #1c2027;\n' +
-			'  --bcw-chk-border: #485060;\n' +
-			'  --bcw-select-bg: #282c34;\n' +
-			'  --bcw-select-color: #ffffff;\n' +
-			'  --bcw-select-border: #485060;\n' +
-			'  --bcw-hint-bg: rgba(97, 175, 239, 0.06);\n' +
-			'  --bcw-hint-border: rgba(97, 175, 239, 0.22);\n' +
-			'  --bcw-hint-item-bg: rgba(0, 0, 0, 0.25);\n' +
-			'  --bcw-card-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);\n' +
+			'  --bcw-tile-bg: var(--fs-panel2, #2d333b);\n' +
+			'  --bcw-tile-border: var(--fs-border, #444c56);\n' +
+			'  --bcw-tile-color: var(--bcw-text-main);\n' +
+			'  --bcw-tile-hover-bg: #373e47;\n' +
+			'  --bcw-tile-active-bg: var(--bcw-accent-soft);\n' +
+			'  --bcw-tile-active-color: var(--bcw-accent);\n' +
+			'  --bcw-code-bg: #161b22;\n' +
+			'  --bcw-code-color: #7ee787;\n' +
+			'  --bcw-code-border: #30363d;\n' +
+			'  --bcw-chk-bg: #1c2128;\n' +
+			'  --bcw-chk-border: #444c56;\n' +
+			'  --bcw-select-bg: var(--fs-panel2, #2d333b);\n' +
+			'  --bcw-select-color: #f0f6fc;\n' +
+			'  --bcw-select-border: var(--fs-border, #444c56);\n' +
+			'  --bcw-hint-bg: rgba(86, 157, 245, 0.08);\n' +
+			'  --bcw-hint-border: rgba(86, 157, 245, 0.25);\n' +
+			'  --bcw-hint-item-bg: rgba(0, 0, 0, 0.22);\n' +
+			'  --bcw-card-shadow: 0 1px 3px rgba(0, 0, 0, 0.16), 0 1px 2px rgba(0, 0, 0, 0.12);\n' +
 			'}\n' +
 			'\n' +
-			'/* Theme Variables: Light Theme */\n' +
+			'/* Theme Variables: Light Theme (GitHub Primer Light) */\n' +
 			'.bcw-wrapper[data-theme="light"], body[data-bcw-theme="light"] {\n' +
-			'  --bcw-bg-card: #ffffff;\n' +
-			'  --bcw-bg-card-sub: #f6f8fa;\n' +
-			'  --bcw-bg-card-inner: #f6f8fa;\n' +
-			'  --bcw-border-card: #d0d7de;\n' +
-			'  --bcw-border-sub: #e1e4e8;\n' +
-			'  --bcw-border-divider: rgba(0, 0, 0, 0.08);\n' +
-			'  --bcw-text-title: #24292f;\n' +
-			'  --bcw-text-main: #4a5568;\n' +
-			'  --bcw-text-muted: #6e7781;\n' +
-			'  --bcw-btn-bg: #f6f8fa;\n' +
-			'  --bcw-btn-color: #24292f;\n' +
-			'  --bcw-btn-border: #d0d7de;\n' +
-			'  --bcw-btn-hover-bg: #eaecf0;\n' +
-			'  --bcw-btn-hover-color: #0969da;\n' +
+			'  --bcw-font-sans: var(--fs-font-sans, "Manrope", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);\n' +
+			'  --bcw-font-mono: var(--fs-font-mono, "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace);\n' +
+			'  --bcw-bg-card: var(--fs-panel, #ffffff);\n' +
+			'  --bcw-bg-card-sub: var(--fs-panel2, #f6f8fa);\n' +
+			'  --bcw-bg-card-inner: var(--fs-panel2, #f6f8fa);\n' +
+			'  --bcw-border-card: var(--fs-border, #d0d7de);\n' +
+			'  --bcw-border-sub: var(--fs-border, #e1e4e8);\n' +
+			'  --bcw-border-divider: var(--fs-hairline-color, rgba(0, 0, 0, 0.08));\n' +
+			'  --bcw-text-title: var(--fs-text, #1f2328);\n' +
+			'  --bcw-text-main: var(--fs-dim, #33383d);\n' +
+			'  --bcw-text-muted: var(--fs-faint, #656d76);\n' +
+			'  --bcw-accent: var(--fs-accent, #0969da);\n' +
+			'  --bcw-accent-soft: var(--fs-accent-soft, rgba(9, 105, 218, 0.1));\n' +
+			'  --bcw-on-accent: var(--fs-on-accent, #ffffff);\n' +
+			'  --bcw-good: var(--fs-good, #1a7f37);\n' +
+			'  --bcw-good-soft: var(--fs-good-soft, rgba(26, 127, 55, 0.1));\n' +
+			'  --bcw-on-good: var(--fs-on-good, #ffffff);\n' +
+			'  --bcw-warn: var(--fs-warn, #946300);\n' +
+			'  --bcw-warn-soft: var(--fs-warn-soft, rgba(148, 99, 0, 0.1));\n' +
+			'  --bcw-danger: var(--fs-danger, #cf222e);\n' +
+			'  --bcw-danger-soft: var(--fs-danger-soft, rgba(207, 34, 46, 0.1));\n' +
+			'  --bcw-on-danger: var(--fs-on-danger, #ffffff);\n' +
+			'  --bcw-track: var(--fs-track, #eaeef2);\n' +
+			'  --bcw-radius-lg: var(--fs-radius-lg, 12px);\n' +
+			'  --bcw-radius: var(--fs-radius, 10px);\n' +
+			'  --bcw-radius-sm: var(--fs-radius-sm, 8px);\n' +
+			'  --bcw-radius-pill: 999px;\n' +
+			'  --bcw-btn-bg: var(--fs-panel2, #f6f8fa);\n' +
+			'  --bcw-btn-color: var(--bcw-text-title);\n' +
+			'  --bcw-btn-border: var(--fs-border, #d0d7de);\n' +
+			'  --bcw-btn-hover-bg: #eaeef2;\n' +
+			'  --bcw-btn-hover-color: var(--bcw-accent);\n' +
 			'  --bcw-tile-bg: #ffffff;\n' +
-			'  --bcw-tile-border: #d0d7de;\n' +
-			'  --bcw-tile-color: #4a5568;\n' +
+			'  --bcw-tile-border: var(--fs-border, #d0d7de);\n' +
+			'  --bcw-tile-color: var(--bcw-text-main);\n' +
 			'  --bcw-tile-hover-bg: #f3f6fc;\n' +
-			'  --bcw-tile-active-bg: rgba(0, 180, 150, 0.12);\n' +
-			'  --bcw-tile-active-color: #008775;\n' +
+			'  --bcw-tile-active-bg: var(--bcw-accent-soft);\n' +
+			'  --bcw-tile-active-color: var(--bcw-accent);\n' +
 			'  --bcw-code-bg: #f6f8fa;\n' +
 			'  --bcw-code-color: #116329;\n' +
-			'  --bcw-code-border: #d0d7de;\n' +
+			'  --bcw-code-border: var(--fs-border, #d0d7de);\n' +
 			'  --bcw-chk-bg: #ffffff;\n' +
 			'  --bcw-chk-border: #8c959f;\n' +
 			'  --bcw-select-bg: #ffffff;\n' +
-			'  --bcw-select-color: #24292f;\n' +
-			'  --bcw-select-border: #d0d7de;\n' +
+			'  --bcw-select-color: #1f2328;\n' +
+			'  --bcw-select-border: var(--fs-border, #d0d7de);\n' +
 			'  --bcw-hint-bg: rgba(9, 105, 218, 0.06);\n' +
 			'  --bcw-hint-border: rgba(9, 105, 218, 0.22);\n' +
 			'  --bcw-hint-item-bg: #ffffff;\n' +
-			'  --bcw-card-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);\n' +
+			'  --bcw-card-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);\n' +
 			'}\n' +
 			'\n' +
 			'.bcw-wrapper { width: 100%; max-width: 100%; box-sizing: border-box; overflow-x: hidden; }\n' +
 			'.bcw-wrapper * { box-sizing: border-box; }\n' +
 			'.bcw-container { display: flex; flex-direction: column; gap: 16px; margin-top: 8px; width: 100%; max-width: 100%; overflow-x: hidden; }\n' +
-			'.bcw-card { background: var(--bcw-bg-card); border: 1px solid var(--bcw-border-card); border-radius: 8px; padding: 18px 20px; box-shadow: var(--bcw-card-shadow); width: 100%; max-width: 100%; overflow-x: hidden; color: var(--bcw-text-main); transition: background 0.2s, border-color 0.2s; }\n' +
+			'.bcw-card { background: var(--bcw-bg-card); border: 1px solid var(--bcw-border-card); border-radius: var(--bcw-radius-lg); padding: 20px 22px; box-shadow: var(--bcw-card-shadow); width: 100%; max-width: 100%; overflow-x: hidden; color: var(--bcw-text-main); font-family: var(--bcw-font-sans); transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease; }\n' +
+			'.bcw-status-pill { display: inline-flex; align-items: center; gap: 7px; padding: 3px 12px; font-size: 11.5px; font-weight: 600; border-radius: var(--bcw-radius-pill); border: 1px solid transparent; line-height: 1.2; letter-spacing: -0.01em; }\n' +
+			'.bcw-status-pill.online { background: var(--bcw-good-soft); color: var(--bcw-good); border-color: color-mix(in srgb, var(--bcw-good) 35%, transparent); }\n' +
+			'.bcw-status-pill.offline { background: var(--bcw-danger-soft); color: var(--bcw-danger); border-color: color-mix(in srgb, var(--bcw-danger) 35%, transparent); }\n' +
+			'.bcw-status-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; box-shadow: 0 0 6px currentColor; }\n' +
+			'.bcw-status-pill.online .bcw-status-dot { animation: bcwDotPulse 2s infinite ease-in-out; }\n' +
+			'@keyframes bcwDotPulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.45; transform: scale(0.85); } }\n' +
+			'.bcw-progressbar-track { background: var(--bcw-track); border-radius: var(--bcw-radius-pill); height: 8px; width: 100%; overflow: hidden; margin: 12px 0; border: none; }\n' +
+			'.bcw-progressbar-fill { background: var(--bcw-accent); height: 100%; border-radius: var(--bcw-radius-pill); transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1); }\n' +
 			'.bcw-card-header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px solid var(--bcw-border-divider); width: 100%; }\n' +
 			'.bcw-spoiler-header:hover { background: var(--bcw-bg-card-sub); border-radius: 6px; }\n' +
 			'.bcw-spoiler-btn { background: var(--bcw-btn-bg) !important; color: var(--bcw-btn-color) !important; border: 1px solid var(--bcw-btn-border) !important; }\n' +
@@ -481,9 +525,9 @@ return view.extend({
 			'\n' +
 			'/* Finder Mode Tiles Grid */\n' +
 			'.bcw-tiles-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; width: 100%; margin-top: 4px; }\n' +
-			'.bcw-tile-btn { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 12px 6px; border-radius: 8px; background: var(--bcw-tile-bg); border: 1.5px solid var(--bcw-tile-border); color: var(--bcw-tile-color); cursor: pointer; transition: all 0.2s ease; user-select: none; text-align: center; min-height: 64px; box-sizing: border-box; }\n' +
+			'.bcw-tile-btn { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 12px 8px; border-radius: var(--bcw-radius); background: var(--bcw-tile-bg); border: 1px solid var(--bcw-tile-border); color: var(--bcw-tile-color); cursor: pointer; transition: all 0.15s ease; user-select: none; text-align: center; min-height: 68px; box-sizing: border-box; font-family: var(--bcw-font-sans); }\n' +
 			'.bcw-tile-btn:hover { background: var(--bcw-tile-hover-bg); border-color: #61afef; color: var(--bcw-text-title); transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.18); }\n' +
-			'.bcw-tile-btn.active { background: var(--bcw-tile-active-bg); border-color: var(--bcw-tile-active-color); color: var(--bcw-tile-active-color); font-weight: bold; box-shadow: 0 0 12px rgba(0, 209, 178, 0.25); }\n' +
+			'.bcw-tile-btn.active { background: var(--bcw-tile-active-bg); border-color: var(--bcw-accent); color: var(--bcw-accent); font-weight: bold; box-shadow: 0 0 0 1px var(--bcw-accent), 0 4px 14px rgba(86, 157, 245, 0.22); }\n' +
 			'.bcw-tile-icon { font-size: 20px; line-height: 1; margin-bottom: 5px; }\n' +
 			'.bcw-tile-name { font-size: 12px; line-height: 1.25; font-weight: 600; }\n' +
 			'.bcw-select { box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; height: 38px; padding: 0 12px; font-size: 13px; font-weight: 600; border-radius: 6px; background: var(--bcw-select-bg); color: var(--bcw-select-color); border: 1px solid var(--bcw-select-border); outline: none; cursor: pointer; transition: all 0.2s; }\n' +
@@ -514,9 +558,11 @@ return view.extend({
 			'/* Unified Actions Grid (Equal Size) */\n' +
 			'.bcw-actions-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; width: 100%; margin-top: 14px; }\n' +
 			'.bcw-action-btn { height: 44px; box-sizing: border-box; padding: 0 16px; font-size: 13.5px; font-weight: bold; border-radius: 8px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 8px; transition: all 0.2s ease; line-height: 1.2; text-align: center; white-space: nowrap; border: 1px solid transparent; user-select: none; width: 100%; }\n' +
-			'.bcw-action-btn-primary { background: #00d1b2; color: #081a17; border-color: #00d1b2; box-shadow: 0 2px 8px rgba(0,209,178,0.25); }\n' +
+			'.bcw-action-btn-primary { background: var(--bcw-accent); color: var(--bcw-on-accent); border-color: transparent; box-shadow: 0 1px 3px rgba(0,0,0,0.12); }\n' +
+			'.bcw-action-btn-primary:hover { filter: brightness(1.1); box-shadow: 0 4px 14px rgba(86, 157, 245, 0.35); transform: translateY(-1px); }\n' +
 			'.bcw-action-btn-primary:hover { background: #00e6c4; box-shadow: 0 0 16px rgba(0,209,178,0.45); transform: translateY(-1px); }\n' +
-			'.bcw-action-btn-stop { background: #ff3860; color: #ffffff; border-color: #ff3860; box-shadow: 0 2px 8px rgba(255,56,96,0.25); }\n' +
+			'.bcw-action-btn-stop { background: var(--bcw-danger); color: var(--bcw-on-danger); border-color: transparent; box-shadow: 0 1px 3px rgba(0,0,0,0.12); }\n' +
+			'.bcw-action-btn-stop:hover { filter: brightness(1.1); box-shadow: 0 4px 14px rgba(234, 122, 116, 0.35); transform: translateY(-1px); }\n' +
 			'.bcw-action-btn-stop:hover { background: #ff4d73; box-shadow: 0 0 14px rgba(255,56,96,0.4); }\n' +
 			'.bcw-action-btn-secondary { background: var(--bcw-btn-bg); border-color: var(--bcw-btn-border); color: var(--bcw-btn-color); }\n' +
 			'.bcw-action-btn-secondary:hover { background: var(--bcw-btn-hover-bg); color: var(--bcw-btn-hover-color); border-color: #3273dc; transform: translateY(-1px); }\n' +
@@ -613,39 +659,56 @@ return view.extend({
 		var mainLayout = E('div', { class: 'bcw-container' });
 		container.appendChild(mainLayout);
 
-		// Header Section
+		// Header Section (Footstrap Status Pill)
+		var isServiceRunning = (zapretInfo.zapret2_running === 'running');
 		var zapretBadgeEl = E('span', {
-			class: 'bcw-header-item ' + ((zapretInfo.zapret2_running === 'running') ? 'badge cbi-color-green' : 'badge cbi-color-red'),
-			style: 'border: none;'
-		}, (zapretInfo.zapret2_running === 'running') ? '✓ Zapret2Wizard активен' : '✗ Zapret2Wizard остановлен');
+			class: 'bcw-header-item bcw-status-pill ' + (isServiceRunning ? 'online' : 'offline'),
+			title: isServiceRunning ? 'Служба Zapret2Wizard активна и фильтрует трафик' : 'Служба Zapret2Wizard остановлена'
+		}, [
+			E('span', { class: 'bcw-status-dot' }),
+			E('span', {}, isServiceRunning ? 'Zapret2Wizard активен' : 'Zapret2Wizard остановлен')
+		]);
 
-		// Theme Management (Dark & Light)
+		// Footstrap & LuCI Theme Auto-Detection Engine
 		var THEME_KEY = 'bcw_theme_mode';
 
 		var themeSelectEl = E('select', {
 			class: 'bcw-header-item bcw-header-btn bcw-theme-select',
 			id: 'bcw-theme-select',
-			title: 'Цветовая тема оформления',
+			title: 'Цветовая палитра интерфейса (Footstrap / GitHub Primer)',
 			change: function() {
 				applyUserThemeChoice(this.value);
 			}
 		}, [
+			E('option', { value: 'auto' }, '🌓 Тема: Авто'),
 			E('option', { value: 'dark' }, '🌙 Тёмная'),
 			E('option', { value: 'light' }, '☀️ Светлая')
 		]);
 
-		function updateAppliedTheme() {
-			var choice = themeSelectEl.value || 'dark';
-			if (choice !== 'light') choice = 'dark';
-
-			container.setAttribute('data-theme', choice);
+		function getEffectiveTheme(choice) {
+			if (choice === 'dark' || choice === 'light') return choice;
 			try {
-				document.body.setAttribute('data-bcw-theme', choice);
+				if (document.documentElement.getAttribute('data-darkmode') === 'true' ||
+				    document.body.getAttribute('data-darkmode') === 'true' ||
+				    (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+					return 'dark';
+				}
+			} catch(e) {}
+			return 'light';
+		}
+
+		function updateAppliedTheme() {
+			var choice = themeSelectEl.value || 'auto';
+			var effective = getEffectiveTheme(choice);
+
+			container.setAttribute('data-theme', effective);
+			try {
+				document.body.setAttribute('data-bcw-theme', effective);
 			} catch(e) {}
 		}
 
 		function applyUserThemeChoice(choice) {
-			if (choice !== 'light') choice = 'dark';
+			if (choice !== 'light' && choice !== 'dark') choice = 'auto';
 			try {
 				localStorage.setItem(THEME_KEY, choice);
 			} catch(e) {}
@@ -653,15 +716,32 @@ return view.extend({
 			updateAppliedTheme();
 		}
 
-		var initialTheme = 'dark';
+		var initialTheme = 'auto';
 		try {
-			initialTheme = localStorage.getItem(THEME_KEY) || 'dark';
-			if (initialTheme !== 'dark' && initialTheme !== 'light') {
-				initialTheme = 'dark';
+			initialTheme = localStorage.getItem(THEME_KEY) || 'auto';
+			if (initialTheme !== 'dark' && initialTheme !== 'light' && initialTheme !== 'auto') {
+				initialTheme = 'auto';
 			}
 		} catch(e) {}
 		themeSelectEl.value = initialTheme;
 		updateAppliedTheme();
+
+		// Real-time listener for Footstrap theme toggles without page reload
+		if (window.matchMedia) {
+			try {
+				window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function() {
+					if (themeSelectEl.value === 'auto') updateAppliedTheme();
+				});
+			} catch(e) {}
+		}
+		if (window.MutationObserver) {
+			try {
+				var themeObs = new MutationObserver(function() {
+					if (themeSelectEl.value === 'auto') updateAppliedTheme();
+				});
+				themeObs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-darkmode'] });
+			} catch(e) {}
+		}
 
 		var btnCheckUpdate = E('button', {
 			class: 'bcw-header-item bcw-header-btn',
@@ -1172,8 +1252,8 @@ return view.extend({
 				E('span', { style: 'font-size: 24px; line-height: 1;' }, '🚀'),
 				E('div', { style: 'flex: 1;' }, [
 					E('div', { style: 'display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;' }, [
-						E('strong', { style: 'color: #00d1b2; font-size: 14px;' }, 'Стратегия уже загружена в Zapret2 и активна!'),
-						E('span', { class: 'badge cbi-color-green', style: 'font-weight: bold;' }, '✓ Zapret2 перезапущен')
+						E('strong', { style: 'color: #00d1b2; font-size: 14px;' }, 'Стратегия уже загружена в Zapret2Wizard и активна!'),
+						E('span', { class: 'badge cbi-color-green', style: 'font-weight: bold;' }, '✓ Zapret2Wizard перезапущен')
 					]),
 					E('p', { style: 'margin: 6px 0 0 0; font-size: 13px; color: #e5e9f0; line-height: 1.5;' },
 						'Служба уже перезапущена и прямо сейчас применяет обход для всех устройств в сети. ' +
@@ -1193,7 +1273,7 @@ return view.extend({
 					progressTimerEl
 				])
 			]),
-			E('div', { style: 'background: #181a1f; border-radius: 8px; height: 20px; width: 100%; overflow: hidden; margin: 10px 0; border: 1px solid #383e4a;' }, [
+			E('div', { class: 'bcw-progressbar-track' }, [
 				progressBarEl
 			]),
 			E('div', { style: 'display: flex; justify-content: space-between; font-size: 13px; opacity: 0.9;' }, [
