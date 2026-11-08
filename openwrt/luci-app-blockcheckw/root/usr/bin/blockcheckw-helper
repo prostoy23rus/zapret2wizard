@@ -2999,10 +2999,63 @@ CLASSLIST
     fi
 }
 
+# Ключ сервиса по имени секции (для интерфейса и отчётов).
+_info_sec_key() {
+    case "$1" in
+        BlockcheckW_YouTube) echo youtube ;;
+        BlockcheckW_Discord) echo discord ;;
+        BlockcheckW_Discord_Voice) echo discord_voice ;;
+        BlockcheckW_Twitch) echo twitch ;;
+        BlockcheckW_X) echo x ;;
+        BlockcheckW_Instagram) echo instagram ;;
+        BlockcheckW_General) echo builtin ;;
+        BlockcheckW_User*) echo user ;;
+        *) echo custom ;;
+    esac
+}
+
+# Резервный сборщик info: работает без Lua-модуля uci (на минимальных сборках
+# OpenWrt он отсутствует, и тогда интерфейс показывал нули).
+_info_json_shell() {
+    local running=$(get_dpi_service_status | head -n 1)
+    local ver=$(grep -o '"version": *"[^"]*"' "$VERSION_FILE" 2>/dev/null | head -n 1 | cut -d'"' -f4)
+    local svc="" strat="" first_s=1 first_a=1
+    for sec in $(uci -q show zapret2wizard 2>/dev/null | sed -n 's/^zapret2wizard\.\([^=]*\)=strategy$/\1/p'); do
+        local en_raw=$(uci -q get "zapret2wizard.$sec.enabled")
+        local en=false; [ "$en_raw" = "1" ] && en=true
+        local script=$(uci -q get "zapret2wizard.$sec.script")
+        local port=$(uci -q get "zapret2wizard.$sec.port")
+        local proto=$(uci -q get "zapret2wizard.$sec.protocol")
+        local l7=$(uci -q get "zapret2wizard.$sec.filter_l7")
+        local hl=$(uci -q get "zapret2wizard.$sec.hostlist")
+        local key=$(_info_sec_key "$sec")
+        local cnt=0
+        case "$hl" in
+            list_hosts_*)
+                local f="/etc/zapret2wizard/ipset/zapret_hosts_${hl#list_hosts_}.txt"
+                [ -f "$f" ] && cnt=$(grep -vc '^#' "$f" 2>/dev/null || echo 0)
+                ;;
+        esac
+        local esc=$(printf '%s' "$script" | sed 's/\\/\\\\/g; s/"/\\"/g')
+        local obj="\"$key\":{\"section\":\"$sec\",\"enabled\":$en,\"script\":\"$esc\",\"port\":\"$port\",\"protocol\":\"$proto\",\"filter_l7\":\"$l7\",\"hostlist\":\"$hl\",\"domain_count\":$cnt}"
+        local aobj="{\"section\":\"$sec\",\"service_key\":\"$key\",\"enabled\":$en,\"script\":\"$esc\",\"port\":\"$port\",\"protocol\":\"$proto\",\"hostlist\":\"$hl\",\"domain_count\":$cnt}"
+        if [ "$first_s" = "1" ]; then svc="$obj"; first_s=0; else svc="$svc,$obj"; fi
+        if [ "$first_a" = "1" ]; then strat="$aobj"; first_a=0; else strat="$strat,$aobj"; fi
+    done
+    printf '{"zapret2_running":"%s","version":"%s","services":{%s},"all_strategies":[%s]}\n' \
+        "$running" "$ver" "$svc" "$strat"
+}
+
 cmd_info() {
     ensure_dpi_service
     ensure_all_hostlists
     local zapret_running=$(get_dpi_service_status)
+
+    # На минимальных сборках OpenWrt нет Lua-модуля uci — тогда отчёт собираем через uci CLI.
+    if ! lua -e 'require("uci")' >/dev/null 2>&1; then
+        _info_json_shell
+        return 0
+    fi
 
     lua -e '
         local uci = require("uci").cursor()
