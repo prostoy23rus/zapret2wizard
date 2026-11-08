@@ -2609,19 +2609,26 @@ cmd_conflicts() {
 cmd_doctor() {
     local ok=1
     local checks=""
+    local quiet=0
+    [ "$1" = "--json" ] && quiet=1
+
     add_check() {
         local name="$1" state="$2" detail="$3" hint="$4"
         [ "$state" = "1" ] || ok=0
-        printf '  %-28s %s  %s\n' "$name" "$([ "$state" = "1" ] && echo OK || echo FAIL)" "$detail"
-        if [ "$state" != "1" ] && [ -n "$hint" ]; then
-            printf '      → %s\n' "$hint"
+        if [ "$quiet" = "0" ]; then
+            printf '  %-28s %s  %s\n' "$name" "$([ "$state" = "1" ] && echo OK || echo FAIL)" "$detail"
+            if [ "$state" != "1" ] && [ -n "$hint" ]; then
+                printf '      → %s\n' "$hint"
+            fi
         fi
         checks="$checks{\"name\":\"$name\",\"ok\":$([ "$state" = "1" ] && echo true || echo false),\"detail\":\"$detail\",\"hint\":\"$hint\"},"
     }
 
-    echo "=== Zapret2Wizard doctor ==="
     local arch=$(uname -m)
-    echo "  платформа: $arch, версия $(grep -o '"version": *"[^"]*"' /usr/share/blockcheckw/version.json 2>/dev/null | head -1 | cut -d'"' -f4)"
+    if [ "$quiet" = "0" ]; then
+        echo "=== Zapret2Wizard doctor ==="
+        echo "  платформа: $arch, версия $(grep -o '"version": *"[^"]*"' /usr/share/blockcheckw/version.json 2>/dev/null | head -1 | cut -d'"' -f4)"
+    fi
 
     if command -v nft >/dev/null 2>&1; then add_check "nftables" 1 "$(command -v nft)" ""; else add_check "nftables" 0 "nft не найден" "Установите nftables (пакет nftables)"; fi
 
@@ -3605,7 +3612,7 @@ case "$1" in
     metrics) cmd_metrics ;;
     toggle) shift; cmd_toggle_service "$@" ;;
     conflicts) cmd_conflicts ;;
-    doctor) cmd_doctor ;;
+    doctor) shift; cmd_doctor "$@" ;;
     install_engine) cmd_install_engine ;;
     *)
         echo "Usage: $0 {start|status|stop|apply|activate|delete_strategy|test|speedtest|info|logs|check_update|update|uninstall|diag|ensure_hostlists|read_hostlist|add_hostlist_domain|remove_hostlist_domain|write_hostlist|metrics|toggle|conflicts|doctor}"

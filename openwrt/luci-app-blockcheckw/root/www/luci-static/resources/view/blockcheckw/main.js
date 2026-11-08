@@ -222,7 +222,16 @@ function getZapretInfo() {
 	});
 }
 
-// Метрики последних проверок по сервисам и журнал событий.
+// Самодиагностика службы (движок, nft, конфигурация, служба).
+function getDoctor() {
+	return fs.exec(HELPER_BIN, ['doctor', '--json']).then(function(res) {
+		var out = (res && res.stdout) ? res.stdout : '';
+		var line = out.split('\n').filter(function(l) { return l.trim().charAt(0) === '{'; }).pop();
+		if (!line) return null;
+		try { return JSON.parse(line); } catch (e) { return null; }
+	}).catch(function() { return null; });
+}
+
 function getMetrics() {
 	return fs.exec(HELPER_BIN, ['metrics']).then(function(res) {
 		if (res && res.code === 0 && res.stdout) {
@@ -375,7 +384,8 @@ return view.extend({
 			return Promise.all([
 				checkHelperStatus(),
 				getZapretInfo(),
-				getMetrics()
+				getMetrics(),
+				getDoctor()
 			]);
 		});
 	},
@@ -384,6 +394,7 @@ return view.extend({
 		var statusData = data[0] || {};
 		var zapretInfo = data[1] || {};
 		var metricsData = data[2] || { tests: {}, history: [] };
+		var doctorInfo = data[3] || null;
 		var logsData = { scanner_log: 'Загрузка логов...', zapret2_log: 'Загрузка логов...', daemons: '' };
 		var curVer = zapretInfo.version || '0.15.12';
 		var versionInfo = {
@@ -960,6 +971,57 @@ return view.extend({
 			])
 		]);
 		mainLayout.appendChild(statsStrip);
+
+		// ── Баннер самовосстановления: не хватает движка или служба не готова ──
+		var repairCard = E('div', {
+			class: 'bcw-card',
+			style: 'display: none; margin-bottom: 16px; padding: 14px 18px; background: rgba(229, 96, 92, 0.10); border: 1px solid #e5605c;'
+		});
+		mainLayout.appendChild(repairCard);
+
+		function renderRepairBanner() {
+			if (!doctorInfo || doctorInfo.ok) { repairCard.style.display = 'none'; return; }
+			var failed = (doctorInfo.checks || []).filter(function(c) { return c && !c.ok; });
+			if (!failed.length) { repairCard.style.display = 'none'; return; }
+
+			var engineFailed = failed.some(function(c) { return c.name === 'движок nfqws2'; });
+			var nodes = [
+				E('div', { style: 'font-weight: 600; color: #e5605c; font-size: 14px;' }, '⚠ Служба не готова к работе'),
+				E('div', { style: 'font-size: 12.5px; color: var(--bcw-text-muted); margin-top: 4px;' },
+					failed.map(function(c) { return c.name + ': ' + c.detail; }).join(' · '))
+			];
+
+			if (engineFailed) {
+				nodes.push(E('button', {
+					class: 'bcw-btn-launch',
+					style: 'margin-top: 10px; padding: 8px 16px; font-size: 13px;',
+					click: function() {
+						var self = this;
+						self.disabled = true;
+						self.textContent = '⏳ Скачиваю движок nfqws2...';
+						fs.exec(HELPER_BIN, ['install_engine']).then(function(res) {
+							var out = null;
+							try { out = JSON.parse(res.stdout); } catch (e) {}
+							if (out && out.success) {
+								self.textContent = '✓ Движок установлен, перезагружаю страницу...';
+								setTimeout(function() { location.reload(); }, 1500);
+							} else {
+								self.disabled = false;
+								self.textContent = '✗ Не удалось скачать — повторите или поставьте вручную';
+							}
+						}).catch(function() {
+							self.disabled = false;
+							self.textContent = '✗ Ошибка установки';
+						});
+					}
+				}, '🛠 Установить движок nfqws2'));
+			}
+
+			repairCard.innerHTML = '';
+			repairCard.appendChild(E('div', {}, nodes));
+			repairCard.style.display = 'block';
+		}
+		renderRepairBanner();
 
 		// Target Selection Section (Tiles Grid)
 		// tcp16 — служебная техника для проверки DPI-лимита ~16 КБ. В интерфейсе
