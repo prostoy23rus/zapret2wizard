@@ -869,6 +869,32 @@ return view.extend({
 			])
 		]);
 		mainLayout.appendChild(headerCard);
+		// Статус службы мог измениться после подбора (она останавливается на время скана).
+		// Обновляем бейдж и, если служба поднялась, перечитываем данные страницы.
+		function refreshServiceBadge(reloadOnStart) {
+		    getZapretInfo().then(function(info) {
+		        var running = (info.zapret2_running === 'running');
+		        var wasOnline = zapretBadgeEl.classList.contains('online');
+		        zapretBadgeEl.className = 'bcw-header-item bcw-status-pill ' + (running ? 'online' : 'offline');
+		        zapretBadgeEl.textContent = '';
+		        zapretBadgeEl.appendChild(E('span', { class: 'bcw-status-dot' }));
+		        zapretBadgeEl.appendChild(E('span', {}, running ? 'Zapret2Wizard активен' : 'Zapret2Wizard остановлен'));
+		        zapretBadgeEl.title = running ? 'Служба активна и фильтрует трафик' : 'Служба остановлена — нажмите, чтобы запустить';
+		        if (running && !wasOnline && reloadOnStart) { location.reload(); }
+		    }).catch(function() {});
+		}
+		zapretBadgeEl.style.cursor = 'pointer';
+		zapretBadgeEl.addEventListener('click', function() {
+		    if (zapretBadgeEl.classList.contains('online')) { return; }
+		    fs.exec('/etc/init.d/zapret2wizard', ['start']).then(function() {
+		        setTimeout(function() { location.reload(); }, 1500);
+		    }).catch(function() {});
+		});
+		setInterval(function() { refreshServiceBadge(true); }, 20000);
+		document.addEventListener('visibilitychange', function() {
+		    if (!document.hidden) { refreshServiceBadge(true); }
+		});
+
 
 		// Update Notification Banner (Dynamic)
 		var updateBannerCard = E('div', {
