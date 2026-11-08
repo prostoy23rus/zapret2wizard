@@ -60,3 +60,21 @@ blockcheckw-helper start --target preset_youtube --mode smart --auto-apply 0
 ```sh
 cp /root/blockcheckw.bak /usr/bin/blockcheckw
 ```
+
+## 6. Проверки CI без отдельной Linux-машины
+
+В том же WSL можно прогнать весь набор проверок GitHub CI:
+
+```powershell
+wsl -d Ubuntu -u root -- bash /mnt/e/AI/zapret2wizard/scripts/wsl-verify.sh
+```
+
+Скрипт выполняет `cargo fmt --check`, `cargo clippy -- -D warnings` и
+`cargo test --lib --features otel`. На момент написания: форматирование — ок,
+clippy без предупреждений, 353 теста прошли.
+
+Требуется один раз доустановить компоненты:
+
+```bash
+rustup component add rustfmt clippy
+```
