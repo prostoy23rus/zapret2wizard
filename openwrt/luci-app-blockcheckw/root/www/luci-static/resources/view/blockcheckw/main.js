@@ -350,8 +350,7 @@ return view.extend({
 	load: function() {
 		return Promise.all([
 			checkHelperStatus(),
-			getZapretInfo(),
-			fs.exec(HELPER_BIN, ['ensure_hostlists']).catch(function() {})
+			getZapretInfo()
 		]);
 	},
 
