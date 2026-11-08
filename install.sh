@@ -333,6 +333,7 @@ mkdir -p /usr/share/zapret2wizard/lua /usr/share/zapret2wizard/fake /usr/share/z
 chmod 755 /www/luci-static/resources/view/blockcheckw /usr/share/blockcheckw /usr/share/zapret2wizard 2>/dev/null || true
 
 fetch_file "openwrt/luci-app-blockcheckw/root/usr/bin/blockcheckw-helper" /usr/bin/blockcheckw-helper 8
+chmod +x /usr/bin/blockcheckw-helper 2>/dev/null || true
 fetch_file "openwrt/luci-app-blockcheckw/root/usr/bin/circular-builder.lua" /usr/bin/circular-builder.lua 8
 fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/uci2config" /usr/share/zapret2wizard/uci2config 8
 fetch_file "strategies/zapret2_presets.json" /usr/share/blockcheckw/zapret2_presets.json 8
@@ -340,8 +341,10 @@ fetch_file "openwrt/version.json" /usr/share/blockcheckw/version.json 8
 fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/luci/menu.d/luci-app-blockcheckw.json" /usr/share/luci/menu.d/luci-app-blockcheckw.json 8 || true
 fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/rpcd/acl.d/luci-app-blockcheckw.json" /usr/share/rpcd/acl.d/luci-app-blockcheckw.json 8 || true
 fetch_file "openwrt/luci-app-blockcheckw/root/www/luci-static/resources/view/blockcheckw/main.js" /www/luci-static/resources/view/blockcheckw/main.js 8
+chmod 644 /www/luci-static/resources/view/blockcheckw/main.js 2>/dev/null || true
 
 # Ключевые файлы обязательны: без них интерфейс не запустится.
+chmod +x /usr/bin/blockcheckw-helper 2>/dev/null || true
 HELPER_SIZE=$(wc -c < /usr/bin/blockcheckw-helper 2>/dev/null || echo 0)
 MAINJS_SIZE=$(wc -c < /www/luci-static/resources/view/blockcheckw/main.js 2>/dev/null || echo 0)
 if [ "${HELPER_SIZE:-0}" -lt 50000 ] || [ "${MAINJS_SIZE:-0}" -lt 100000 ]; then
