@@ -249,7 +249,15 @@ prepare_environment() {
 # Чужие DPI-службы и движки не должны перехватывать наши очереди и метки.
 # Гасим известные конфликтующие службы и освобождаем очередь от посторонних
 # nfqws/nfqws2 (свои определяем по пути zapret2wizard в командной строке).
+# Осиротевшие процессы сканера держат тестовый движок на очереди 200 и мешают
+# службе: убираем их до старта.
+kill_orphan_scans() {
+    pkill -9 -f 'blockcheckw check' 2>/dev/null || true
+    pkill -9 -f 'blockcheckw-helper start' 2>/dev/null || true
+}
+
 guard_conflicts() {
+    kill_orphan_scans
 	local svc
 	for svc in zapret2 zapret zapret-manager blockcheck; do
 		[ -x "/etc/init.d/$svc" ] || continue

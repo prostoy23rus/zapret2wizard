@@ -930,6 +930,9 @@ cmd_start() {
         }
         trap cleanup_subshell EXIT INT TERM
 
+        # Осиротевшие проверки прошлых запусков
+        pkill -9 -f 'blockcheckw check' 2>/dev/null || true
+
         # Kill any zombie/orphan nfqws2 holding queue 200 from previous runs
         local stray_pids=$(ps -w | grep -E 'nfqws2.*--qnum=200' | grep -v grep | awk '{print $1}')
         if [ -n "$stray_pids" ]; then
