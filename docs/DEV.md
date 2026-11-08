@@ -20,6 +20,23 @@
 `cargo build --release` проверяет **только** компиляцию. Код может собираться, но падать на CI из-за clippy warnings или
 неотформатированного кода.
 
+### Проверка на Windows
+
+Крейт собирается под Linux: зависимости `nix`, `libc` и работа с netlink/nftables на Windows не компилируются.
+Полноценный `cargo check`/`test` локально на Windows не пройдёт — нужен Linux (CI, dev-контейнер или WSL).
+
+Что реально работает на Windows:
+
+```powershell
+cargo fmt --check                      # синтаксис и форматирование — да
+rustup target add x86_64-unknown-linux-musl
+cargo check --target x86_64-unknown-linux-musl   # только при наличии MSVC Build Tools (link.exe)
+```
+
+Сборочные скрипты зависимостей компилируются под хост и требуют линкер. Без Visual Studio Build Tools
+(`Microsoft.VisualStudio.2022.BuildTools` с компонентом C++) `cargo check` падает с
+`linker link.exe not found` — это ограничение окружения, а не ошибка кода.
+
 ## Dev-контейнер
 
 Запуск `blockcheckw` локально требует root, nftables и собранный nfqws2. Чтобы не засорять хост — dev-контейнер
