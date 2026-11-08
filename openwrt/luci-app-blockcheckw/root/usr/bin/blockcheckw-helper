@@ -2978,16 +2978,39 @@ cmd_check_update() {
     fi
 
     local tmp_ver="/tmp/bcw_remote_ver.json"
-    rm -f "$tmp_ver"
+    local tmp_api="/tmp/bcw_remote_api.json"
+    rm -f "$tmp_ver" "$tmp_api"
 
-    # 1. Direct GitHub Raw first (bypasses CDN edge cache, always fresh)
+    # 1. GitHub API (не кэшируется CDN, отдаёт актуальный файл напрямую).
+    curl -fsSL -k --connect-timeout 4 -m 10 \
+        -H "Accept: application/vnd.github.raw" \
+        -H "Cache-Control: no-cache" \
+        "https://api.github.com/repos/prostoy23rus/zapret2wizard/contents/openwrt/version.json?ref=main&t=$(date +%s)" \
+        -o "$tmp_api" 2>/dev/null
+
+    # 2. GitHub Raw с обходом кэша (запасной путь).
     for gh_ip in 185.199.108.133 185.199.111.133 185.199.109.133 185.199.110.133; do
-        curl -fsSL -k --connect-timeout 2 -m 4 --resolve "raw.githubusercontent.com:443:$gh_ip" "https://raw.githubusercontent.com/prostoy23rus/zapret2wizard/main/openwrt/version.json?_t=$(date +%s)" -o "$tmp_ver" 2>/dev/null
+        curl -fsSL -k --connect-timeout 2 -m 4 \
+            -H "Cache-Control: no-cache" -H "Pragma: no-cache" \
+            --resolve "raw.githubusercontent.com:443:$gh_ip" \
+            "https://raw.githubusercontent.com/prostoy23rus/zapret2wizard/main/openwrt/version.json?_t=$(date +%s)" \
+            -o "$tmp_ver" 2>/dev/null
         if [ -s "$tmp_ver" ] && ! head -n 3 "$tmp_ver" | grep -qiE '404|not found|<html>'; then
             break
         fi
         rm -f "$tmp_ver"
     done
+
+    # 3. Если CDN отдал устаревшую версию, а API — свежую, берём API.
+    if [ -s "$tmp_api" ] && head -n 3 "$tmp_api" | grep -q '"version"'; then
+        local api_v raw_v
+        api_v=$(grep -o '"version"[^,]*' "$tmp_api" | head -1 | grep -o '[0-9][0-9.]*')
+        raw_v=$(grep -o '"version"[^,]*' "$tmp_ver" 2>/dev/null | head -1 | grep -o '[0-9][0-9.]*')
+        if [ -z "$raw_v" ] || [ "$(printf '%s\n%s\n' "$api_v" "$raw_v" | sort -V | tail -1)" = "$api_v" ]; then
+            cp -f "$tmp_api" "$tmp_ver"
+        fi
+    fi
+    rm -f "$tmp_api"
 
     # 2. If direct GitHub was unreachable, purge jsDelivr and fetch via mirrors
     if [ ! -s "$tmp_ver" ]; then

@@ -3140,6 +3140,8 @@ return view.extend({
 			has_update: false,
 			latest_version: curVer
 		};
+		// Не показываем одно и то же уведомление дважды подряд.
+		var lastNoUpdateNotifyAt = 0;
 
 		function confirmRunUpdate(targetVer) {
 			bcwShowModal('Обновление службы Zapret2Wizard', [
@@ -3260,7 +3262,8 @@ return view.extend({
 
 				updateBannerCard.style.display = 'none';
 
-				if (isManual) {
+				if (isManual && (Date.now() - lastNoUpdateNotifyAt > 8000)) {
+					lastNoUpdateNotifyAt = Date.now();
 					ui.addNotification(null, E('p', {}, '✓ У вас установлена последняя версия Zapret2Wizard (v' + (parsed.current_version || curVer) + '). Обновлений не требуется.'), 'info');
 				}
 			}
