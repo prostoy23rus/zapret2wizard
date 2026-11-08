@@ -262,7 +262,27 @@ ensure_firewall_quic_reject() {
     fi
 }
 
+# Ревизия набора списков по умолчанию. Поднимать при изменении пресетов,
+# чтобы полная пересборка списков отработала один раз после обновления.
+HOSTLISTS_REV="2026-11-08.1"
+HOSTLISTS_MARKER="/etc/zapret2wizard/.hostlists.rev"
+
+# Быстрая проверка: все списки на месте, секции и правило QUIC заведены.
+# Нужна, чтобы не гонять полный ensure на каждый вызов info из интерфейса.
+_hostlists_ready() {
+    local f
+    for f in youtube discord x instagram twitch user user_exclude; do
+        [ -s "/etc/zapret2wizard/ipset/zapret_hosts_$f.txt" ] || return 1
+    done
+    uci -q get zapret2wizard.list_hosts_user_exclude >/dev/null 2>&1 || return 1
+    uci -q get firewall.reject_quic >/dev/null 2>&1 || return 1
+    return 0
+}
+
 ensure_all_hostlists() {
+    if [ "$(cat "$HOSTLISTS_MARKER" 2>/dev/null)" = "$HOSTLISTS_REV" ] && _hostlists_ready; then
+        return 0
+    fi
     ensure_firewall_quic_reject
     local ipset_dir="/etc/zapret2wizard/ipset"
     mkdir -p "$ipset_dir" 2>/dev/null
@@ -294,6 +314,8 @@ ensure_all_hostlists() {
     if [ "$before_changes" != "$after_changes" ] && [ -n "$after_changes" ]; then
         uci commit zapret2wizard 2>/dev/null || true
     fi
+
+    printf '%s\n' "$HOSTLISTS_REV" > "$HOSTLISTS_MARKER" 2>/dev/null || true
 }
 
 write_status() {
