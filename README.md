@@ -407,3 +407,20 @@ sh -c "$(curl -sSL https://raw.githubusercontent.com/prostoy23rus/zapret2wizard/
 * **Модификация, LuCI интерфейс, Генетический Circular-синтез, Discord VoiceFlow и Speedtest**: [prostoy23rus](https://github.com/prostoy23rus/zapret2wizard).
 
 Лицензия: [MIT License](LICENSE).
+
+## Если обход не работает
+
+Проверьте одной командой:
+
+``sh
+blockcheckw-helper selftest
+``
+
+| Симптом | Причина | Что делать |
+|---|---|---|
+| движки nfqws2: 2 вместо 3 | каталоги /etc/zapret2wizard недоступны пользователю daemon | chmod 755 /etc/zapret2wizard /etc/zapret2wizard/ipset и chmod 644 /etc/zapret2wizard/ipset/*.txt, затем перезапуск службы |
+| http-код: 000, байт 0 | десинк не применяется | doctor: должно быть low offloading OK отключён; служба отключает ускорение сама при старте |
+| status: degraded, страница обрывается на 16 КБ | ТСПУ режет поток | запустите подбор: он проверяет кандидатов полной загрузкой и отклоняет обрезанные |
+| всё зелёное, но сайт не открывается | кэш браузера / QUIC | Ctrl+F5, отключите QUIC в браузере |
+
+Подбор занимает 5–10 минут: каждый кандидат проверяется реальной загрузкой до 256 КБ.
