@@ -222,6 +222,23 @@ function getZapretInfo() {
 	});
 }
 
+// Метрики последних проверок по сервисам и журнал событий.
+function getMetrics() {
+	return fs.exec(HELPER_BIN, ['metrics']).then(function(res) {
+		if (res && res.code === 0 && res.stdout) {
+			try {
+				var parsed = JSON.parse(res.stdout);
+				if (parsed && typeof parsed === 'object') {
+					return { tests: parsed.tests || {}, history: parsed.history || [] };
+				}
+			} catch (e) {}
+		}
+		return { tests: {}, history: [] };
+	}).catch(function() {
+		return { tests: {}, history: [] };
+	});
+}
+
 function getLogs() {
 	return fs.exec(HELPER_BIN, ['logs']).then(function(res) {
 		if (res && res.code === 0 && res.stdout) {
@@ -351,13 +368,15 @@ return view.extend({
 	load: function() {
 		return Promise.all([
 			checkHelperStatus(),
-			getZapretInfo()
+			getZapretInfo(),
+			getMetrics()
 		]);
 	},
 
 	render: function(data) {
 		var statusData = data[0] || {};
 		var zapretInfo = data[1] || {};
+		var metricsData = data[2] || { tests: {}, history: [] };
 		var logsData = { scanner_log: 'Загрузка логов...', zapret2_log: 'Загрузка логов...', daemons: '' };
 		var curVer = zapretInfo.version || '0.15.12';
 		var versionInfo = {
@@ -874,7 +893,16 @@ return view.extend({
 			'.bcw-matrix-details{display:grid;grid-template-columns:1fr 240px;gap:14px;padding:4px 0 8px;}',
 			'@media(max-width:1000px){.bcw-matrix-details{grid-template-columns:1fr;}}',
 			'.bcw-matrix-code{margin:0;background:#0c1016;border:1px solid var(--bcw-border-divider,#2a313d);border-radius:9px;padding:12px;font:12px/1.5 ui-monospace,monospace;color:#a9bcd8;white-space:pre-wrap;}',
-			'.bcw-matrix-actions{display:flex;flex-direction:column;gap:8px;}'
+			'.bcw-matrix-actions{display:flex;flex-direction:column;gap:8px;}',
+			'.bcw-matrix-check{font-size:12.5px;color:var(--bcw-text-muted,#93a0b4);white-space:nowrap;}',
+			'.bcw-history{display:flex;flex-direction:column;}',
+			'.bcw-history-row{display:grid;grid-template-columns:56px 28px minmax(0,1fr);gap:10px;align-items:center;padding:12px 16px;border-top:1px solid var(--bcw-border-divider,#2a313d);}',
+			'.bcw-history-time{font-size:12px;color:var(--bcw-text-muted,#93a0b4);font-variant-numeric:tabular-nums;}',
+			'.bcw-history-icon{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-size:13px;}',
+			'.bcw-history-icon.ok{background:rgba(53,192,122,.15);color:#35c07a;}',
+			'.bcw-history-icon.info{background:rgba(76,141,255,.15);color:#4c8dff;}',
+			'.bcw-history-text{font-size:13px;}',
+			'.bcw-history-empty{padding:18px 16px;color:var(--bcw-text-muted,#93a0b4);font-size:13px;}'
 		].join('\n');
 		container.appendChild(dashStyles);
 
@@ -882,6 +910,17 @@ return view.extend({
 			if (!t) return 'не проверялось';
 			var map = { sni_blocked: 'SNI blocked', throttled: 'лимит скорости', not_blocked: 'не заблокирован', ip_blocked: 'по IP', dns_blocked: 'по DNS' };
 			return map[t] || String(t).replace(/_/g, ' ');
+		}
+
+		// Время и объём последней проверки сервиса: «19:52 · 966 КБ».
+		function fmtLastTest(key) {
+			var t = (metricsData.tests || {})[key];
+			if (!t || !t.time) return '—';
+			var d = new Date(t.time * 1000);
+			var hh = ('0' + d.getHours()).slice(-2);
+			var mm = ('0' + d.getMinutes()).slice(-2);
+			var kb = Math.floor((t.size || 0) / 1024);
+			return hh + ':' + mm + (kb > 0 ? ' · ' + kb + ' КБ' : '');
 		}
 		var enabledCount = 0, totalDomains = 0;
 		var svcAll = (zapretInfo && zapretInfo.services) || {};
@@ -1484,16 +1523,86 @@ return view.extend({
 				])
 			]),
 			logTabsBar,
-			E('div', { style: 'margin-top: 10px;' }, [ consoleLogEl ])
+			E('div', { style: 'margin-top: 10px;' }, [
+				E('input', {
+					class: 'cbi-input-text',
+					type: 'text',
+					placeholder: 'Фильтр по тексту лога…',
+					style: 'width: 100%; margin-bottom: 8px;',
+					input: function() { applyLogFilter(); }
+				}),
+				consoleLogEl
+			])
 		]);
 		mainLayout.appendChild(logCard);
+
+		var logFilterEl = logCard.querySelector('input[placeholder^="Фильтр"]');
+		function applyLogFilter() {
+			var raw = consoleLogEl.getAttribute('data-raw');
+			if (raw === null) { raw = consoleLogEl.textContent; consoleLogEl.setAttribute('data-raw', raw); }
+			var q = (logFilterEl && logFilterEl.value || '').trim().toLowerCase();
+			if (!q) { consoleLogEl.textContent = raw; return; }
+			consoleLogEl.textContent = raw.split('\n').filter(function(line) {
+				return line.toLowerCase().indexOf(q) !== -1;
+			}).join('\n');
+		}
 		// Основные вкладки страницы: собираются из уже готовых карточек,
 		// чтобы не переписывать логику их построения.
 		var MAIN_TAB_KEY = 'bcw_main_tab';
 
+		// ── Вкладка «История»: лента событий из helper metrics ──
+		var historyListEl = E('div', { class: 'bcw-history' });
+		var historyCard = E('div', { class: 'bcw-card' }, [
+			E('div', { class: 'bcw-card-header' }, [
+				E('h3', { class: 'bcw-card-title' }, 'История подбора и проверок'),
+				E('div', { style: 'display:flex; gap:8px; align-items:center;' }, [
+					E('span', { class: 'bcw-chip' }, 'последние 60 событий'),
+					E('button', {
+						class: 'bcw-btn-sm cbi-button cbi-button-neutral',
+						click: function() {
+							var btn = this;
+							btn.disabled = true;
+							getMetrics().then(function(m) {
+								metricsData = m;
+								rebuildHistory();
+								btn.disabled = false;
+							});
+						}
+					}, '🔄 Обновить')
+				])
+			]),
+			(historyListEl)
+		]);
+
+		function rebuildHistory() {
+			if (!historyListEl) return;
+			var names = { youtube: 'YouTube', discord: 'Discord', instagram: 'Instagram', x: 'X / Twitter', twitch: 'Twitch', general: 'Общие сайты' };
+			historyListEl.innerHTML = '';
+			var items = (metricsData.history || []);
+			if (!items.length) {
+				historyListEl.appendChild(E('div', { class: 'bcw-history-empty' }, 'Событий пока нет — запустите подбор или проверку.'));
+				return;
+			}
+			items.forEach(function(ev) {
+				var d = new Date((ev.t || 0) * 1000);
+				var hh = ('0' + d.getHours()).slice(-2);
+				var mm = ('0' + d.getMinutes()).slice(-2);
+				var kind = ev.type || 'event';
+				var icon = kind === 'test' ? '✓' : (kind === 'apply' ? '⚡' : (kind === 'scan_done' ? '🏁' : '🔍'));
+				var cls = kind === 'test' ? 'ok' : (kind === 'apply' ? 'info' : (kind === 'scan_done' ? 'ok' : 'info'));
+				historyListEl.appendChild(E('div', { class: 'bcw-history-row' }, [
+					E('div', { class: 'bcw-history-time' }, hh + ':' + mm),
+					E('div', { class: 'bcw-history-icon ' + cls }, icon),
+					E('div', { class: 'bcw-history-text' }, (names[ev.target] ? names[ev.target] + ' — ' : '') + (ev.text || kind))
+				]));
+			});
+		}
+		rebuildHistory();
+
 		var mainTabDefs = [
 			{ id: 'scan', label: '🔍 Сканер', nodes: [targetSectionCard, unifiedScanCard] },
 			{ id: 'results', label: '📊 Результаты', nodes: [activeStratCard, resultsCard] },
+			{ id: 'history', label: '🕘 История', nodes: [historyCard] },
 			{ id: 'logs', label: '📜 Логи', nodes: [logCard] }
 		];
 
@@ -1797,7 +1906,7 @@ return view.extend({
 				var chev = E('span', { class: 'bcw-matrix-chev' }, '▸');
 
 				var detailsRow = E('tr', { class: 'bcw-matrix-exp', style: 'display: none;' }, [
-					E('td', { colspan: '5' }, [
+					E('td', { colspan: '6' }, [
 						E('div', { class: 'bcw-matrix-details' }, [
 							E('pre', { class: 'bcw-matrix-code' }, configured ? scriptFull : 'Стратегия ещё не подобрана — запустите подбор.'),
 							E('div', { class: 'bcw-matrix-actions' }, [
@@ -1847,6 +1956,7 @@ return view.extend({
 					E('td', {}, [
 						E('div', { class: 'bcw-matrix-strategy' }, configured ? scriptShort : '—')
 					]),
+					E('td', { class: 'bcw-matrix-check' }, fmtLastTest(svc.key)),
 					E('td', {}, String(domainCount)),
 					E('td', {}, [statusChip]),
 					E('td', {}, [chev])
@@ -1859,10 +1969,11 @@ return view.extend({
 			var tableEl = E('table', { class: 'bcw-matrix-table' }, [
 				E('thead', {}, [
 					E('tr', {}, [
-						E('th', { style: 'width: 24%;' }, 'Сервис'),
-						E('th', { style: 'width: 36%;' }, 'Стратегия'),
-						E('th', { style: 'width: 12%;' }, 'Домены'),
-						E('th', { style: 'width: 16%;' }, 'Статус'),
+						E('th', { style: 'width: 22%;' }, 'Сервис'),
+						E('th', { style: 'width: 30%;' }, 'Стратегия'),
+						E('th', { style: 'width: 14%;' }, 'Проверка'),
+						E('th', { style: 'width: 10%;' }, 'Домены'),
+						E('th', { style: 'width: 18%;' }, 'Статус'),
 						E('th', { style: 'width: 6%;' }, '')
 					])
 				]),
@@ -2090,6 +2201,8 @@ return view.extend({
 					text = lg.daemons || 'Активные процессы nfqws2 не обнаружены.';
 				}
 				consoleLogEl.textContent = text;
+				consoleLogEl.setAttribute('data-raw', text);
+				try { applyLogFilter(); } catch (e) {}
 				if (autoLogScroll) {
 					consoleLogEl.scrollTop = consoleLogEl.scrollHeight;
 				}

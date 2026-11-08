@@ -12,6 +12,12 @@ TURBO_FILE="/tmp/blockcheckw_turbo.txt"
 PRESETS_FILE="/usr/share/blockcheckw/zapret2_presets.json"
 CIRCULAR_BUILDER="/usr/bin/circular-builder.lua"
 
+# Результаты последних проверок по сервисам и журнал событий для вкладок
+# «Результаты» и «История». Обычные JSON-файлы, читаются командой metrics.
+METRICS_FILE="/etc/zapret2wizard/tests.json"
+HISTORY_FILE="/etc/zapret2wizard/history.jsonl"
+HISTORY_LIMIT=200
+
 VERSION_FILE="/usr/share/blockcheckw/version.json"
 REPO_RAW="https://raw.githubusercontent.com/prostoy23rus/zapret2wizard/main"
 
@@ -959,6 +965,7 @@ cmd_start() {
         fi
 
         echo "[blockcheckw-helper] Starting Unified Smart Scan for $domain (target=$target, workers=$workers, auto_apply=$auto_apply)..." >> "$LOG_FILE"
+        history_add "scan_start" "$(metric_target_key "$target")" "Начат подбор для $domain"
         write_status "running" 15 "Фаза 1: Экспресс-тест векторов DPI ($domain)..."
 
         local probe_corpus="/tmp/blockcheckw_probe_corpus.txt"
@@ -1334,6 +1341,8 @@ EOF
             fi
             write_status "done" 100 "$final_msg" ",\"strategies\":$strats_json$apply_info"
             echo "[blockcheckw-helper] Finished successfully. Found $found_count working strategies." >> "$LOG_FILE"
+            history_add "scan_done" "$(metric_target_key "$target")" "Найдено рабочих стратегий: $found_count"
+            [ "$auto_apply" = "1" ] && history_add "apply" "$(metric_target_key "$target")" "Стратегия применена в Zapret2"
         else
             if [ "$exit_code" -ne 0 ]; then
                 local last_err=$(tail -n 5 "$LOG_FILE" 2>/dev/null | grep -E 'error|Error|failed|FATAL' | tail -n 1)
@@ -1828,7 +1837,7 @@ cmd_delete_strategy() {
     echo "{\"success\":true,\"message\":\"Запись $section удалена.\"}"
 }
 
-cmd_test() {
+cmd_test_impl() {
     local target_or_url="${1:-preset_youtube}"
     local custom_url="$2"
 
@@ -2026,6 +2035,142 @@ local resp = {
 }
 
 print(json.stringify(resp))
+EOF
+}
+
+# Нормализует идентификатор цели к ключу сервиса в интерфейсе.
+metric_target_key() {
+    case "$1" in
+        preset_youtube|youtube) echo "youtube" ;;
+        preset_discord|discord) echo "discord" ;;
+        preset_instagram|instagram) echo "instagram" ;;
+        preset_x|x) echo "x" ;;
+        preset_twitch|twitch) echo "twitch" ;;
+        builtin|general|user) echo "general" ;;
+        *) echo "$1" ;;
+    esac
+}
+
+# Записывает результат проверки в tests.json и строку в историю.
+record_test_metrics() {
+    local raw="$1"
+    local key=$(metric_target_key "${2:-unknown}")
+    [ -n "$raw" ] || return 0
+    local tmp="/tmp/.bcw_test_$$.json"
+    printf '%s' "$raw" > "$tmp" 2>/dev/null || return 0
+    lua - "$METRICS_FILE" "$HISTORY_FILE" "$key" "$HISTORY_LIMIT" "$tmp" << 'EOF' 2>/dev/null
+local json = require("luci.jsonc")
+local metrics_file, history_file, key, limit, raw_file = arg[1], arg[2], arg[3], tonumber(arg[4]) or 200, arg[5]
+local raw = ""
+local rf = io.open(raw_file, "r")
+if rf then raw = rf:read("*a") or ""; rf:close() end
+local resp = json.parse(raw)
+if not resp or type(resp) ~= "table" then return end
+
+local f = io.open(metrics_file, "r")
+local store = {}
+if f then store = json.parse(f:read("*a")) or {}; f:close() end
+if type(store) ~= "table" then store = {} end
+
+local total_size = 0
+if type(resp.endpoints) == "table" then
+    for _, ep in ipairs(resp.endpoints) do total_size = total_size + (tonumber(ep.size_bytes) or 0) end
+end
+store[key] = {
+    time = os.time(),
+    status = resp.overall_status or "unknown",
+    code = tostring(resp.http_code or ""),
+    size = total_size,
+    speed = tonumber(resp.avg_speed_kbs or 0) or 0
+}
+local out = io.open(metrics_file, "w")
+if out then out:write(json.stringify(store)); out:close() end
+
+local size_kb = math.floor((store[key].size or 0) / 1024)
+local st = store[key].status
+local text = (st == "optimal" and "проверка пройдена" or (st == "degraded" and "частично доступно" or "недоступно"))
+    .. (size_kb > 0 and (" · " .. size_kb .. " КБ") or "")
+
+local line = json.stringify({ t = os.time(), type = "test", target = key, status = st, text = text })
+local h = io.open(history_file, "a")
+if h then h:write(line, "\n"); h:close() end
+
+-- подрезаем историю, чтобы файл не рос бесконечно
+local hf = io.open(history_file, "r")
+if hf then
+    local lines = {}
+    for l in hf:lines() do if l ~= "" then table.insert(lines, l) end end
+    hf:close()
+    if #lines > limit then
+        local trimmed = io.open(history_file, "w")
+        if trimmed then
+            for i = #lines - limit + 1, #lines do trimmed:write(lines[i], "\n") end
+            trimmed:close()
+        end
+    end
+end
+EOF
+    rm -f "$tmp" 2>/dev/null || true
+}
+
+# Универсальная запись события в историю: history_add <type> <target> <text>
+history_add() {
+    local etype="${1:-event}" etarget="${2:-}" etext="${3:-}"
+    lua - "$HISTORY_FILE" "$etype" "$etarget" "$etext" "$HISTORY_LIMIT" << 'EOF' 2>/dev/null
+local json = require("luci.jsonc")
+local file, etype, etarget, etext, limit = arg[1], arg[2], arg[3], arg[4], tonumber(arg[5]) or 200
+local line = json.stringify({ t = os.time(), type = etype, target = etarget, text = etext })
+local h = io.open(file, "a")
+if h then h:write(line, "\n"); h:close() end
+local hf = io.open(file, "r")
+if hf then
+    local lines = {}
+    for l in hf:lines() do if l ~= "" then table.insert(lines, l) end end
+    hf:close()
+    if #lines > limit then
+        local trimmed = io.open(file, "w")
+        if trimmed then
+            for i = #lines - limit + 1, #lines do trimmed:write(lines[i], "\n") end
+            trimmed:close()
+        end
+    end
+end
+EOF
+}
+
+cmd_test() {
+    local out
+    out=$(cmd_test_impl "$@")
+    printf '%s\n' "$out"
+    record_test_metrics "$out" "${1:-preset_youtube}"
+}
+
+# Отдаёт метрики последних проверок и журнал событий одним JSON.
+cmd_metrics() {
+    lua - "$METRICS_FILE" "$HISTORY_FILE" << 'EOF' 2>/dev/null
+local json = require("luci.jsonc")
+local mf, hf = arg[1], arg[2]
+local tests = {}
+local f = io.open(mf, "r")
+if f then tests = json.parse(f:read("*a")) or {}; f:close() end
+if type(tests) ~= "table" then tests = {} end
+
+local history = {}
+local h = io.open(hf, "r")
+if h then
+    for l in h:lines() do
+        if l ~= "" then
+            local o = json.parse(l)
+            if o then table.insert(history, o) end
+        end
+    end
+    h:close()
+end
+
+local out = {}
+local start = math.max(1, #history - 59)
+for i = #history, start, -1 do table.insert(out, history[i]) end
+print(json.stringify({ tests = tests, history = out }))
 EOF
 }
 
@@ -3187,8 +3332,9 @@ case "$1" in
     add_hostlist_domain) shift; cmd_add_hostlist_domain "$@" ;;
     remove_hostlist_domain) shift; cmd_remove_hostlist_domain "$@" ;;
     write_hostlist) shift; cmd_write_hostlist "$@" ;;
+    metrics) cmd_metrics ;;
     *)
-        echo "Usage: $0 {start|status|stop|apply|activate|delete_strategy|test|speedtest|info|logs|check_update|update|uninstall|diag|ensure_hostlists|read_hostlist|add_hostlist_domain|remove_hostlist_domain|write_hostlist}"
+        echo "Usage: $0 {start|status|stop|apply|activate|delete_strategy|test|speedtest|info|logs|check_update|update|uninstall|diag|ensure_hostlists|read_hostlist|add_hostlist_domain|remove_hostlist_domain|write_hostlist|metrics}"
         exit 1
         ;;
 esac
