@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.18.9] (2026-11-08)
+
+### Автономный пакет
+* packaging/build.py собирает бандл dist/zapret2wizard-<ver>-<arch>-bundle.tar.gz: внутри LuCI-приложение, helper, сканер lockcheckw, движок 
+fqws2, конфиг, init-скрипт, Lua-модули, fake-блобы и списки доменов. Установка без интернета.
+* packaging/build-ipk.sh собирает штатный .ipk (GNU ar + conffiles + postinst/prerm).
+* Установщик бандла не перетирает существующий /etc/config/zapret2wizard со стратегиями.
+* docs/PACKAGING.md — сборка и установка обоих форматов.
+
 ## [0.18.8] (2026-11-08)
 
 ### Полная сборка с движком
