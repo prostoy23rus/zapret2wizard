@@ -1347,8 +1347,10 @@ EOF
             fi
             rm -f "$verified"
 
+            # Circular-стратегия — это один набор аргументов, разбитый на строки.
+            # Склеиваем его в одну строку, иначе применяются обрывки вида "--payload=tls_client_hello".
             if [ "$do_circular" = "1" ] && [ -f "$OUTPUT_CIRCULAR" ] && [ -s "$OUTPUT_CIRCULAR" ]; then
-                head -n 2 "$OUTPUT_CIRCULAR" >> "$candidates"
+                tr '\n' ' ' < "$OUTPUT_CIRCULAR" | sed 's/  */ /g' | sed 's/^ //; s/ $//' >> "$candidates"
             fi
             if [ -f "$OUTPUT_VANILLA" ] && [ -s "$OUTPUT_VANILLA" ]; then
                 head -n 8 "$OUTPUT_VANILLA" >> "$candidates"
@@ -1602,6 +1604,12 @@ cmd_apply() {
 
     if [ -n "$script_file" ] && [ -f "$script_file" ]; then
         script_text=$(cat "$script_file")
+    fi
+
+    # Неполная стратегия (обрывок вроде "--payload=tls_client_hello") ломает обход.
+    if [ -n "$script_text" ] && ! printf '%s' "$script_text" | grep -q -- '--lua-desync\|--new\|--filter'; then
+        echo '{"success":false,"error":"Стратегия неполная: нет --lua-desync"}'
+        return 1
     fi
 
     if [ -z "$target" ] || [ -z "$script_text" ]; then
