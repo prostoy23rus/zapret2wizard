@@ -361,6 +361,17 @@ for lua_script in zapret-lib.lua zapret-antidpi.lua zapret-auto.lua zapret-obfs.
     fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/lua/$lua_script" "/usr/share/zapret2wizard/lua/$lua_script" 8 || true
 done
 
+# Установка fake-блобов: полный список из openwrt/fakes.list (иначе — базовый набор)
+FAKES_LIST="/tmp/bcw_fakes.list"
+if fetch_file "openwrt/fakes.list" "$FAKES_LIST" 8 && [ -s "$FAKES_LIST" ]; then
+    echo -e "${BLUE}ℹ${NC} Скачивание fake-блобов по полному списку ($(wc -l < "$FAKES_LIST") шт.)..."
+    while read -r fb; do
+        [ -n "$fb" ] || continue
+        fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/fake/$fb" "/usr/share/zapret2wizard/fake/$fb" 8 || true
+    done < "$FAKES_LIST"
+    rm -f "$FAKES_LIST"
+fi
+
 # Установка ключевых fake-блобов
 for fake_blob in stun.bin quic_initial_dbankcloud_ru.bin quic_3.bin quic_4.bin quic_initial_vk_com.bin quic_initial_www_google_com.bin quic_initial_facebook_com.bin tls_clienthello_gosuslugi_ru.bin tls_clienthello_sberbank_ru.bin tls_clienthello_t2_ru.bin tls_clienthello_vk_com.bin tls_clienthello_www_google_com.bin tls_clienthello_www_4pda_to.bin tls_clienthello_max_ru.bin tls_clienthello_iana_org.bin tls_alert.bin discord-ip-discovery-with-port.bin discord-ip-discovery-without-port.bin ACTIVE_GAME_UDP.bin zero_1024.bin zero_512.bin zero_256.bin wireguard_initiation.bin wireguard_response.bin; do
     fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/fake/$fake_blob" "/usr/share/zapret2wizard/fake/$fake_blob" 8 || true

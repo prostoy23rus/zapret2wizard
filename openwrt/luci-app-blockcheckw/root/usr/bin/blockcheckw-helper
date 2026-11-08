@@ -2632,6 +2632,22 @@ cmd_doctor() {
 
     if command -v nft >/dev/null 2>&1; then add_check "nftables" 1 "$(command -v nft)" ""; else add_check "nftables" 0 "nft не найден" "Установите nftables (пакет nftables)"; fi
 
+    local eng_ours=0 ec en
+    for ec in /proc/[0-9]*/comm; do
+        [ -r "$ec" ] || continue
+        en=$(cat "$ec" 2>/dev/null)
+        case "$en" in nfqws2|nfqws) ;; *) continue ;; esac
+        local ep=${ec#/proc/}; ep=${ep%/comm}
+        case "$(tr '\0' ' ' < "/proc/$ep/cmdline" 2>/dev/null)" in
+            *zapret2wizard*) eng_ours=$((eng_ours + 1)) ;;
+        esac
+    done
+    if [ "$eng_ours" -ge 1 ]; then
+        add_check "наши движки" 1 "$eng_ours запущено" ""
+    else
+        add_check "наши движки" 0 "ни один экземпляр nfqws2 не запущен" "Перезапустите службу и проверьте лог: logread | grep -i nfqws | tail -20"
+    fi
+
     local fo=$(uci -q get firewall.@defaults[0].flow_offloading)
     local fohw=$(uci -q get firewall.@defaults[0].flow_offloading_hw)
     if [ "$fo" = "1" ] || [ "$fohw" = "1" ]; then
@@ -2814,6 +2830,7 @@ cmd_selftest() {
 
     echo "--- ошибки движка ---"
     logread 2>/dev/null | grep -iE 'nfqws|zapret2wizard' | tail -5 || echo "(нет записей)"
+    logread 2>/dev/null | grep -iE 'lua|blob|no such file' | tail -4 || true
 
     echo "--- последние строки лога ---"
     tail -n 6 /tmp/blockcheckw_run.log 2>/dev/null || echo "(лог пуст)"
