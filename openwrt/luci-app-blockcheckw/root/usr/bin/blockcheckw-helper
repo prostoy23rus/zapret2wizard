@@ -3055,7 +3055,8 @@ _info_json_shell() {
         case "$hl" in
             list_hosts_*)
                 local f="/etc/zapret2wizard/ipset/zapret_hosts_${hl#list_hosts_}.txt"
-                [ -f "$f" ] && cnt=$(grep -vc '^#' "$f" 2>/dev/null || echo 0)
+                if [ -f "$f" ]; then cnt=$(grep -vc '^#' "$f" 2>/dev/null); fi
+                cnt=${cnt:-0}
                 ;;
         esac
         local esc=$(printf '%s' "$script" | sed 's/\\/\\\\/g; s/"/\\"/g')
@@ -3068,7 +3069,8 @@ _info_json_shell() {
     for f in /etc/zapret2wizard/ipset/zapret_hosts_*.txt; do
         [ -f "$f" ] || continue
         local k=$(basename "$f" .txt); k=${k#zapret_hosts_}
-        local c=$(grep -vc '^#' "$f" 2>/dev/null || echo 0)
+        local c=$(grep -vc '^#' "$f" 2>/dev/null)
+        c=${c:-0}
         local used=$(uci -q show zapret2wizard 2>/dev/null | grep -c "hostlist.*list_hosts_$k")
         local cfg=false; [ "$used" -gt 0 ] && cfg=true
         local hobj="{\"key\":\"$k\",\"name\":\"$k\",\"domains_count\":$c,\"uci_configured\":$cfg}"
@@ -3080,7 +3082,7 @@ _info_json_shell() {
 
 cmd_info() {
     ensure_dpi_service
-    ensure_all_hostlists
+    ensure_all_hostlists >/dev/null 2>&1 || true
     local zapret_running=$(get_dpi_service_status)
 
     # На минимальных сборках OpenWrt нет Lua-модуля uci — тогда отчёт собираем через uci CLI.

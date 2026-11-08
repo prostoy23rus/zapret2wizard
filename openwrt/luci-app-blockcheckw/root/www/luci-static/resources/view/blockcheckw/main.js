@@ -201,7 +201,15 @@ function checkHelperStatus() {
 		if (res && res.code === 0 && res.stdout) {
 			try {
 				return JSON.parse(res.stdout);
-			} catch (e) {}
+			} catch (e) {
+				__r.parseError = String(e).slice(0, 120);
+				// helper может вывести служебные строки до JSON — берём объект целиком
+				var s = res.stdout.indexOf('{');
+				var f = res.stdout.lastIndexOf('}');
+				if (s >= 0 && f > s) {
+					try { return JSON.parse(res.stdout.slice(s, f + 1)); } catch (e2) {}
+				}
+			}
 		}
 		return { status: 'idle', percent: 0, phase: 'Готов к работе', strategies: [] };
 	}).catch(function() {
@@ -210,11 +218,15 @@ function checkHelperStatus() {
 }
 
 function getZapretInfo() {
+	// Не полагаемся на код возврата RPC: на части сборок он приходит строкой,
+	// а stdout при этом валидный. Просто пытаемся разобрать JSON.
 	return fs.exec(HELPER_BIN, ['info']).then(function(res) {
-		if (res && res.code === 0 && res.stdout) {
-			try {
-				return JSON.parse(res.stdout);
-			} catch (e) {}
+		var out = (res && res.stdout) ? res.stdout : '';
+		var s = out.indexOf('{');
+		var f = out.lastIndexOf('}');
+		if (s >= 0 && f > s) {
+			var body = out.slice(s, f + 1);
+			try { return JSON.parse(body); } catch (e) {}
 		}
 		return { zapret2_running: 'unknown', services: {}, all_strategies: [] };
 	}).catch(function() {
@@ -253,7 +265,14 @@ function getLogs() {
 		if (res && res.code === 0 && res.stdout) {
 			try {
 				return JSON.parse(res.stdout);
-			} catch (e) {}
+			} catch (e) {
+				// helper может вывести служебные строки до JSON — берём объект целиком
+				var s = res.stdout.indexOf('{');
+				var f = res.stdout.lastIndexOf('}');
+				if (s >= 0 && f > s) {
+					try { return JSON.parse(res.stdout.slice(s, f + 1)); } catch (e2) {}
+				}
+			}
 		}
 		return { scanner_log: '', zapret2_log: '', daemons: '' };
 	}).catch(function() {
@@ -266,7 +285,14 @@ function checkVersion() {
 		if (res && res.code === 0 && res.stdout) {
 			try {
 				return JSON.parse(res.stdout);
-			} catch (e) {}
+			} catch (e) {
+				// helper может вывести служебные строки до JSON — берём объект целиком
+				var s = res.stdout.indexOf('{');
+				var f = res.stdout.lastIndexOf('}');
+				if (s >= 0 && f > s) {
+					try { return JSON.parse(res.stdout.slice(s, f + 1)); } catch (e2) {}
+				}
+			}
 		}
 		return { success: false, current_version: '0.15.5', has_update: false };
 	}).catch(function() {
@@ -380,10 +406,24 @@ return view.extend({
 		function ensureHostlists() {
 			return fs.exec(HELPER_BIN, ['ensure_hostlists']).catch(function() {});
 		}
+		// Служба могла перезапускаться (подбор, установка): первый отчёт бывает пустым.
+		// Делаем несколько попыток, иначе страница остаётся с нулями.
+		function getZapretInfoRetry(left) {
+			return getZapretInfo().then(function(info) {
+				if (info && info.zapret2_running && info.zapret2_running !== 'unknown') return info;
+				if (left <= 0) return info;
+				return new Promise(function(resolve) {
+					setTimeout(resolve, 1500);
+				}).then(function() {
+					return getZapretInfoRetry(left - 1);
+				});
+			});
+		}
+
 		return ensureHostlists().then(function() {
 			return Promise.all([
 				checkHelperStatus(),
-				getZapretInfo(),
+				getZapretInfoRetry(3),
 				getMetrics(),
 				getDoctor()
 			]);
@@ -402,6 +442,7 @@ return view.extend({
 			has_update: false,
 			changelog: zapretInfo.changelog || []
 		};
+
 		zapretServicesData = zapretInfo.services || {};
 		zapretAllStrategies = zapretInfo.all_strategies || [];
 		var lastAppliedResult = (statusData && statusData.apply_result) ? statusData.apply_result : null;
@@ -1426,7 +1467,8 @@ return view.extend({
 							self.textContent = '⏳ Обновление...';
 							getZapretInfo().then(function(info) {
 								zapretInfo = info || {};
-								zapretServicesData = zapretInfo.services || {};
+						
+		zapretServicesData = zapretInfo.services || {};
 								zapretAllStrategies = zapretInfo.all_strategies || [];
 								updateActiveStrategyDisplay();
 								self.disabled = false;
