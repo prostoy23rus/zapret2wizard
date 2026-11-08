@@ -654,6 +654,14 @@ return view.extend({
 			'}\n'
 		]);
 		container.appendChild(styleSheet);
+		var tabStyles = E('style');
+		tabStyles.textContent = '.bcw-main-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 14px; }\n' +
+			'.bcw-main-tab { min-height: 38px; padding: 0 16px; border-radius: 8px; border: 1px solid #383e4a; background: transparent; color: inherit; cursor: pointer; font-size: 13px; font-weight: 600; font-family: inherit; }\n' +
+			'.bcw-main-tab:hover { border-color: #3273dc; }\n' +
+			'.bcw-main-tab.active { background: #3273dc; border-color: #3273dc; color: #fff; }\n' +
+			'@media (max-width: 720px) { .bcw-main-tab { flex: 1 1 calc(33.3% - 6px); padding: 0 6px; font-size: 12px; } }\n';
+		container.appendChild(tabStyles);
+
 
 		// Layout Wrapper
 		var mainLayout = E('div', { class: 'bcw-container' });
@@ -1364,6 +1372,64 @@ return view.extend({
 			E('div', { style: 'margin-top: 10px;' }, [ consoleLogEl ])
 		]);
 		mainLayout.appendChild(logCard);
+		// Основные вкладки страницы: собираются из уже готовых карточек,
+		// чтобы не переписывать логику их построения.
+		var MAIN_TAB_KEY = 'bcw_main_tab';
+
+		var mainTabDefs = [
+			{ id: 'scan', label: '🔍 Сканер', nodes: [targetSectionCard, unifiedScanCard] },
+			{ id: 'results', label: '📊 Результаты', nodes: [activeStratCard, resultsCard] },
+			{ id: 'logs', label: '📜 Логи', nodes: [logCard] }
+		];
+
+		var mainTabBar = E('div', { class: 'bcw-main-tabs' });
+		var mainTabPanels = {};
+
+		mainTabDefs.forEach(function(def) {
+			var panel = E('div', {
+				class: 'bcw-main-panel',
+				'data-tab': def.id,
+				style: 'display: none;'
+			});
+			def.nodes.forEach(function(node) {
+				if (!node) return;
+				if (node.parentNode) node.parentNode.removeChild(node);
+				panel.appendChild(node);
+			});
+			mainTabPanels[def.id] = panel;
+		});
+
+		function switchMainTab(id) {
+			if (!mainTabPanels[id]) id = 'scan';
+			mainTabDefs.forEach(function(def) {
+				var panel = mainTabPanels[def.id];
+				if (!panel) return;
+				panel.style.display = (def.id === id) ? '' : 'none';
+				var btn = mainTabBar.querySelector('[data-main-tab="' + def.id + '"]');
+				if (btn) {
+					if (def.id === id) btn.classList.add('active');
+					else btn.classList.remove('active');
+				}
+			});
+			try { localStorage.setItem(MAIN_TAB_KEY, id); } catch (e) {}
+		}
+
+		mainTabDefs.forEach(function(def) {
+			mainTabBar.appendChild(E('button', {
+				class: 'bcw-main-tab',
+				'data-main-tab': def.id,
+				click: function() { switchMainTab(def.id); }
+			}, def.label));
+		});
+
+		mainLayout.appendChild(mainTabBar);
+		mainTabDefs.forEach(function(def) {
+			mainLayout.appendChild(mainTabPanels[def.id]);
+		});
+
+		var initialMainTab = 'scan';
+		try { initialMainTab = localStorage.getItem(MAIN_TAB_KEY) || 'scan'; } catch (e) {}
+		switchMainTab(initialMainTab);
 
 		// Diagnostic and Duration Helpers
 		var scanStartTime = null;
