@@ -1,12 +1,12 @@
 {
-  "version": "0.18.24",
+  "version": "0.18.25",
   "release_date": "2026-11-09",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "apply очищает строку стратегии от префикса вида curl_test_https_tls12 ipv4 domain : nfqws2",
-    "Команда class: матрица 9 приёмов ТСПУ с восстановлением прежней стратегии",
-    "Добавлены приёмы из tspu-class-test: multidisorder:pos=sld, чистый fake, fake с fake_default_tls",
-    "Понятное сообщение при нулевом подборе, если текущая стратегия работает"
+    "Скилл skills/zapret2-desync: параметры desync, выбор стратегии, грабли — по manual.md, llms-full.txt и zapret2-guide",
+    "Справочник docs/ZAPRET2-KNOWLEDGE.md со ссылками на источники",
+    "Добавлены техники tcpseg, fakedsplit, hostfakesplit:midhost, rst:rstack, syndata:tcp_ts_up, multidisorder с seqovl",
+    "class печатает класс ТСПУ и рекомендует семейство стратегий"
   ]
 }

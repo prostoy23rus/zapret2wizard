@@ -39,7 +39,14 @@
         "--payload=tls_client_hello --lua-desync=multidisorder:pos=sld",
         "--payload=tls_client_hello --lua-desync=fake:blob=fake_default_tls:tcp_md5:repeats=6",
         "--payload=tls_client_hello --lua-desync=fake:blob=fake_default_tls:ip_autottl=-2,3-20:repeats=6",
-        "--payload=tls_client_hello --lua-desync=fake:blob=fake_default_tls:tcp_md5:repeats=6 --lua-desync=multidisorder:pos=midsld"
+        "--payload=tls_client_hello --lua-desync=fake:blob=fake_default_tls:tcp_md5:repeats=6 --lua-desync=multidisorder:pos=midsld",
+        "--payload=tls_client_hello --lua-desync=tcpseg:pos=midsld:seqovl=1",
+        "--payload=tls_client_hello --lua-desync=tcpseg:pos=1,sniext+1",
+        "--payload=tls_client_hello --lua-desync=fakedsplit:pos=midsld:seqovl=1",
+        "--payload=tls_client_hello --lua-desync=hostfakesplit:host=vk.com:midhost=midsld",
+        "--payload=tls_client_hello --lua-desync=rst:rstack:ip_autottl=-2,3-20",
+        "--payload=tls_client_hello --lua-desync=syndata:blob=fake_default_tls:tcp_ts_up",
+        "--payload=tls_client_hello --lua-desync=multidisorder:pos=host+1,midsld:seqovl=1"
       ]
     },
     "preset_youtube": {
@@ -102,7 +109,14 @@
         "--payload=tls_client_hello --lua-desync=multidisorder:pos=sld",
         "--payload=tls_client_hello --lua-desync=fake:blob=fake_default_tls:tcp_md5:repeats=6",
         "--payload=tls_client_hello --lua-desync=fake:blob=fake_default_tls:ip_autottl=-2,3-20:repeats=6",
-        "--payload=tls_client_hello --lua-desync=fake:blob=fake_default_tls:tcp_md5:repeats=6 --lua-desync=multidisorder:pos=midsld"
+        "--payload=tls_client_hello --lua-desync=fake:blob=fake_default_tls:tcp_md5:repeats=6 --lua-desync=multidisorder:pos=midsld",
+        "--payload=tls_client_hello --lua-desync=tcpseg:pos=midsld:seqovl=1",
+        "--payload=tls_client_hello --lua-desync=tcpseg:pos=1,sniext+1",
+        "--payload=tls_client_hello --lua-desync=fakedsplit:pos=midsld:seqovl=1",
+        "--payload=tls_client_hello --lua-desync=hostfakesplit:host=vk.com:midhost=midsld",
+        "--payload=tls_client_hello --lua-desync=rst:rstack:ip_autottl=-2,3-20",
+        "--payload=tls_client_hello --lua-desync=syndata:blob=fake_default_tls:tcp_ts_up",
+        "--payload=tls_client_hello --lua-desync=multidisorder:pos=host+1,midsld:seqovl=1"
       ]
     },
     "preset_discord": {

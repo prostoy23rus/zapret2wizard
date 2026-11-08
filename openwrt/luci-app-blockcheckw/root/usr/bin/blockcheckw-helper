@@ -2924,7 +2924,7 @@ cmd_class() {
     esac
 
     local backup=$(uci -q get "zapret2wizard.$sec.script")
-    local n=0 passed=0 name args res
+    local n=0 passed=0 name args res passed_list=""
     echo "=== Класс ТСПУ: $domain ==="
     while IFS='|' read -r name args; do
         [ -n "$name" ] || continue
@@ -2933,6 +2933,7 @@ cmd_class() {
         res=$(cmd_apply --target "$target" --file /tmp/bcw_class.txt 2>/dev/null)
         if printf '%s' "$res" | grep -q '"all_ok":true'; then
             passed=$((passed + 1))
+            passed_list="$passed_list $n"
             echo "  OK   $n. $name"
         else
             echo "  --   $n. $name"
@@ -2956,9 +2957,14 @@ CLASSLIST
     rm -f /tmp/bcw_class.txt
     echo "--- прошло: $passed из $n ---"
     if [ "$passed" -eq 0 ]; then
-        echo "Ни один приём не прошёл: возможна блокировка по IP или по отпечатку клиента."
-    elif [ "$passed" -ge 5 ]; then
-        echo "Провайдер пропускает большинство приёмов: подойдёт простая стратегия."
+        echo "Ни один приём не прошёл: вероятен блок по IP или по отпечатку клиента."
+        echo "Проверьте: DNS не подменён (selftest), VPN выключен, домен резолвится."
+    elif printf '%s' "$passed_list" | grep -qE ' (5|6|7) '; then
+        echo "Класс: нужны фейки вместе с нарезкой. Рабочие варианты: fakeddisorder, fake+multisplit, fake+multidisorder."
+    elif printf '%s' "$passed_list" | grep -qE ' (1|2|3) '; then
+        echo "Класс: ТСПУ не собирает сегменты. Достаточно нарезки: multidisorder или multisplit по midsld."
+    elif printf '%s' "$passed_list" | grep -qE ' (4|8|9) '; then
+        echo "Класс: ТСПУ реагирует на поддельные пакеты. Стратегия: fake с ip_autottl или rst."
     fi
 }
 
