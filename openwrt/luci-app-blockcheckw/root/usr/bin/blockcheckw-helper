@@ -1278,7 +1278,7 @@ EOF
         # сообщаем, что стратегия применена с оговоркой.
         if [ "$auto_apply" = "1" ] && [ "$found_count" -gt 0 ]; then
             write_status "running" 95 "Автоматическое применение стратегии в Zapret2..."
-            local apply_res="" attempt=0 max_attempts=4
+            local apply_res="" attempt=0 max_attempts=4 first_cand=""
             local candidates="/tmp/blockcheckw_candidates.$$"
             : > "$candidates"
             if [ "$do_circular" = "1" ] && [ -f "$OUTPUT_CIRCULAR" ] && [ -s "$OUTPUT_CIRCULAR" ]; then
@@ -1292,6 +1292,7 @@ EOF
                 [ -n "$cand" ] || continue
                 [ "$attempt" -ge "$max_attempts" ] && break
                 attempt=$((attempt + 1))
+                [ -n "$first_cand" ] || first_cand="$cand"
                 echo "[blockcheckw-helper] Пробую кандидата $attempt/$max_attempts" >> "$LOG_FILE"
                 printf '%s\n' "$cand" > /tmp/blockcheckw_top_strat.txt
                 apply_res=$(cmd_apply --target "$target" --file /tmp/blockcheckw_top_strat.txt)
@@ -1301,10 +1302,18 @@ EOF
             done < "$candidates"
             rm -f "$candidates"
 
+            # Ни один кандидат не прошёл полный тест: возвращаем первого
+            # (Circular), чтобы не оставлять применённым последний перебор.
+            if [ "$apply_ok" != "1" ] && [ "$attempt" -gt 1 ] && [ -n "$first_cand" ]; then
+                echo "[blockcheckw-helper] Ни один кандидат не прошёл all_ok, возвращаю первого" >> "$LOG_FILE"
+                printf '%s\n' "$first_cand" > /tmp/blockcheckw_top_strat.txt
+                apply_res=$(cmd_apply --target "$target" --file /tmp/blockcheckw_top_strat.txt)
+            fi
+
             if [ -n "$apply_res" ]; then
                 echo "[blockcheckw-helper] Auto-applied strategy to $target (all_ok=$apply_ok): $apply_res" >> "$LOG_FILE"
                 apply_info=",\"auto_applied\":true,\"apply_result\":$apply_res"
-                [ "$apply_ok" = "1" ] || apply_info="$apply_info,\"apply_warning\":\"Стратегия применена, но полный тест не пройден\""
+                [ "$apply_ok" = "1" ] || apply_info="$apply_info,\"apply_warning\":\"Стратегия применена, но полный тест с роутера не пройден — проверьте загрузку страницы с устройства в сети\""
             fi
         fi
 
