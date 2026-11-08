@@ -856,7 +856,25 @@ return view.extend({
 			'.bcw-tile-meta{font-size:11.5px;color:var(--bcw-text-muted,#93a0b4);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}',
 			'.bcw-chip{font-size:11.5px;padding:3px 9px;border-radius:999px;border:1px solid var(--bcw-border-divider,#2a313d);color:var(--bcw-text-muted,#93a0b4);white-space:nowrap;}',
 			'.bcw-chip.ok{color:#35c07a;border-color:rgba(53,192,122,.35);background:rgba(53,192,122,.10);}',
-			'.bcw-chip.warn{color:#f0b13f;border-color:rgba(240,177,63,.35);background:rgba(240,177,63,.10);}'
+			'.bcw-chip.warn{color:#f0b13f;border-color:rgba(240,177,63,.35);background:rgba(240,177,63,.10);}',
+			'.bcw-matrix-sum{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:14px 0 2px;}',
+			'@media(max-width:900px){.bcw-matrix-sum{grid-template-columns:repeat(2,minmax(0,1fr));}}',
+			'.bcw-matrix-box{background:var(--bcw-bg-card-sub,#1d232d);border:1px solid var(--bcw-border-divider,#2a313d);border-radius:10px;padding:11px 14px;}',
+			'.bcw-matrix-box .k{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--bcw-text-muted,#93a0b4);}',
+			'.bcw-matrix-box .v{margin-top:4px;font-weight:600;font-size:14px;color:var(--bcw-text-title,#e7ecf3);}',
+			'.bcw-matrix-table{width:100%;border-collapse:collapse;font-size:13px;margin-top:10px;}',
+			'.bcw-matrix-table th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--bcw-text-muted,#93a0b4);font-weight:500;padding:10px 12px;border-bottom:1px solid var(--bcw-border-divider,#2a313d);}',
+			'.bcw-matrix-table td{padding:11px 12px;border-bottom:1px solid var(--bcw-border-divider,#2a313d);vertical-align:middle;}',
+			'.bcw-matrix-row{cursor:pointer;}',
+			'.bcw-matrix-row:hover td{background:var(--bcw-bg-card-sub,#1d232d);}',
+			'.bcw-matrix-name{font-weight:600;display:flex;align-items:center;gap:8px;color:var(--bcw-text-title,#e7ecf3);}',
+			'.bcw-matrix-strategy{font-family:ui-monospace,monospace;font-size:12px;color:#9db8e0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:360px;}',
+			'.bcw-matrix-chev{color:var(--bcw-text-muted,#93a0b4);}',
+			'.bcw-matrix-exp td{background:var(--bcw-bg-card-sub,#1d232d);}',
+			'.bcw-matrix-details{display:grid;grid-template-columns:1fr 240px;gap:14px;padding:4px 0 8px;}',
+			'@media(max-width:1000px){.bcw-matrix-details{grid-template-columns:1fr;}}',
+			'.bcw-matrix-code{margin:0;background:#0c1016;border:1px solid var(--bcw-border-divider,#2a313d);border-radius:9px;padding:12px;font:12px/1.5 ui-monospace,monospace;color:#a9bcd8;white-space:pre-wrap;}',
+			'.bcw-matrix-actions{display:flex;flex-direction:column;gap:8px;}'
 		].join('\n');
 		container.appendChild(dashStyles);
 
@@ -1177,10 +1195,10 @@ return view.extend({
 				E('div', {}, [
 					E('h3', { class: 'bcw-card-title', style: 'margin: 0; font-size: 15px; display: flex; align-items: center; gap: 8px;' }, [
 						E('span', {}, '🛡️'),
-						'Активные службы и обходы Zapret2Wizard'
+						'Что применяется сейчас'
 					]),
 					E('div', { class: 'bcw-header-sub', style: 'font-size: 12.5px; opacity: 0.85; margin-top: 3px;' },
-						'Сводный статус всех защитных контуров домашней сети, L7-фильтрации и Circular-связок'
+						'Нажмите на строку, чтобы раскрыть стратегию и действия'
 					)
 				]),
 				E('div', { style: 'display: flex; align-items: center; gap: 8px;' }, [
@@ -1729,86 +1747,128 @@ return view.extend({
 		function updateActiveStrategyDisplay() {
 			if (!servicesHubGridEl) return;
 			servicesHubGridEl.innerHTML = '';
+			servicesHubGridEl.className = 'bcw-matrix';
+			servicesHubGridEl.style.display = 'block';
+			servicesHubGridEl.style.gridTemplateColumns = '1fr';
+			servicesHubGridEl.style.gap = '0';
+
+			var enabledSvc = 0, configuredSvc = 0, totalDomains = 0;
+			SERVICES_CONFIG.forEach(function(svc) {
+				var sData = zapretServicesData[svc.key] || zapretServicesData[svc.altKey] || {};
+				var configured = !!(sData && sData.script && String(sData.script).trim() !== '');
+				if (configured) configuredSvc++;
+				if (configured && sData.enabled) enabledSvc++;
+				var hl = (zapretInfo.hostlists || []).find(function(h) { return h.key === svc.hostlistKey; });
+				if (hl && hl.domains_count) totalDomains += hl.domains_count;
+			});
+
+			function sumBox(k, v) {
+				return E('div', { class: 'bcw-matrix-box' }, [
+					E('div', { class: 'k' }, k),
+					E('div', { class: 'v' }, v)
+				]);
+			}
+			servicesHubGridEl.appendChild(E('div', { class: 'bcw-matrix-sum' }, [
+				sumBox('Сервисов с обходом', enabledSvc + ' из ' + SERVICES_CONFIG.length),
+				sumBox('Стратегий настроено', String(configuredSvc)),
+				sumBox('Доменов охвачено', String(totalDomains)),
+				sumBox('Служба', (zapretInfo.zapret2_running === 'running') ? 'активна' : 'остановлена')
+			]));
+
+			var tbody = E('tbody', {});
 
 			SERVICES_CONFIG.forEach(function(svc) {
 				var sData = zapretServicesData[svc.key] || zapretServicesData[svc.altKey] || {};
-				var isConfigured = !!(sData && sData.script && sData.script.trim() !== '');
-				var isRunning = isConfigured && sData.enabled;
-
+				var configured = !!(sData && sData.script && String(sData.script).trim() !== '');
+				var isRunning = configured && sData.enabled;
 				var hl = (zapretInfo.hostlists || []).find(function(h) { return h.key === svc.hostlistKey; });
 				var domainCount = hl ? hl.domains_count : 0;
 
-				var statusPill = isRunning ?
-					E('span', { class: 'bcw-status-pill online' }, [
-						E('span', { class: 'bcw-status-dot' }),
-						E('span', {}, 'Активен')
-					]) :
-					E('span', { class: 'bcw-status-pill offline' }, [
-						E('span', { class: 'bcw-status-dot' }),
-						E('span', {}, isConfigured ? 'Отключен' : 'Не настроен')
-					]);
+				var scriptFull = configured ? String(sData.script).trim() : '';
+				var scriptShort = scriptFull.replace(/\s+/g, ' ');
+				if (scriptShort.length > 68) scriptShort = scriptShort.slice(0, 68) + '…';
 
-				var badgesRow = E('div', { style: 'display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 10px 0 12px 0;' }, [
-					E('span', {
-						class: 'badge',
-						style: 'background: var(--bcw-bg-card-sub); border: 1px solid var(--bcw-border-sub); color: var(--bcw-text-title); font-size: 11px; padding: 2px 8px; border-radius: var(--bcw-radius-sm);'
-					}, (svc.key === 'discord' && sData.dual_circuit) ? 'TCP 443 + Voice UDP' : ('Порт: ' + (sData.port || svc.portDefault))),
-					E('span', {
-						class: 'badge',
-						style: 'background: var(--bcw-bg-card-sub); border: 1px solid var(--bcw-border-sub); color: ' + (sData.is_circular ? 'var(--bcw-accent)' : 'var(--bcw-text-muted)') + '; font-size: 11px; padding: 2px 8px; border-radius: var(--bcw-radius-sm);'
-					}, sData.is_circular ? '🔄 Circular' : '⚡ Одиночная'),
-					domainCount > 0 ? E('span', {
-						class: 'badge',
-						style: 'background: var(--bcw-bg-card-sub); border: 1px solid var(--bcw-border-sub); color: var(--bcw-good); font-size: 11px; padding: 2px 8px; border-radius: var(--bcw-radius-sm);'
-					}, '📋 ' + domainCount + ' доменов') : null
-				]);
+				var statusChip = isRunning
+					? E('span', { class: 'bcw-chip ok' }, 'работает')
+					: (configured
+						? E('span', { class: 'bcw-chip warn' }, 'выключен')
+						: E('span', { class: 'bcw-chip' }, 'не настроен'));
 
-				var btnParams = E('button', {
-					type: 'button',
-					class: 'bcw-btn-sm cbi-button cbi-button-neutral',
-					style: 'flex: 1; height: 32px; font-size: 12px; font-weight: 600; justify-content: center; border-radius: var(--bcw-radius); display: inline-flex; align-items: center; gap: 6px;',
-					click: function(e) {
-						e.stopPropagation();
-						showServiceParamsModal(svc, sData);
-					}
-				}, [ '📋 Параметры / Код' ]);
+				var chev = E('span', { class: 'bcw-matrix-chev' }, '▸');
 
-				var btnQuickScan = E('button', {
-					type: 'button',
-					class: 'bcw-btn-sm cbi-button ' + (isRunning ? 'cbi-button-neutral' : 'cbi-button-action'),
-					style: 'height: 32px; font-size: 12px; font-weight: 600; padding: 0 12px; border-radius: var(--bcw-radius); display: inline-flex; align-items: center; gap: 4px;',
-					title: 'Выбрать данный ресурс в сканере выше',
-					click: function(e) {
-						e.stopPropagation();
-						selectTarget(svc.targetId);
-						var el = document.getElementById('bcw-actions-grid') || document.querySelector('.bcw-tiles-grid');
-						if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-					}
-				}, [ isRunning ? '🔍 Подобрать заново' : '⚡ Настроить' ]);
-
-				var itemCard = E('div', {
-					class: 'bcw-service-item',
-					style: 'background: var(--bcw-bg-card-sub); border: 1px solid var(--bcw-border-card); border-radius: var(--bcw-radius); padding: 14px 16px; display: flex; flex-direction: column; justify-content: space-between; transition: all 0.15s ease;'
-				}, [
-					E('div', {}, [
-						E('div', { style: 'display: flex; align-items: center; justify-content: space-between; gap: 8px;' }, [
-							E('div', { style: 'font-weight: 700; font-size: 14px; color: var(--bcw-text-title); display: flex; align-items: center; gap: 7px;' }, [
-								E('span', { style: 'font-size: 16px;' }, svc.icon),
-								svc.name
-							]),
-							statusPill
-						]),
-						E('div', { style: 'font-size: 12px; color: var(--bcw-text-muted); margin-top: 4px; line-height: 1.35;' }, svc.desc),
-						badgesRow
-					]),
-					E('div', { style: 'display: flex; gap: 8px; margin-top: 4px;' }, [
-						btnParams,
-						btnQuickScan
+				var detailsRow = E('tr', { class: 'bcw-matrix-exp', style: 'display: none;' }, [
+					E('td', { colspan: '5' }, [
+						E('div', { class: 'bcw-matrix-details' }, [
+							E('pre', { class: 'bcw-matrix-code' }, configured ? scriptFull : 'Стратегия ещё не подобрана — запустите подбор.'),
+							E('div', { class: 'bcw-matrix-actions' }, [
+								E('button', {
+									type: 'button',
+									class: 'bcw-btn-sm cbi-button cbi-button-neutral',
+									click: function(e) { e.stopPropagation(); showServiceParamsModal(svc, sData); }
+								}, '📋 Параметры / Код'),
+								E('button', {
+									type: 'button',
+									class: 'bcw-btn-sm cbi-button cbi-button-neutral',
+									click: function(e) {
+										e.stopPropagation();
+										selectTarget(svc.targetId);
+										testActiveConnection();
+									}
+								}, '✓ Проверить'),
+								E('button', {
+									type: 'button',
+									class: 'bcw-btn-sm cbi-button cbi-button-action',
+									click: function(e) {
+										e.stopPropagation();
+										selectTarget(svc.targetId);
+										var el = document.querySelector('.bcw-dash-row') || document.querySelector('.bcw-tiles-grid');
+										if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+									}
+								}, '▶ Подобрать заново')
+							])
+						])
 					])
 				]);
 
-				servicesHubGridEl.appendChild(itemCard);
+				var row = E('tr', {
+					class: 'bcw-matrix-row',
+					click: function() {
+						var open = detailsRow.style.display !== 'none';
+						detailsRow.style.display = open ? 'none' : '';
+						chev.textContent = open ? '▸' : '▾';
+					}
+				}, [
+					E('td', {}, [
+						E('div', { class: 'bcw-matrix-name' }, [
+							E('span', { style: 'font-size: 15px;' }, svc.icon),
+							svc.name
+						])
+					]),
+					E('td', {}, [
+						E('div', { class: 'bcw-matrix-strategy' }, configured ? scriptShort : '—')
+					]),
+					E('td', {}, String(domainCount)),
+					E('td', {}, [statusChip]),
+					E('td', {}, [chev])
+				]);
+
+				tbody.appendChild(row);
+				tbody.appendChild(detailsRow);
 			});
+
+			var tableEl = E('table', { class: 'bcw-matrix-table' }, [
+				E('thead', {}, [
+					E('tr', {}, [
+						E('th', { style: 'width: 24%;' }, 'Сервис'),
+						E('th', { style: 'width: 36%;' }, 'Стратегия'),
+						E('th', { style: 'width: 12%;' }, 'Домены'),
+						E('th', { style: 'width: 16%;' }, 'Статус'),
+						E('th', { style: 'width: 6%;' }, '')
+					])
+				]),
+				tbody
+			]);
+			servicesHubGridEl.appendChild(tableEl);
 		}
 
 		function selectSavedVersion(sec) {
