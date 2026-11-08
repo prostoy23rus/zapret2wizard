@@ -1346,7 +1346,12 @@ EOF
         else
             if [ "$exit_code" -ne 0 ]; then
                 local last_err=$(tail -n 5 "$LOG_FILE" 2>/dev/null | grep -E 'error|Error|failed|FATAL' | tail -n 1)
-                [ -n "$last_err" ] || last_err="Код ошибки $exit_code"
+                if [ -z "$last_err" ]; then
+                    case "$exit_code" in
+                        6) last_err="Предполётная проверка не прошла: нет движка nfqws2 или nftables. Запустите blockcheckw-helper doctor" ;;
+                        *) last_err="Код ошибки $exit_code — запустите blockcheckw-helper doctor для диагностики" ;;
+                    esac
+                fi
                 write_status "error" 0 "Ошибка подбора: $last_err" ",\"strategies\":[]"
                 echo "[blockcheckw-helper] Scan failed with exit code $exit_code: $last_err" >> "$LOG_FILE"
             else
@@ -2584,6 +2589,54 @@ cmd_conflicts() {
         "$services" "$ours" "$foreign" "$table" "$autostart" "$svc_running" "$ok"
 }
 
+# Самодиагностика: проверяет всё, что нужно сканеру и службе.
+# Печатает человекочитаемый список и итоговый JSON.
+cmd_doctor() {
+    local ok=1
+    local checks=""
+    add_check() {
+        local name="$1" state="$2" detail="$3" hint="$4"
+        [ "$state" = "1" ] || ok=0
+        printf '  %-28s %s  %s\n' "$name" "$([ "$state" = "1" ] && echo OK || echo FAIL)" "$detail"
+        if [ "$state" != "1" ] && [ -n "$hint" ]; then
+            printf '      → %s\n' "$hint"
+        fi
+        checks="$checks{\"name\":\"$name\",\"ok\":$([ "$state" = "1" ] && echo true || echo false),\"detail\":\"$detail\",\"hint\":\"$hint\"},"
+    }
+
+    echo "=== Zapret2Wizard doctor ==="
+    local arch=$(uname -m)
+    echo "  платформа: $arch, версия $(grep -o '"version": *"[^"]*"' /usr/share/blockcheckw/version.json 2>/dev/null | head -1 | cut -d'"' -f4)"
+
+    if command -v nft >/dev/null 2>&1; then add_check "nftables" 1 "$(command -v nft)" ""; else add_check "nftables" 0 "nft не найден" "Установите nftables (пакет nftables)"; fi
+
+    local engine=""
+    for p in /usr/bin/nfqws2 /opt/zapret2/nfq2/nfqws2 /usr/bin/nfqws; do
+        [ -x "$p" ] && { engine="$p"; break; }
+    done
+    if [ -n "$engine" ]; then add_check "движок nfqws2" 1 "$engine" ""; else add_check "движок nfqws2" 0 "бинарник не найден" "Переустановите службу: install.sh скачает nfqws2 под вашу архитектуру"; fi
+
+    if [ -x /usr/bin/blockcheckw ]; then add_check "сканер blockcheckw" 1 "$(/usr/bin/blockcheckw --version 2>/dev/null | head -1)" ""; else add_check "сканер blockcheckw" 0 "бинарник не найден" "Переустановите службу через install.sh"; fi
+
+    if [ -f /etc/config/zapret2wizard ]; then add_check "конфигурация" 1 "/etc/config/zapret2wizard" ""; else add_check "конфигурация" 0 "нет /etc/config/zapret2wizard" "Запустите /etc/init.d/zapret2wizard restart — файл создаётся при старте"; fi
+
+    local strategies=$(uci show zapret2wizard 2>/dev/null | grep -c '=strategy')
+    add_check "стратегии в конфиге" 1 "$strategies шт." ""
+
+    if /etc/init.d/zapret2wizard running >/dev/null 2>&1; then add_check "служба" 1 "работает" ""; else add_check "служба" 0 "остановлена" "Запустите: /etc/init.d/zapret2wizard start"; fi
+
+    if nft list tables 2>/dev/null | grep -q 'inet zapret2wizard'; then add_check "nft-таблица" 1 "inet zapret2wizard" ""; else add_check "nft-таблица" 0 "отсутствует" "Служба не установила правила — проверьте лог: logread -e zapret2wizard"; fi
+
+    if ls /etc/rc.d/ 2>/dev/null | grep -q zapret2wizard; then add_check "автозапуск" 1 "включён" ""; else add_check "автозапуск" 0 "выключен" "Включите: /etc/init.d/zapret2wizard enable"; fi
+
+    local foreign=$(blockcheckw-helper conflicts 2>/dev/null | grep -o '"foreign":[0-9]*' | cut -d: -f2)
+    add_check "чужие движки" "$([ "${foreign:-0}" = "0" ] && echo 1 || echo 0)" "${foreign:-0} шт." "Служба освободит очередь при следующем старте"
+
+    checks="[${checks%,}]"
+    printf '{"ok":%s,"arch":"%s","checks":%s}\n' "$([ "$ok" = "1" ] && echo true || echo false)" "$arch" "$checks"
+    [ "$ok" = "1" ]
+}
+
 cmd_info() {
     ensure_all_hostlists
     local zapret_running=$(get_dpi_service_status)
@@ -3431,8 +3484,9 @@ case "$1" in
     metrics) cmd_metrics ;;
     toggle) shift; cmd_toggle_service "$@" ;;
     conflicts) cmd_conflicts ;;
+    doctor) cmd_doctor ;;
     *)
-        echo "Usage: $0 {start|status|stop|apply|activate|delete_strategy|test|speedtest|info|logs|check_update|update|uninstall|diag|ensure_hostlists|read_hostlist|add_hostlist_domain|remove_hostlist_domain|write_hostlist|metrics}"
+        echo "Usage: $0 {start|status|stop|apply|activate|delete_strategy|test|speedtest|info|logs|check_update|update|uninstall|diag|ensure_hostlists|read_hostlist|add_hostlist_domain|remove_hostlist_domain|write_hostlist|metrics|toggle|conflicts|doctor}"
         exit 1
         ;;
 esac
