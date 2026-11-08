@@ -886,8 +886,10 @@ cmd_start() {
             [ "$openclash_stopped" = "1" ] && /etc/init.d/openclash start >/dev/null 2>&1
             [ "$passwall_stopped" = "1" ] && /etc/init.d/passwall start >/dev/null 2>&1
 
-            # Restore DPI service if not running
-            if ! get_dpi_service_status | grep -q running; then
+            # Restore DPI service if not running — или если исчезла таблица nft:
+            # сканер сносит inet zapret2wizard, но процессы nfqws2 при этом
+            # остаются живыми, и проверка одного статуса пропускает восстановление.
+            if ! get_dpi_service_status | grep -q running || ! nft list tables 2>/dev/null | grep -q 'inet zapret2wizard'; then
                 restart_dpi_service
             fi
         }
