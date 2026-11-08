@@ -1028,7 +1028,9 @@ return view.extend({
 			if (!svc || !svc.script || !String(svc.script).trim()) return null;
 			return E('span', {
 				class: 'bcw-switch' + (svc.enabled ? ' on' : ''),
-				title: svc.enabled ? 'Выключить обход' : 'Включить обход',
+				title: svc.enabled
+					? 'Обход DPI включён. Выключение отключает обход, но не блокирует сайт.'
+					: 'Обход DPI выключен. Включить десинк для этого сервиса.',
 				click: function(e) { e.stopPropagation(); toggleService(key, this); }
 			}, [E('span', { class: 'bcw-switch-dot' })]);
 		}
