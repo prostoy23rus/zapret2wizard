@@ -25,6 +25,8 @@
 
 ## Установка
 
+**Скачать:** [последний релиз](https://github.com/prostoy23rus/zapret2wizard/releases/latest) — там лежат `.apk`, `.ipk` и автономный бандл.
+
 | Прошивка | Чем ставить | Команда |
 |---|---|---|
 | OpenWrt 25.x (apk) | `.apk` | `apk add --allow-untrusted /tmp/zapret2wizard_<версия>-r1_<арх>.apk` |
