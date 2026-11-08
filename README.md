@@ -1,6 +1,6 @@
-# Zapret2Wizard (Zapret2 Edition)
+# Zapret2Wizard — All-in-One Autonomous DPI Bypass Suite
 
-[![GitHub Release](https://img.shields.io/badge/Release-v0.16.2-00d1b2?style=flat-square)](https://github.com/prostoy23rus/zapret2wizard)
+[![GitHub Release](https://img.shields.io/badge/Release-v0.17.0-00d1b2?style=flat-square)](https://github.com/prostoy23rus/zapret2wizard)
 [![OpenWrt](https://img.shields.io/badge/OpenWrt-21.02%20|%2022.03%20|%2023.05%20|%2024.10%20|%2025.x%20|%20snapshot-blue?style=flat-square)](https://openwrt.org)
 [![Architectures](https://img.shields.io/badge/Arch-arm64%20|%20x86__64%20|%20arm%20|%20mips%20|%20mipsel%20|%20riscv64-success?style=flat-square)](https://github.com/prostoy23rus/zapret2wizard)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
@@ -9,7 +9,7 @@
   <img src="docs/images/luci_dashboard.png" alt="Zapret2Wizard LuCI Dashboard" width="950" />
 </p>
 
-**Zapret2Wizard** — интеллектуальный параллельный сканер и генетический оптимизатор DPI-стратегий для **Zapret2**, оснащённый современным адаптивным веб-интерфейсом **LuCI OpenWrt**, синтезом отказоустойчивых 4-слотовых **Circular-связок**, двухконтурным обходом **Discord VoiceFlow**, замером реальной скорости потокового видео и системой обновления в **1 клик** прямо из веб-панели роутера.
+**Zapret2Wizard** — автономная единая система противодействия DPI и ТСПУ нового поколения (All-in-One). Объединяет в себе движок **Zapret2 (nfqws2)**, интеллектуальный параллельный сканер и генетический оптимизатор стратегий, адаптивный веб-интерфейс **LuCI OpenWrt**, синтез отказоустойчивых 4-слотовых **Circular-связок**, двухконтурный обход **Discord VoiceFlow** (UDP STUN + WebRTC), замер реальной скорости потокового видео (YouTube 4K Benchmark) и встроенное управление службой без необходимости сторонних пакетов.
 
 ---
 

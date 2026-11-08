@@ -9,3 +9,7 @@ vanilla_results.txt
 /docs/superpowers/
 /docs/research/
 /.superpowers/
+
+steer_*
+svc_google_ai_extra.lst
+*.dl.*

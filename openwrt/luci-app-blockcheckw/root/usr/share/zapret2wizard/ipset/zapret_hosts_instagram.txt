@@ -1,0 +1,9 @@
+instagram.com
+cdninstagram.com
+fbcdn.net
+facebook.com
+threads.net
+gateway.instagram.com
+static.cdninstagram.com
+graph.instagram.com
+i.instagram.com

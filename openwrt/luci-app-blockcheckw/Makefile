@@ -1,11 +1,11 @@
 include $(TOPDIR)/rules.mk
 
-LUCI_TITLE:=LuCI support for BlockcheckW parallel DPI bypass scanner & Zapret2
-LUCI_DEPENDS:=+blockcheckw +luci-base +luci-compat +zapret2
+LUCI_TITLE:=Zapret2Wizard - All-in-One DPI Bypass Engine & Autonomous LuCI Tuning Suite
+LUCI_DEPENDS:=+luci-base +luci-compat +curl +nftables +ca-bundle
 LUCI_PKGARCH:=all
 
 PKG_NAME:=luci-app-blockcheckw
-PKG_VERSION:=0.15.28
+PKG_VERSION:=0.17.0
 PKG_RELEASE:=1
 PKG_LICENSE:=MIT
 

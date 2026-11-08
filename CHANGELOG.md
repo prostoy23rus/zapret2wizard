@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.17.0] (2026-11-08)
+
+### 🌟 All-in-One Autonomous DPI Bypass Suite (Слияние Zapret2 и Zapret2Wizard)
+
+* **Единая автономная служба**: Zapret2 и Zapret2Wizard объединены в одну самодостаточную систему без необходимости установки сторонних пакетов.
+* **Автономный init-скрипт `/etc/init.d/zapret2wizard`**: управление жизненным циклом (start/stop/restart/reload), procd-оркестрация многоинстансных процессов (main queue 300, discord_media queue 65300, stun queue 65301) и прямое управление таблицей nftables `table inet zapret2`.
+* **Ядро десинхронизации nfqws2**: автоматическая потоковая загрузка и установка предварительно скомпилированного бинарника `nfqws2` для любых процессорных архитектур (`arm64`, `x86_64`, `arm`, `mips`, `mipsel`, `riscv64`, `ppc`).
+* **Встроенный пакет Lua-модулей и Fake-пакетов**: перенесены все ключевые библиотеки десинхронизации (`zapret-lib`, `zapret-antidpi`, `zapret-auto`, `zapret-obfs`) и база бинарных фейков (`quic_initial`, `stun`, `tls_clienthello_gosuslugi_ru`, `tls_clienthello_sberbank_ru`, `tls_clienthello_vk_com`, `zero_*.bin`).
+* **Двусторонняя синхронизация UCI конфигурации**: транслятор `uci2config` обеспечивает бесшовную работу с `/etc/config/zapret2wizard` и сохраняет полную обратную совместимость с `/etc/config/zapret2`.
+* **Полная изоляция списков хостов**: независимые наборы хостов для YouTube, Discord, Instagram, X/Twitter, Twitch и пользовательских доменов в `/etc/zapret2wizard/ipset/`.
+* **Бесшовный переход**: обёртка совместимости `/etc/init.d/zapret2` прозрачно проксирует вызовы в `/etc/init.d/zapret2wizard`.
+
+
 ## [0.12.1](https://github.com/rcd27/blockcheckw/compare/v0.12.0...v0.12.1) (2026-10-12)
 
 

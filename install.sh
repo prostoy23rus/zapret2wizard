@@ -247,29 +247,100 @@ cp -f "$TMP_DIR/blockcheckw" /usr/bin/blockcheckw
 chmod +x /usr/bin/blockcheckw
 echo -e "${GREEN}✓${NC} Бинарник установлен: ${BOLD}/usr/bin/blockcheckw${NC}"
 
-# 6. Скачивание и установка LuCI приложения и вспомогательных скриптов
-echo -e "${BLUE}ℹ${NC} Скачивание модулей LuCI приложения BlockcheckW..."
+# 5.1. Установка автономного бинарника nfqws2 (All-in-One DPI Engine)
+echo -e "${BLUE}ℹ${NC} Проверка и установка ядра десинхронизации nfqws2..."
+if [ ! -x /usr/bin/nfqws2 ]; then
+    if [ -x /opt/zapret2/nfq2/nfqws2 ]; then
+        cp -f /opt/zapret2/nfq2/nfqws2 /usr/bin/nfqws2
+        chmod +x /usr/bin/nfqws2
+    fi
+fi
+if [ ! -x /usr/bin/nfqws2 ]; then
+    ZAPRET_DIR="linux-${ARCH}"
+    ZAPRET_URL="https://github.com/bol-van/zapret2/releases/download/v1.0.7/zapret2-v1.0.7.tar.gz"
+    echo -e "${BLUE}ℹ${NC} Загрузка ядра nfqws2 для ${BOLD}${ZAPRET_DIR}${NC}..."
+    if ! curl -fsSL -k --connect-timeout 8 "$ZAPRET_URL" 2>/dev/null | tar -xz -O --wildcards "*/binaries/${ZAPRET_DIR}/nfqws2" > /usr/bin/nfqws2 2>/dev/null; then
+        curl -fsSL -k --connect-timeout 10 "https://ghproxy.net/$ZAPRET_URL" 2>/dev/null | tar -xz -O --wildcards "*/binaries/${ZAPRET_DIR}/nfqws2" > /usr/bin/nfqws2 2>/dev/null || true
+    fi
+    chmod +x /usr/bin/nfqws2 2>/dev/null || true
+fi
+if [ -x /usr/bin/nfqws2 ]; then
+    echo -e "${GREEN}✓${NC} Бинарник nfqws2 готов: ${BOLD}/usr/bin/nfqws2${NC}"
+else
+    echo -e "${YELLOW}[WARN] nfqws2 не найден, будет использован системный путь при наличии.${NC}"
+fi
+
+# 6. Скачивание и установка компонентов автономной службы и LuCI
+echo -e "${BLUE}ℹ${NC} Установка модулей Zapret2Wizard All-in-One..."
 
 mkdir -p /usr/bin /usr/share/blockcheckw /usr/share/luci/menu.d /usr/share/rpcd/acl.d /www/luci-static/resources/view/blockcheckw
-chmod 755 /www/luci-static/resources/view/blockcheckw /usr/share/blockcheckw 2>/dev/null || true
+mkdir -p /usr/share/zapret2wizard/lua /usr/share/zapret2wizard/fake /usr/share/zapret2wizard/ipset /etc/zapret2wizard/ipset /etc/config /etc/init.d
+chmod 755 /www/luci-static/resources/view/blockcheckw /usr/share/blockcheckw /usr/share/zapret2wizard 2>/dev/null || true
 
 fetch_file "openwrt/luci-app-blockcheckw/root/usr/bin/blockcheckw-helper" /usr/bin/blockcheckw-helper 8
 fetch_file "openwrt/luci-app-blockcheckw/root/usr/bin/circular-builder.lua" /usr/bin/circular-builder.lua 8
+fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/uci2config" /usr/share/zapret2wizard/uci2config 8
 fetch_file "strategies/zapret2_presets.json" /usr/share/blockcheckw/zapret2_presets.json 8
 fetch_file "openwrt/version.json" /usr/share/blockcheckw/version.json 8
 fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/luci/menu.d/luci-app-blockcheckw.json" /usr/share/luci/menu.d/luci-app-blockcheckw.json 8 || true
 fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/rpcd/acl.d/luci-app-blockcheckw.json" /usr/share/rpcd/acl.d/luci-app-blockcheckw.json 8 || true
 fetch_file "openwrt/luci-app-blockcheckw/root/www/luci-static/resources/view/blockcheckw/main.js" /www/luci-static/resources/view/blockcheckw/main.js 8
 
-chmod +x /usr/bin/blockcheckw-helper /usr/bin/circular-builder.lua
-    ln -sf /usr/bin/blockcheckw-helper /usr/bin/zapret2wizard 2>/dev/null || true
+# Установка Lua скриптов десинхронизации
+for lua_script in zapret-lib.lua zapret-antidpi.lua zapret-auto.lua zapret-obfs.lua zapret-pcap.lua zapret-tests.lua zapret-wgobfs.lua; do
+    fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/lua/$lua_script" "/usr/share/zapret2wizard/lua/$lua_script" 8 || true
+done
+
+# Установка ключевых fake-блобов
+for fake_blob in stun.bin quic_initial_dbankcloud_ru.bin quic_3.bin quic_4.bin quic_initial_vk_com.bin quic_initial_www_google_com.bin quic_initial_facebook_com.bin tls_clienthello_gosuslugi_ru.bin tls_clienthello_sberbank_ru.bin tls_clienthello_t2_ru.bin tls_clienthello_vk_com.bin tls_clienthello_www_google_com.bin tls_clienthello_www_4pda_to.bin tls_clienthello_max_ru.bin tls_clienthello_iana_org.bin tls_alert.bin discord-ip-discovery-with-port.bin discord-ip-discovery-without-port.bin ACTIVE_GAME_UDP.bin zero_1024.bin zero_512.bin zero_256.bin wireguard_initiation.bin wireguard_response.bin; do
+    fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/fake/$fake_blob" "/usr/share/zapret2wizard/fake/$fake_blob" 8 || true
+done
+
+# Установка базовых списков хостов
+for ipset_file in zapret_hosts_youtube.txt zapret_hosts_discord.txt zapret_hosts_x.txt zapret_hosts_instagram.txt zapret_hosts_twitch.txt zapret_hosts_user.txt zapret_hosts_user_exclude.txt zapret_hosts_auto.txt; do
+    fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/ipset/$ipset_file" "/usr/share/zapret2wizard/ipset/$ipset_file" 8 || true
+    [ -f "/etc/zapret2wizard/ipset/$ipset_file" ] || cp -f "/usr/share/zapret2wizard/ipset/$ipset_file" "/etc/zapret2wizard/ipset/$ipset_file" 2>/dev/null || true
+done
+
+# Установка автономной службы /etc/init.d/zapret2wizard
+fetch_file "openwrt/luci-app-blockcheckw/root/etc/init.d/zapret2wizard" /etc/init.d/zapret2wizard 8
+chmod +x /etc/init.d/zapret2wizard /usr/share/zapret2wizard/uci2config /usr/bin/blockcheckw-helper /usr/bin/circular-builder.lua
+ln -sf /usr/bin/blockcheckw-helper /usr/bin/zapret2wizard 2>/dev/null || true
+
+# Настройка конфигурации по умолчанию при отсутствии
+[ -f /etc/config/zapret2wizard ] || fetch_file "openwrt/luci-app-blockcheckw/root/etc/config/zapret2wizard" /etc/config/zapret2wizard 8 || true
+[ -f /etc/config/zapret2 ] || fetch_file "openwrt/luci-app-blockcheckw/root/etc/config/zapret2" /etc/config/zapret2 8 || true
+
+# Бесшовная интеграция с /etc/init.d/zapret2
+if [ -f /etc/init.d/zapret2 ] && [ ! -L /etc/init.d/zapret2 ] && ! grep -q "zapret2wizard" /etc/init.d/zapret2 2>/dev/null; then
+    echo -e "${YELLOW}ℹ${NC} Миграция старой службы /etc/init.d/zapret2 в режим совместимости..."
+    /etc/init.d/zapret2 stop >/dev/null 2>&1 || true
+    /etc/init.d/zapret2 disable >/dev/null 2>&1 || true
+fi
+cat << 'EOF' > /etc/init.d/zapret2
+#!/bin/sh /etc/rc.common
+# Compatibility wrapper for Zapret2Wizard
+exec /etc/init.d/zapret2wizard "$@"
+EOF
+chmod +x /etc/init.d/zapret2
+
+# Симлинки обратной совместимости для путей /opt/zapret2/...
+mkdir -p /opt/zapret2/files /opt/zapret2/init.d/openwrt 2>/dev/null || true
+[ -e /opt/zapret2/files/fake ] || ln -sf /usr/share/zapret2wizard/fake /opt/zapret2/files/fake 2>/dev/null || true
+[ -e /opt/zapret2/lua ] || ln -sf /usr/share/zapret2wizard/lua /opt/zapret2/lua 2>/dev/null || true
+[ -e /opt/zapret2/ipset ] || ln -sf /etc/zapret2wizard/ipset /opt/zapret2/ipset 2>/dev/null || true
+
+# Включение и запуск единой автономной службы
+/etc/init.d/zapret2wizard enable 2>/dev/null || true
+/etc/init.d/zapret2wizard restart 2>/dev/null || true
+
 chmod 644 /www/luci-static/resources/view/blockcheckw/main.js
 chmod 644 /usr/share/blockcheckw/* /usr/share/luci/menu.d/luci-app-blockcheckw.json /usr/share/rpcd/acl.d/luci-app-blockcheckw.json 2>/dev/null || true
 
-# Инициализация списков хостов для сервисов в Zapret2 (/opt/zapret2/ipset/)
+# Инициализация списков хостов для сервисов в Zapret2
 /usr/bin/blockcheckw-helper ensure_hostlists 2>/dev/null || true
 
-echo -e "${GREEN}✓${NC} Файлы LuCI интерфейса успешно скопированы."
+echo -e "${GREEN}✓${NC} Автономная служба Zapret2Wizard успешно настроена и запущена."
 
 # 7. Настройка Firewall: блокировка QUIC (UDP 443)
 echo -e "${BLUE}ℹ${NC} Проверка настройки блокировки QUIC (UDP 443)..."

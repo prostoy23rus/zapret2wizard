@@ -1,0 +1,6 @@
+twitch.tv
+ttvnw.net
+jtvnw.net
+usher.ttvnw.net
+static-cdn.jtvnw.net
+gql.twitch.tv

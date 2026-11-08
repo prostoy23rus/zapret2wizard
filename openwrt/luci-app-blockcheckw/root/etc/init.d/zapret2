@@ -1,0 +1,3 @@
+#!/bin/sh
+# Compatibility wrapper for Zapret2Wizard
+exec /etc/init.d/zapret2wizard "$@"

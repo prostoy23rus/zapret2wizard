@@ -69,6 +69,10 @@ if [ "$AUTO_YES" -eq 0 ]; then
 fi
 
 echo -e "\n${BLUE}ℹ${NC} Остановка активных процессов..."
+if [ -x /etc/init.d/zapret2wizard ]; then
+    /etc/init.d/zapret2wizard stop >/dev/null 2>&1 || true
+    /etc/init.d/zapret2wizard disable >/dev/null 2>&1 || true
+fi
 killall -9 blockcheckw 2>/dev/null || true
 killall -9 blockcheckw-helper 2>/dev/null || true
 
@@ -78,6 +82,11 @@ rm -f /usr/bin/blockcheckw-helper
 rm -f /usr/bin/zapret2wizard
 rm -f /usr/bin/circular-builder.lua
 rm -rf /usr/share/blockcheckw
+rm -rf /usr/share/zapret2wizard
+rm -f /etc/init.d/zapret2wizard
+if [ -f /etc/init.d/zapret2 ] && grep -q "zapret2wizard" /etc/init.d/zapret2 2>/dev/null; then
+    rm -f /etc/init.d/zapret2
+fi
 
 echo -e "${BLUE}ℹ${NC} Удаление модулей интерфейса LuCI..."
 rm -f /usr/share/luci/menu.d/luci-app-blockcheckw.json
@@ -103,7 +112,12 @@ fi
 
 # Опциональная очистка секций zapret2, созданных blockcheckw
 if [ "$PURGE_ZAPRET" -eq 1 ]; then
-    echo -e "${YELLOW}ℹ${NC} Очистка записей BlockcheckW из /etc/config/zapret2..."
+    echo -e "${YELLOW}ℹ${NC} Очистка записей и компонентов Zapret2..."
+    rm -rf /etc/zapret2wizard
+    rm -f /etc/config/zapret2wizard
+    rm -f /usr/bin/nfqws2
+    nft delete table inet zapret2 2>/dev/null || true
+    killall -9 nfqws2 2>/dev/null || true
     if command -v uci >/dev/null 2>&1 && [ -f /etc/config/zapret2 ]; then
         for sec in $(uci show zapret2 | grep -E "=section" | cut -d'.' -f2 | cut -d'=' -f1); do
             case "$sec" in
@@ -113,7 +127,6 @@ if [ "$PURGE_ZAPRET" -eq 1 ]; then
             esac
         done
         uci commit zapret2 2>/dev/null || true
-        /etc/init.d/zapret2 restart >/dev/null 2>&1 || true
     fi
 fi
 

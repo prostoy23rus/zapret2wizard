@@ -109,11 +109,65 @@ _add_domains_if_missing() {
     chmod 644 "$file" 2>/dev/null
 }
 
+restart_dpi_service() {
+    if [ -x /etc/init.d/zapret2wizard ]; then
+        /etc/init.d/zapret2wizard restart >/dev/null 2>&1
+    fi
+    if [ -x /etc/init.d/zapret2 ] && [ ! -L /etc/init.d/zapret2 ]; then
+        /etc/init.d/zapret2 restart >/dev/null 2>&1
+    fi
+}
+
+get_dpi_service_status() {
+    local st=""
+    if [ -x /etc/init.d/zapret2wizard ]; then
+        st=$(/etc/init.d/zapret2wizard status 2>/dev/null)
+    fi
+    if [ -z "$st" ] || ! echo "$st" | grep -q running; then
+        if [ -x /etc/init.d/zapret2 ]; then
+            st=$(/etc/init.d/zapret2 status 2>/dev/null)
+        fi
+    fi
+    if [ -z "$st" ]; then
+        echo "inactive"
+    else
+        echo "$st"
+    fi
+}
+
+get_active_uci_pkg() {
+    if [ -f /etc/config/zapret2wizard ]; then
+        echo "zapret2wizard"
+    else
+        echo "zapret2"
+    fi
+}
+
+sync_uci_commit() {
+    uci commit zapret2 2>/dev/null || true
+    if [ -f /etc/config/zapret2wizard ]; then
+        uci commit zapret2wizard 2>/dev/null || true
+    fi
+}
+
+_uci_set_list_if_missing() {
+    local list_name="$1"
+    local list_path="$2"
+    for pkg in zapret2 zapret2wizard; do
+        [ -f "/etc/config/$pkg" ] || continue
+        if ! uci -q get "$pkg.$list_name" >/dev/null; then
+            uci set "$pkg.$list_name=list"
+            uci set "$pkg.$list_name.path=$list_path"
+        fi
+    done
+}
+
 ensure_preset_hostlist() {
     local tgt="$1"
     local custom_dom="$2"
-    local ipset_dir="/opt/zapret2/ipset"
-    mkdir -p "$ipset_dir" 2>/dev/null
+    local ipset_dir="/etc/zapret2wizard/ipset"
+    [ -d "$ipset_dir" ] || ipset_dir="/opt/zapret2/ipset"
+    mkdir -p "$ipset_dir" "/opt/zapret2/ipset" "/etc/zapret2wizard/ipset" 2>/dev/null || true
 
     case "$tgt" in
         preset_x|x)
@@ -121,10 +175,7 @@ ensure_preset_hostlist() {
             _add_domains_if_missing "$x_file" \
                 "x.com" "twitter.com" "t.co" "twimg.com" "pbs.twimg.com" \
                 "abs.twimg.com" "api.x.com" "api.twitter.com" "video.twimg.com" "ton.twitter.com"
-            if ! uci -q get zapret2.list_hosts_x >/dev/null; then
-                uci set zapret2.list_hosts_x=list
-                uci set zapret2.list_hosts_x.path="$x_file"
-            fi
+            _uci_set_list_if_missing list_hosts_x "$x_file"
             ;;
         preset_instagram|instagram)
             local ig_file="$ipset_dir/zapret_hosts_instagram.txt"
@@ -132,20 +183,14 @@ ensure_preset_hostlist() {
                 "instagram.com" "cdninstagram.com" "fbcdn.net" "facebook.com" \
                 "threads.net" "gateway.instagram.com" "static.cdninstagram.com" \
                 "graph.instagram.com" "i.instagram.com"
-            if ! uci -q get zapret2.list_hosts_instagram >/dev/null; then
-                uci set zapret2.list_hosts_instagram=list
-                uci set zapret2.list_hosts_instagram.path="$ig_file"
-            fi
+            _uci_set_list_if_missing list_hosts_instagram "$ig_file"
             ;;
         preset_twitch|twitch)
             local tw_file="$ipset_dir/zapret_hosts_twitch.txt"
             _add_domains_if_missing "$tw_file" \
                 "twitch.tv" "ttvnw.net" "jtvnw.net" "usher.ttvnw.net" \
                 "static-cdn.jtvnw.net" "gql.twitch.tv"
-            if ! uci -q get zapret2.list_hosts_twitch >/dev/null; then
-                uci set zapret2.list_hosts_twitch=list
-                uci set zapret2.list_hosts_twitch.path="$tw_file"
-            fi
+            _uci_set_list_if_missing list_hosts_twitch "$tw_file"
             ;;
         preset_youtube|youtube)
             local yt_file="$ipset_dir/zapret_hosts_youtube.txt"
@@ -159,10 +204,7 @@ ensure_preset_hostlist() {
                 "test.googlevideo.com" \
                 "yt3.ggpht.com" "yt4.ggpht.com" "i.ytimg.com" "i9.ytimg.com" \
                 "signaler-pa.youtube.com" "manifest.googlevideo.com" "yt3.googleusercontent.com"
-            if ! uci -q get zapret2.list_hosts_youtube >/dev/null; then
-                uci set zapret2.list_hosts_youtube=list
-                uci set zapret2.list_hosts_youtube.path="$yt_file"
-            fi
+            _uci_set_list_if_missing list_hosts_youtube "$yt_file"
             ;;
         preset_discord|discord)
             local dc_file="$ipset_dir/zapret_hosts_discord.txt"
@@ -179,10 +221,7 @@ ensure_preset_hostlist() {
                 "discordcdn.com" "discordsez.com" "discordsays.com" "discordmerch.com" \
                 "discordpartygames.com" "discordactivities.com" "stable.dl2.discordapp.net" \
                 "discord-attachments-uploads-prd.storage.googleapis.com"
-            if ! uci -q get zapret2.list_hosts_discord >/dev/null; then
-                uci set zapret2.list_hosts_discord=list
-                uci set zapret2.list_hosts_discord.path="$dc_file"
-            fi
+            _uci_set_list_if_missing list_hosts_discord "$dc_file"
             ;;
         builtin|general|preset_builtin|preset_user)
             local u_file="$ipset_dir/zapret_hosts_user.txt"
@@ -194,10 +233,7 @@ ensure_preset_hostlist() {
                 "linkedin.com" "notion.so" "canva.com" "medium.com" "soundcloud.com" \
                 "spotify.com" "deezer.com" "openai.com" "chatgpt.com" "claude.ai" \
                 "proton.me" "protonmail.com" "t.me"
-            if ! uci -q get zapret2.list_hosts_user >/dev/null; then
-                uci set zapret2.list_hosts_user=list
-                uci set zapret2.list_hosts_user.path="$u_file"
-            fi
+            _uci_set_list_if_missing list_hosts_user "$u_file"
             ;;
         *)
             local u_file="$ipset_dir/zapret_hosts_user.txt"
@@ -211,10 +247,7 @@ ensure_preset_hostlist() {
                     fi
                 fi
             fi
-            if ! uci -q get zapret2.list_hosts_user >/dev/null; then
-                uci set zapret2.list_hosts_user=list
-                uci set zapret2.list_hosts_user.path="$u_file"
-            fi
+            _uci_set_list_if_missing list_hosts_user "$u_file"
             ;;
     esac
 }
@@ -843,9 +876,9 @@ cmd_start() {
             [ "$openclash_stopped" = "1" ] && /etc/init.d/openclash start >/dev/null 2>&1
             [ "$passwall_stopped" = "1" ] && /etc/init.d/passwall start >/dev/null 2>&1
 
-            # Restore zapret2 if not running
-            if ! /etc/init.d/zapret2 status 2>/dev/null | grep -q running; then
-                /etc/init.d/zapret2 restart >/dev/null 2>&1
+            # Restore DPI service if not running
+            if ! get_dpi_service_status | grep -q running; then
+                restart_dpi_service
             fi
         }
         trap cleanup_subshell EXIT INT TERM
@@ -1430,7 +1463,7 @@ cmd_stop() {
     killall -9 blockcheckw blockcheckw-helper 2>/dev/null
     rm -f /tmp/blockcheckw.lock
     nft delete table inet blockcheckw 2>/dev/null
-    /etc/init.d/zapret2 restart >/dev/null 2>&1
+    restart_dpi_service
     write_status "idle" 0 "Остановлено пользователем"
     echo '{"status":"stopped"}'
 }
@@ -1542,75 +1575,72 @@ cmd_apply() {
     fi
 
     # Disable previously active strategies for this target to prevent desync/filter conflicts,
-    # keeping all older strategies safely stored in /etc/config/zapret2
-    uci -q set "zapret2.$base_sec.enabled=0"
-    local s
-    for s in $(uci show zapret2 2>/dev/null | grep -E '^zapret2\.'"$base_sec"'_' | grep '=strategy$' | cut -d'.' -f2 | cut -d'=' -f1); do
-        uci -q set "zapret2.$s.enabled=0"
-    done
-    if [ "$base_sec" = "BlockcheckW_YouTube" ] || [ "$base_sec" = "MyTube" ]; then
-        uci -q set "zapret2.MyTube.enabled=0"
-        uci -q set "zapret2.Youtube_circular.enabled=0"
-        for s in $(uci show zapret2 2>/dev/null | grep -E '^zapret2\.(MyTube_|BlockcheckW_YouTube_)' | grep '=strategy$' | cut -d'.' -f2 | cut -d'=' -f1); do
-            uci -q set "zapret2.$s.enabled=0"
+    # keeping all older strategies safely stored in /etc/config/zapret2 & /etc/config/zapret2wizard
+    for pkg in zapret2 zapret2wizard; do
+        [ -f "/etc/config/$pkg" ] || continue
+        uci -q set "$pkg.$base_sec.enabled=0"
+        for s in $(uci show "$pkg" 2>/dev/null | grep -E "^$pkg\.$base_sec\_" | grep '=strategy$' | cut -d'.' -f2 | cut -d'=' -f1); do
+            uci -q set "$pkg.$s.enabled=0"
         done
-    elif [ "$base_sec" = "BlockcheckW_Discord" ]; then
-        uci -q set "zapret2.Discord_circular.enabled=0"
-        uci -q set "zapret2.BlockcheckW_Discord_Voice.enabled=0"
-        for s in $(uci show zapret2 2>/dev/null | grep -E '^zapret2\.BlockcheckW_Discord_Voice_' | grep '=strategy$' | cut -d'.' -f2 | cut -d'=' -f1); do
-            uci -q set "zapret2.$s.enabled=0"
+        if [ "$base_sec" = "BlockcheckW_YouTube" ] || [ "$base_sec" = "MyTube" ]; then
+            uci -q set "$pkg.MyTube.enabled=0"
+            uci -q set "$pkg.Youtube_circular.enabled=0"
+            for s in $(uci show "$pkg" 2>/dev/null | grep -E "^$pkg\.(MyTube_|BlockcheckW_YouTube_)" | grep '=strategy$' | cut -d'.' -f2 | cut -d'=' -f1); do
+                uci -q set "$pkg.$s.enabled=0"
+            done
+        elif [ "$base_sec" = "BlockcheckW_Discord" ]; then
+            uci -q set "$pkg.Discord_circular.enabled=0"
+            uci -q set "$pkg.BlockcheckW_Discord_Voice.enabled=0"
+            for s in $(uci show "$pkg" 2>/dev/null | grep -E "^$pkg\.BlockcheckW_Discord_Voice_" | grep '=strategy$' | cut -d'.' -f2 | cut -d'=' -f1); do
+                uci -q set "$pkg.$s.enabled=0"
+            done
+        elif [ "$base_sec" = "BlockcheckW_General" ]; then
+            uci -q set "$pkg.Routerich_circular.enabled=0"
+        fi
+
+        # Create new strategy section
+        uci set "$pkg.$sec_name=strategy"
+        uci set "$pkg.$sec_name.enabled=1"
+        uci set "$pkg.$sec_name.port=$port"
+        uci set "$pkg.$sec_name.protocol=tcp"
+        uci -q delete "$pkg.$sec_name.filter_l3"
+        uci -q delete "$pkg.$sec_name.filter_l7"
+        uci -q delete "$pkg.$sec_name.hostlist"
+        uci -q delete "$pkg.$sec_name.hostlist_exclude"
+        uci add_list "$pkg.$sec_name.filter_l3=ipv4"
+        for proto in $l7; do
+            uci add_list "$pkg.$sec_name.filter_l7=$proto"
         done
-    elif [ "$base_sec" = "BlockcheckW_General" ]; then
-        uci -q set "zapret2.Routerich_circular.enabled=0"
-    fi
+        uci add_list "$pkg.$sec_name.hostlist=$hostlist"
+        if [ "$target" = "preset_youtube" ] || [ "$target" = "youtube" ] || [ "$target" = "builtin" ] || [ "$target" = "general" ]; then
+            uci add_list "$pkg.$sec_name.hostlist_exclude=list_hosts_user_exclude"
+        fi
+        uci set "$pkg.$sec_name.script=$script_text"
 
-    # Ensure target hostlist and domains are properly configured in Zapret2
-    ensure_preset_hostlist "$target"
+        if [ "$base_sec" = "BlockcheckW_Discord" ]; then
+            uci -q set "$pkg.blob_stun.enabled=1"
+            local v_idx=$(echo "$sec_name" | grep -oE '_[0-9]+$')
+            voice_sec_name="BlockcheckW_Discord_Voice${v_idx}"
 
-    # Create new strategy section in zapret2
-    uci set "zapret2.$sec_name=strategy"
-    uci set "zapret2.$sec_name.enabled=1"
-    uci set "zapret2.$sec_name.port=$port"
-    uci set "zapret2.$sec_name.protocol=tcp"
-    uci -q delete "zapret2.$sec_name.filter_l3"
-    uci -q delete "zapret2.$sec_name.filter_l7"
-    uci -q delete "zapret2.$sec_name.hostlist"
-    uci -q delete "zapret2.$sec_name.hostlist_exclude"
-    uci add_list "zapret2.$sec_name.filter_l3=ipv4"
-    for proto in $l7; do
-        uci add_list "zapret2.$sec_name.filter_l7=$proto"
+            uci set "$pkg.$voice_sec_name=strategy"
+            uci set "$pkg.$voice_sec_name.enabled=1"
+            uci set "$pkg.$voice_sec_name.port=50000-65535,19294-19344"
+            uci set "$pkg.$voice_sec_name.protocol=udp"
+            uci -q delete "$pkg.$voice_sec_name.filter_l3"
+            uci -q delete "$pkg.$voice_sec_name.filter_l7"
+            uci add_list "$pkg.$voice_sec_name.filter_l3=ipv4"
+            uci add_list "$pkg.$voice_sec_name.filter_l7=discord"
+            uci add_list "$pkg.$voice_sec_name.filter_l7=stun"
+            uci set "$pkg.$voice_sec_name.script=--payload=discord_ip_discovery,stun --lua-desync=circular:fails=3:maxtime=20 --lua-desync=fake:blob=blob_stun:repeats=2:strategy=1 --lua-desync=udplen:increment=2:strategy=2 --lua-desync=fake:blob=blob_stun:repeats=4:strategy=3"
+        fi
     done
-    uci add_list "zapret2.$sec_name.hostlist=$hostlist"
-    if [ "$target" = "preset_youtube" ] || [ "$target" = "youtube" ] || [ "$target" = "builtin" ] || [ "$target" = "general" ]; then
-        uci add_list "zapret2.$sec_name.hostlist_exclude=list_hosts_user_exclude"
-    fi
-    uci set "zapret2.$sec_name.script=$script_text"
 
-    # Milestone 2: Discord VoiceFlow (Paired UDP strategy for Discord WebRTC Voice & STUN)
-    local voice_sec_name=""
-    if [ "$base_sec" = "BlockcheckW_Discord" ]; then
-        uci -q set zapret2.blob_stun.enabled=1
-        local v_idx=$(echo "$sec_name" | grep -oE '_[0-9]+$')
-        voice_sec_name="BlockcheckW_Discord_Voice${v_idx}"
+    sync_uci_commit
 
-        uci set "zapret2.$voice_sec_name=strategy"
-        uci set "zapret2.$voice_sec_name.enabled=1"
-        uci set "zapret2.$voice_sec_name.port=50000-65535,19294-19344"
-        uci set "zapret2.$voice_sec_name.protocol=udp"
-        uci -q delete "zapret2.$voice_sec_name.filter_l3"
-        uci -q delete "zapret2.$voice_sec_name.filter_l7"
-        uci add_list "zapret2.$voice_sec_name.filter_l3=ipv4"
-        uci add_list "zapret2.$voice_sec_name.filter_l7=discord"
-        uci add_list "zapret2.$voice_sec_name.filter_l7=stun"
-        uci set "zapret2.$voice_sec_name.script=--payload=discord_ip_discovery,stun --lua-desync=circular:fails=3:maxtime=20 --lua-desync=fake:blob=blob_stun:repeats=2:strategy=1 --lua-desync=udplen:increment=2:strategy=2 --lua-desync=fake:blob=blob_stun:repeats=4:strategy=3"
-    fi
-
-    uci commit zapret2
-
-    # Restart zapret2 service
-    /etc/init.d/zapret2 restart >/dev/null 2>&1
+    # Restart DPI service
+    restart_dpi_service
     sleep 1
-    local zapret_running=$(/etc/init.d/zapret2 status 2>/dev/null)
+    local zapret_running=$(get_dpi_service_status)
 
     # Test connectivity with curl (Multi-Domain and Data Flow validation)
     local curl_status=0
@@ -1687,51 +1717,53 @@ cmd_activate() {
             ;;
     esac
 
-    # Disable all other sections for this target
-    if [ -n "$base_sec" ]; then
-        uci -q set "zapret2.$base_sec.enabled=0"
-        local s
-        for s in $(uci show zapret2 2>/dev/null | grep -E '^zapret2\.'"$base_sec"'_' | grep '=strategy$' | cut -d'.' -f2 | cut -d'=' -f1); do
-            uci -q set "zapret2.$s.enabled=0"
-        done
-        if [ "$base_sec" = "BlockcheckW_YouTube" ] || [ "$base_sec" = "MyTube" ]; then
-            uci -q set "zapret2.MyTube.enabled=0"
-            uci -q set "zapret2.Youtube_circular.enabled=0"
-            for s in $(uci show zapret2 2>/dev/null | grep -E '^zapret2\.(MyTube_|BlockcheckW_YouTube_)' | grep '=strategy$' | cut -d'.' -f2 | cut -d'=' -f1); do
-                uci -q set "zapret2.$s.enabled=0"
+    # Disable all other sections for this target in both configs
+    for pkg in zapret2 zapret2wizard; do
+        [ -f "/etc/config/$pkg" ] || continue
+        if [ -n "$base_sec" ]; then
+            uci -q set "$pkg.$base_sec.enabled=0"
+            for s in $(uci show "$pkg" 2>/dev/null | grep -E "^$pkg\.$base_sec\_" | grep '=strategy$' | cut -d'.' -f2 | cut -d'=' -f1); do
+                uci -q set "$pkg.$s.enabled=0"
             done
+            if [ "$base_sec" = "BlockcheckW_YouTube" ] || [ "$base_sec" = "MyTube" ]; then
+                uci -q set "$pkg.MyTube.enabled=0"
+                uci -q set "$pkg.Youtube_circular.enabled=0"
+                for s in $(uci show "$pkg" 2>/dev/null | grep -E "^$pkg\.(MyTube_|BlockcheckW_YouTube_)" | grep '=strategy$' | cut -d'.' -f2 | cut -d'=' -f1); do
+                    uci -q set "$pkg.$s.enabled=0"
+                done
+            fi
+            if [ "$base_sec" = "BlockcheckW_Discord" ]; then
+                uci -q set "$pkg.Discord_circular.enabled=0"
+                uci -q set "$pkg.BlockcheckW_Discord_Voice.enabled=0"
+                for s in $(uci show "$pkg" 2>/dev/null | grep -E "^$pkg\.BlockcheckW_Discord_Voice_" | grep '=strategy$' | cut -d'.' -f2 | cut -d'=' -f1); do
+                    uci -q set "$pkg.$s.enabled=0"
+                done
+            fi
+            [ "$base_sec" = "BlockcheckW_General" ] && uci -q set "$pkg.Routerich_circular.enabled=0"
         fi
+
+        # Enable target section
+        uci set "$pkg.$section.enabled=1"
+
+        # Synchronize Discord VoiceFlow strategy
         if [ "$base_sec" = "BlockcheckW_Discord" ]; then
-            uci -q set "zapret2.Discord_circular.enabled=0"
-            uci -q set "zapret2.BlockcheckW_Discord_Voice.enabled=0"
-            for s in $(uci show zapret2 2>/dev/null | grep -E '^zapret2\.BlockcheckW_Discord_Voice_' | grep '=strategy$' | cut -d'.' -f2 | cut -d'=' -f1); do
-                uci -q set "zapret2.$s.enabled=0"
-            done
+            uci -q set "$pkg.blob_stun.enabled=1"
+            local v_idx=$(echo "$section" | grep -oE '_[0-9]+$')
+            local target_voice="BlockcheckW_Discord_Voice${v_idx}"
+            if uci -q get "$pkg.$target_voice" >/dev/null; then
+                uci set "$pkg.$target_voice.enabled=1"
+            elif uci -q get "$pkg.BlockcheckW_Discord_Voice" >/dev/null; then
+                uci set "$pkg.BlockcheckW_Discord_Voice.enabled=1"
+            fi
         fi
-        [ "$base_sec" = "BlockcheckW_General" ] && uci -q set "zapret2.Routerich_circular.enabled=0"
-    fi
+    done
 
-    # Enable target section
-    uci set "zapret2.$section.enabled=1"
-
-    # Synchronize Discord VoiceFlow strategy
-    if [ "$base_sec" = "BlockcheckW_Discord" ]; then
-        uci -q set zapret2.blob_stun.enabled=1
-        local v_idx=$(echo "$section" | grep -oE '_[0-9]+$')
-        local target_voice="BlockcheckW_Discord_Voice${v_idx}"
-        if uci -q get "zapret2.$target_voice" >/dev/null; then
-            uci set "zapret2.$target_voice.enabled=1"
-        elif uci -q get "zapret2.BlockcheckW_Discord_Voice" >/dev/null; then
-            uci set "zapret2.BlockcheckW_Discord_Voice.enabled=1"
-        fi
-    fi
-    uci commit zapret2
-
-    /etc/init.d/zapret2 restart >/dev/null 2>&1
+    sync_uci_commit
+    restart_dpi_service
     sleep 1
-    local zapret_running=$(/etc/init.d/zapret2 status 2>/dev/null)
+    local zapret_running=$(get_dpi_service_status)
 
-    echo "{\"success\":true,\"message\":\"Стратегия $section успешно активирована в Zapret2!\",\"section\":\"$section\",\"zapret2_status\":\"$zapret_running\"}"
+    echo "{\"success\":true,\"message\":\"Стратегия $section успешно активирована в Zapret2Wizard!\",\"section\":\"$section\",\"zapret2_status\":\"$zapret_running\"}"
 }
 
 cmd_delete_strategy() {
@@ -1740,9 +1772,12 @@ cmd_delete_strategy() {
         echo '{"success":false,"error":"Missing section name"}'
         return 1
     fi
-    uci -q delete "zapret2.$section"
-    uci commit zapret2
-    /etc/init.d/zapret2 restart >/dev/null 2>&1
+    for pkg in zapret2 zapret2wizard; do
+        [ -f "/etc/config/$pkg" ] || continue
+        uci -q delete "$pkg.$section"
+    done
+    sync_uci_commit
+    restart_dpi_service
     echo "{\"success\":true,\"message\":\"Запись $section удалена.\"}"
 }
 
@@ -2263,7 +2298,7 @@ EOF
 
 cmd_info() {
     ensure_all_hostlists
-    local zapret_running=$(/etc/init.d/zapret2 status 2>/dev/null)
+    local zapret_running=$(get_dpi_service_status)
 
     lua -e '
         local uci = require("uci").cursor()
@@ -2273,6 +2308,11 @@ cmd_info() {
             zapret2_running = "'"$zapret_running"'",
             services = {}
         }
+
+        local cfg = "zapret2wizard"
+        if not uci:get(cfg, "main") then
+            cfg = "zapret2"
+        end
 
         local vf = io.open("'"$VERSION_FILE"'", "r")
         if vf then
@@ -2286,17 +2326,22 @@ cmd_info() {
         if not res.version then res.version = "0.15.12" end
 
         local hostlists_info = {
-            { key = "youtube", name = "YouTube", file = "/opt/zapret2/ipset/zapret_hosts_youtube.txt", uci_sec = "list_hosts_youtube" },
-            { key = "discord", name = "Discord", file = "/opt/zapret2/ipset/zapret_hosts_discord.txt", uci_sec = "list_hosts_discord" },
-            { key = "x", name = "X (Twitter)", file = "/opt/zapret2/ipset/zapret_hosts_x.txt", uci_sec = "list_hosts_x" },
-            { key = "instagram", name = "Instagram", file = "/opt/zapret2/ipset/zapret_hosts_instagram.txt", uci_sec = "list_hosts_instagram" },
-            { key = "twitch", name = "Twitch", file = "/opt/zapret2/ipset/zapret_hosts_twitch.txt", uci_sec = "list_hosts_twitch" },
-            { key = "user", name = "Общие сайты (User)", file = "/opt/zapret2/ipset/zapret_hosts_user.txt", uci_sec = "list_hosts_user" }
+            { key = "youtube", name = "YouTube", fname = "zapret_hosts_youtube.txt", uci_sec = "list_hosts_youtube" },
+            { key = "discord", name = "Discord", fname = "zapret_hosts_discord.txt", uci_sec = "list_hosts_discord" },
+            { key = "x", name = "X (Twitter)", fname = "zapret_hosts_x.txt", uci_sec = "list_hosts_x" },
+            { key = "instagram", name = "Instagram", fname = "zapret_hosts_instagram.txt", uci_sec = "list_hosts_instagram" },
+            { key = "twitch", name = "Twitch", fname = "zapret_hosts_twitch.txt", uci_sec = "list_hosts_twitch" },
+            { key = "user", name = "Общие сайты (User)", fname = "zapret_hosts_user.txt", uci_sec = "list_hosts_user" }
         }
         local hl_res = {}
         for _, hl in ipairs(hostlists_info) do
+            local file = "/etc/zapret2wizard/ipset/" .. hl.fname
+            local f = io.open(file, "r")
+            if not f then
+                file = "/opt/zapret2/ipset/" .. hl.fname
+                f = io.open(file, "r")
+            end
             local count = 0
-            local f = io.open(hl.file, "r")
             if f then
                 for l in f:lines() do
                     l = l:gsub("^%s+", ""):gsub("%s+$", "")
@@ -2306,11 +2351,11 @@ cmd_info() {
                 end
                 f:close()
             end
-            local has_uci = (uci:get("zapret2", hl.uci_sec) ~= nil)
+            local has_uci = (uci:get(cfg, hl.uci_sec) ~= nil) or (uci:get("zapret2", hl.uci_sec) ~= nil)
             table.insert(hl_res, {
                 key = hl.key,
                 name = hl.name,
-                file = hl.file,
+                file = file,
                 exists = (count > 0 or f ~= nil),
                 domains_count = count,
                 uci_configured = has_uci
@@ -2319,7 +2364,7 @@ cmd_info() {
         res.hostlists = hl_res
 
         local all_strats = {}
-        uci:foreach("zapret2", "strategy", function(s)
+        uci:foreach(cfg, "strategy", function(s)
             local name = s[".name"]
             if name then
                 table.insert(all_strats, {
@@ -2331,6 +2376,20 @@ cmd_info() {
                 })
             end
         end)
+        if #all_strats == 0 and cfg ~= "zapret2" then
+            uci:foreach("zapret2", "strategy", function(s)
+                local name = s[".name"]
+                if name then
+                    table.insert(all_strats, {
+                        section = name,
+                        enabled = (s.enabled == "1" or s.enabled == 1),
+                        port = s.port or "443",
+                        script = s.script or "",
+                        is_circular = (s.script and s.script:find("circular") ~= nil) or false
+                    })
+                end
+            end)
+        end
         res.all_strategies = all_strats
 
         local targets = {
@@ -2747,12 +2806,16 @@ local bcw_ver = run_cmd("/usr/bin/blockcheckw --version")
 local bcw_size = run_cmd("ls -lh /usr/bin/blockcheckw 2>/dev/null | awk '{print $5}'")
 local bcw_md5 = run_cmd("md5sum /usr/bin/blockcheckw 2>/dev/null | awk '{print $1}'")
 
-local zapret_status = run_cmd("/etc/init.d/zapret2 status 2>/dev/null")
+local zapret_status = run_cmd("/etc/init.d/zapret2wizard status 2>/dev/null")
+if zapret_status == "" then zapret_status = run_cmd("/etc/init.d/zapret2 status 2>/dev/null") end
 local zeroblock_status = run_cmd("/etc/init.d/zeroblock status 2>/dev/null")
 local nfqws_procs = run_cmd("ps | grep -E 'nfqws2' | grep -v grep")
 local bcw_procs = run_cmd("ps | grep -E 'blockcheckw' | grep -v grep")
 local nft_tables = run_cmd("nft list tables 2>/dev/null")
-local zapret_uci = run_cmd("uci show zapret2 2>/dev/null | grep -E '\\.name=|\\.strategy=|\\.dual_circuit=|\\.ports=' | head -n 35")
+local zapret_uci = run_cmd("uci show zapret2wizard 2>/dev/null | grep -E '\\.name=|\\.strategy=|\\.dual_circuit=|\\.ports=' | head -n 35")
+if zapret_uci == "" then
+    zapret_uci = run_cmd("uci show zapret2 2>/dev/null | grep -E '\\.name=|\\.strategy=|\\.dual_circuit=|\\.ports=' | head -n 35")
+end
 local dns_servers = run_cmd("cat /etc/resolv.conf 2>/dev/null | grep -E '^nameserver' | tr '\\n' ', '")
 local ggc_diag = run_cmd("curl -4 -s -k --connect-timeout 2 -m 3 'https://redirector.googlevideo.com/report_mapping?di=no'")
 local quic_target = run_cmd("uci -q get firewall.reject_quic.target")

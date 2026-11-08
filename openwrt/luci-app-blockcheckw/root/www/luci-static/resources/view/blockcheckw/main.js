@@ -617,7 +617,7 @@ return view.extend({
 		var zapretBadgeEl = E('span', {
 			class: 'bcw-header-item ' + ((zapretInfo.zapret2_running === 'running') ? 'badge cbi-color-green' : 'badge cbi-color-red'),
 			style: 'border: none;'
-		}, (zapretInfo.zapret2_running === 'running') ? '✓ Zapret2 активен' : '✗ Zapret2 остановлен');
+		}, (zapretInfo.zapret2_running === 'running') ? '✓ Zapret2Wizard активен' : '✗ Zapret2Wizard остановлен');
 
 		// Theme Management (Dark & Light)
 		var THEME_KEY = 'bcw_theme_mode';
@@ -1608,7 +1608,7 @@ return view.extend({
 						updateActiveStrategyDisplay();
 						if (zapretBadgeEl) {
 							zapretBadgeEl.className = 'bcw-header-item ' + ((info.zapret2_running === 'running') ? 'badge cbi-color-green' : 'badge cbi-color-red');
-							zapretBadgeEl.textContent = (info.zapret2_running === 'running') ? '✓ Zapret2 активен' : '✗ Zapret2 остановлен';
+							zapretBadgeEl.textContent = (info.zapret2_running === 'running') ? '✓ Zapret2Wizard активен' : '✗ Zapret2Wizard остановлен';
 						}
 					});
 					refreshLogs();
@@ -2051,7 +2051,7 @@ return view.extend({
 							updateActiveStrategyDisplay();
 							if (zapretBadgeEl) {
 								zapretBadgeEl.className = 'bcw-header-item ' + ((info.zapret2_running === 'running') ? 'badge cbi-color-green' : 'badge cbi-color-red');
-								zapretBadgeEl.textContent = (info.zapret2_running === 'running') ? '✓ Zapret2 активен' : '✗ Zapret2 остановлен';
+								zapretBadgeEl.textContent = (info.zapret2_running === 'running') ? '✓ Zapret2Wizard активен' : '✗ Zapret2Wizard остановлен';
 							}
 						});
 						refreshLogs();
@@ -2289,7 +2289,7 @@ return view.extend({
 						updateActiveStrategyDisplay();
 						if (zapretBadgeEl) {
 							zapretBadgeEl.className = 'bcw-header-item ' + ((info.zapret2_running === 'running') ? 'badge cbi-color-green' : 'badge cbi-color-red');
-							zapretBadgeEl.textContent = (info.zapret2_running === 'running') ? '✓ Zapret2 активен' : '✗ Zapret2 остановлен';
+							zapretBadgeEl.textContent = (info.zapret2_running === 'running') ? '✓ Zapret2Wizard активен' : '✗ Zapret2Wizard остановлен';
 						}
 					});
 					refreshLogs();
