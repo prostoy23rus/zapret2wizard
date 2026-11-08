@@ -1271,20 +1271,40 @@ EOF
         fi
 
         local apply_info=""
-        # Auto-apply if requested and strategies found
+        local apply_ok="0"
+        # Auto-apply if requested and strategies found.
+        # Кандидаты пробуются по очереди: Circular, затем одиночные из vanilla.
+        # Останавливаемся на первом, который прошёл полный тест (all_ok), иначе
+        # сообщаем, что стратегия применена с оговоркой.
         if [ "$auto_apply" = "1" ] && [ "$found_count" -gt 0 ]; then
             write_status "running" 95 "Автоматическое применение стратегии в Zapret2..."
-            local apply_res=""
+            local apply_res="" attempt=0 max_attempts=4
+            local candidates="/tmp/blockcheckw_candidates.$$"
+            : > "$candidates"
             if [ "$do_circular" = "1" ] && [ -f "$OUTPUT_CIRCULAR" ] && [ -s "$OUTPUT_CIRCULAR" ]; then
-                apply_res=$(cmd_apply --target "$target" --file "$OUTPUT_CIRCULAR")
-            elif [ -n "$top_strategy" ]; then
-                echo "$top_strategy" > /tmp/blockcheckw_top_strat.txt
-                apply_res=$(cmd_apply --target "$target" --file /tmp/blockcheckw_top_strat.txt)
+                head -n 2 "$OUTPUT_CIRCULAR" >> "$candidates"
+            fi
+            if [ -f "$OUTPUT_VANILLA" ] && [ -s "$OUTPUT_VANILLA" ]; then
+                head -n 3 "$OUTPUT_VANILLA" >> "$candidates"
             fi
 
+            while IFS= read -r cand; do
+                [ -n "$cand" ] || continue
+                [ "$attempt" -ge "$max_attempts" ] && break
+                attempt=$((attempt + 1))
+                echo "[blockcheckw-helper] Пробую кандидата $attempt/$max_attempts" >> "$LOG_FILE"
+                printf '%s\n' "$cand" > /tmp/blockcheckw_top_strat.txt
+                apply_res=$(cmd_apply --target "$target" --file /tmp/blockcheckw_top_strat.txt)
+                case "$apply_res" in
+                    *'"all_ok":true'*) apply_ok="1"; break ;;
+                esac
+            done < "$candidates"
+            rm -f "$candidates"
+
             if [ -n "$apply_res" ]; then
-                echo "[blockcheckw-helper] Auto-applied strategy to $target: $apply_res" >> "$LOG_FILE"
+                echo "[blockcheckw-helper] Auto-applied strategy to $target (all_ok=$apply_ok): $apply_res" >> "$LOG_FILE"
                 apply_info=",\"auto_applied\":true,\"apply_result\":$apply_res"
+                [ "$apply_ok" = "1" ] || apply_info="$apply_info,\"apply_warning\":\"Стратегия применена, но полный тест не пройден\""
             fi
         fi
 
@@ -1294,7 +1314,13 @@ EOF
             echo "[blockcheckw-helper] Scan failed with DNS error: $dns_err" >> "$LOG_FILE"
         elif [ "$found_count" -gt 0 ]; then
             local final_msg="Найдено рабочих стратегий: $found_count"
-            [ "$auto_apply" = "1" ] && final_msg="$final_msg (Успешно применена в Zapret2!)"
+            if [ "$auto_apply" = "1" ]; then
+                if [ "$apply_ok" = "1" ]; then
+                    final_msg="$final_msg (применена и проверена в Zapret2)"
+                elif [ -n "$apply_res" ]; then
+                    final_msg="$final_msg (применена, но полный тест не пройден)"
+                fi
+            fi
             write_status "done" 100 "$final_msg" ",\"strategies\":$strats_json$apply_info"
             echo "[blockcheckw-helper] Finished successfully. Found $found_count working strategies." >> "$LOG_FILE"
         else
