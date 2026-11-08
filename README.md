@@ -52,7 +52,7 @@ sh -c "$(curl -sSL https://raw.githubusercontent.com/prostoy23rus/zapret2wizard/
   - 🐦 **X / Twitter (3)**: `x.com`, `api.x.com`, `pbs.twimg.com`
   - 📸 **Instagram (2)**: `gateway.instagram.com`, `static.cdninstagram.com`
   - 🌐 **Встроенные хосты (33)**: Rutracker, Pornhub, TorProject, BBC и др.
-  - ⚡ **Кандидаты TCP 16-20 KB (110)**: хосты с искусственным DPI-throttling.
+  - ⚡ **Лимит данных (16 КБ)** — скрытая диагностическая техника (в интерфейсе не показывается): подбор стратегии против обрезки ответа на ~16 КБ, проверяется на реальном хосте через `blockcheckw-helper start --target tcp16`.
   - 🎯 **Свои домены**: ввод любого произвольного домена или списка доменов через пробел.
   - 🧪 **Тест стратегии**: ручная проверка любой сырой строки десинка.
 

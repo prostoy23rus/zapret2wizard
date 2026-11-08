@@ -837,7 +837,7 @@ cmd_start() {
             ;;
         tcp16)
             domain=$(get_preset_param "tcp16" "domain")
-            [ -n "$domain" ] || domain="media.miele.com"
+            [ -n "$domain" ] || domain="discord.com"
             protocols="tls12,tls13"
             ;;
         builtin|general)
@@ -1587,8 +1587,8 @@ cmd_apply() {
             base_sec="BlockcheckW_TCP16"
             port="443"
             l7="tls"
-            hostlist="list_hosts_user"
-            test_url="https://media.miele.com"
+            hostlist="list_hosts_discord"
+            test_url="https://discord.com"
             ;;
         builtin|general)
             base_sec="BlockcheckW_General"
@@ -2451,7 +2451,7 @@ cmd_info() {
             x = { base = "BlockcheckW_X", name = "X (Twitter)" },
             preset_instagram = { base = "BlockcheckW_Instagram", name = "Предустановленный список Instagram (2)" },
             instagram = { base = "BlockcheckW_Instagram", name = "Instagram" },
-            tcp16 = { base = "BlockcheckW_TCP16", name = "Кандидаты TCP 16-20 KB (110)" },
+            tcp16 = { base = "BlockcheckW_TCP16", name = "Лимит данных (16 КБ)" },
             domains = { base = "BlockcheckW_Custom", name = "Свои домены" },
             custom = { base = "BlockcheckW_Custom", name = "Свои домены" },
             test_strategy = { base = "BlockcheckW_General", name = "Тест стратегии" }

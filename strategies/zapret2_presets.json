@@ -287,18 +287,18 @@
       ]
     },
     "tcp16": {
-      "name": "Кандидаты TCP 16-20 KB (110)",
-      "label": "TCP 16-20 KB (110)",
-      "domain": "media.miele.com",
-      "test_url": "https://media.miele.com",
-      "hostlist": "list_hosts_user",
+      "name": "Лимит данных (16 КБ)",
+      "label": "Лимит данных (16 КБ)",
+      "domain": "discord.com",
+      "test_url": "https://discord.com",
+      "hostlist": "list_hosts_discord",
       "port": "443",
       "protocols": [
         "tls12",
         "tls13"
       ],
       "filter_l7": "tls",
-      "description": "110 хостов TCP 16-20 KB (Miele, Roxio, GetScope и др.)",
+      "description": "Скрытый зонд: стратегии против обрезки ответа на ~16 КБ. Проверяется на реальном хосте, который в РФ режется по объёму (discord.com).",
       "turbo_strategies": [
         "--payload=tls_client_hello --lua-desync=multidisorder:pos=1,midsld",
         "--payload=tls_client_hello --lua-desync=multisplit:pos=10:seqovl=1",
