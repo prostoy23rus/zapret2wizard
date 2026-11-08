@@ -1414,8 +1414,16 @@ EOF
                 write_status "error" 0 "Ошибка подбора: $last_err" ",\"strategies\":[]"
                 echo "[blockcheckw-helper] Scan failed with exit code $exit_code: $last_err" >> "$LOG_FILE"
             else
-                write_status "done" 100 "Поиск завершен. Ничего не подошло, попробуйте глубокий скан." ",\"strategies\":[]"
-                echo "[blockcheckw-helper] Scan completed with 0 matches." >> "$LOG_FILE"
+                # Новых вариантов нет — но это не значит, что обход не работает:
+                # ранее применённая стратегия остаётся в конфиге. Проверяем её.
+                local cur_test=$(cmd_test "$target" "" 2>/dev/null | tail -n 1)
+                if printf '%s' "$cur_test" | grep -q '"all_ok":true'; then
+                    write_status "done" 100 "Новых стратегий не найдено — текущая конфигурация уже работает" ",\"strategies\":[],\"current_ok\":true"
+                    echo "[blockcheckw-helper] 0 новых, текущая стратегия рабочая" >> "$LOG_FILE"
+                else
+                    write_status "done" 100 "Поиск завершен. Ничего не подошло, попробуйте глубокий скан." ",\"strategies\":[],\"current_ok\":false"
+                    echo "[blockcheckw-helper] Scan completed with 0 matches." >> "$LOG_FILE"
+                fi
             fi
         fi
 

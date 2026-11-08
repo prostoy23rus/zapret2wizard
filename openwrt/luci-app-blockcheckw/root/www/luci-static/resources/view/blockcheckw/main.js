@@ -2671,8 +2671,8 @@ return view.extend({
 								showManualStrategiesFoundModal(stratsCount);
 							} else {
 								bcwShowModal('Результат поиска', [
-									E('p', { class: 'cbi-color-yellow', style: 'font-weight: bold; font-size: 14px;' }, '⚠️ Рабочих стратегий не найдено'),
-									E('p', { style: 'font-size: 13px; color: #abb2bf; margin-top: 8px;' }, 'Попробуйте запустить «Глубокий скан» для полного перебора или проверьте доступность интернета/домена.')
+									E('p', { class: st.current_ok ? 'cbi-color-green' : 'cbi-color-yellow', style: 'font-weight: bold; font-size: 14px;' }, st.current_ok ? '✓ Новых стратегий не найдено — текущая работает' : '⚠️ Рабочих стратегий не найдено'),
+									E('p', { style: 'font-size: 13px; color: #abb2bf; margin-top: 8px;' }, st.current_ok ? 'Стратегия уже применена и проверена: сервис открывается. Новые варианты не нужны.' : 'Попробуйте запустить «Глубокий скан» для полного перебора или проверьте доступность интернета/домена.')
 								], [
 									E('button', {
 										class: 'cbi-button cbi-button-neutral',
