@@ -3169,6 +3169,25 @@ cmd_update() {
         return 1
     fi
 
+    # Целостность: обрезанный main.js ломает весь интерфейс.
+    local main_size=$(wc -c < "$tmp_dir/main.js" 2>/dev/null || echo 0)
+    local helper_size=$(wc -c < "$tmp_dir/blockcheckw-helper" 2>/dev/null || echo 0)
+    if [ "${main_size:-0}" -lt 100000 ] || ! grep -q 'view.extend' "$tmp_dir/main.js" 2>/dev/null; then
+        rm -rf "$tmp_dir"
+        echo '{"success":false,"error":"Файл main.js скачался не полностью — обновление отменено, прежний интерфейс сохранён. Попробуйте ещё раз."}'
+        return 1
+    fi
+    if [ "${helper_size:-0}" -lt 50000 ] || ! head -n 1 "$tmp_dir/blockcheckw-helper" 2>/dev/null | grep -q '^#!/bin/sh'; then
+        rm -rf "$tmp_dir"
+        echo '{"success":false,"error":"Скрипт helper скачался не полностью — обновление отменено."}'
+        return 1
+    fi
+    if ! grep -q '"version"' "$tmp_dir/version.json" 2>/dev/null; then
+        rm -rf "$tmp_dir"
+        echo '{"success":false,"error":"version.json скачался не полностью — обновление отменено."}'
+        return 1
+    fi
+
     mkdir -p /usr/bin /usr/share/blockcheckw /usr/share/luci/menu.d /usr/share/rpcd/acl.d /www/luci-static/resources/view/blockcheckw
     chmod 755 /www/luci-static/resources/view/blockcheckw /usr/share/blockcheckw 2>/dev/null || true
 

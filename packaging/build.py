@@ -142,6 +142,12 @@ if [ ! -d "$HERE/payload" ]; then
     tar -xf "$HERE/payload.tar" -C "$HERE"
 fi
 
+MAINJS="$HERE/payload/www/luci-static/resources/view/blockcheckw/main.js"
+if [ "$(wc -c < "$MAINJS" 2>/dev/null || echo 0)" -lt 100000 ]; then
+    echo "  ОШИБКА: main.js в бандле повреждён — установка отменена, ничего не изменено."
+    exit 1
+fi
+
 # Не перетираем существующий конфиг со стратегиями при обновлении.
 if [ -f /etc/config/zapret2wizard ] && [ -f "$HERE/payload/etc/config/zapret2wizard" ]; then
     cp -f /etc/config/zapret2wizard /tmp/zapret2wizard.cfg.keep
@@ -181,7 +187,7 @@ echo "Откройте LuCI → Службы → Zapret2Wizard и запусти
 
 def build_bundle(items, version: str, arch: str, out_path: str):
     payload = io.BytesIO()
-    with tarfile.open(fileobj=payload, mode="w") as tar:
+    with tarfile.open(fileobj=payload, mode="w", format=tarfile.GNU_FORMAT) as tar:
         for rel, src, mode, link in items:
             info = tarfile.TarInfo(f"payload/{rel}")
             info.mode = mode
@@ -203,7 +209,7 @@ def build_bundle(items, version: str, arch: str, out_path: str):
     digest = hashlib.sha256(payload_bytes).hexdigest()
 
     with open(out_path, "wb") as f:
-        with tarfile.open(fileobj=f, mode="w:gz") as tar:
+        with tarfile.open(fileobj=f, mode="w:gz", format=tarfile.GNU_FORMAT) as tar:
             for name, content in [
                 (f"zapret2wizard-{version}-{arch}/install.sh", BUNDLE_INSTALLER),
                 (f"zapret2wizard-{version}-{arch}/payload.tar", payload_bytes),
