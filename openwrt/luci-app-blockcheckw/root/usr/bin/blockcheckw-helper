@@ -1614,6 +1614,13 @@ cmd_apply() {
         script_text=$(cat "$script_file")
     fi
 
+    # Иногда в файл попадает целая строка лога blockcheck2 вида
+    # "curl_test_https_tls12 ipv4 discord.com : nfqws2 --payload=...". Оставляем только аргументы.
+    case "$script_text" in
+        *" : nfqws2 "*) script_text="${script_text##* : nfqws2 }" ;;
+    esac
+    script_text=$(printf '%s' "$script_text" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+
     # Неполная стратегия (обрывок вроде "--payload=tls_client_hello") ломает обход.
     if [ -n "$script_text" ] && ! printf '%s' "$script_text" | grep -q -- '--lua-desync\|--new\|--filter'; then
         echo '{"success":false,"error":"Стратегия неполная: нет --lua-desync"}'

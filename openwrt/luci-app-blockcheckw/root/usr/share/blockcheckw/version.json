@@ -1,12 +1,12 @@
 {
-  "version": "0.18.23",
+  "version": "0.18.24",
   "release_date": "2026-11-09",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "Добавлены приёмы из tspu-class-test: multidisorder:pos=sld, чистый fake, fake с named-блобом fake_default_tls",
-    "Новая команда blockcheckw-helper class: матрица из 9 приёмов показывает, что пропускает ТСПУ",
-    "Пресеты YouTube и «Свои домены» дополнены этими техниками",
-    "Сообщение при нулевом подборе учитывает рабочую текущую стратегию"
+    "apply очищает строку стратегии от префикса вида curl_test_https_tls12 ipv4 domain : nfqws2",
+    "Команда class: матрица 9 приёмов ТСПУ с восстановлением прежней стратегии",
+    "Добавлены приёмы из tspu-class-test: multidisorder:pos=sld, чистый fake, fake с fake_default_tls",
+    "Понятное сообщение при нулевом подборе, если текущая стратегия работает"
   ]
 }
