@@ -275,7 +275,7 @@ start_service() {
 	guard_conflicts
 
 	[ -x "$NFQWS_BIN" ] || {
-		logger -t zapret2wizard "Error: nfqws2 binary not found at $NFQWS_BIN"
+		logger -t zapret2wizard "Error: nfqws2 binary not found at $NFQWS_BIN — служба не запущена. Установите ядро (см. install.sh) и проверьте: blockcheckw-helper doctor"
 		return 1
 	}
 

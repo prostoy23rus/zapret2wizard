@@ -257,17 +257,48 @@ if [ ! -x /usr/bin/nfqws2 ]; then
 fi
 if [ ! -x /usr/bin/nfqws2 ]; then
     ZAPRET_DIR="linux-${ARCH}"
-    ZAPRET_URL="https://github.com/bol-van/zapret2/releases/download/v1.0.7/zapret2-v1.0.7.tar.gz"
+    ZAPRET_TAG="v1.0.7"
+    ZAPRET_TARBALL="zapret2-${ZAPRET_TAG}.tar.gz"
+    ZAPRET_URL="https://github.com/bol-van/zapret2/releases/download/${ZAPRET_TAG}/${ZAPRET_TARBALL}"
     echo -e "${BLUE}ℹ${NC} Загрузка ядра nfqws2 для ${BOLD}${ZAPRET_DIR}${NC}..."
-    if ! curl -fsSL -k --connect-timeout 8 "$ZAPRET_URL" 2>/dev/null | tar -xz -O --wildcards "*/binaries/${ZAPRET_DIR}/nfqws2" > /usr/bin/nfqws2 2>/dev/null; then
-        curl -fsSL -k --connect-timeout 10 "https://ghproxy.net/$ZAPRET_URL" 2>/dev/null | tar -xz -O --wildcards "*/binaries/${ZAPRET_DIR}/nfqws2" > /usr/bin/nfqws2 2>/dev/null || true
-    fi
-    chmod +x /usr/bin/nfqws2 2>/dev/null || true
+
+    _install_nfqws2() {
+        local url="$1" out="/tmp/zap2.$$.tgz"
+        rm -f "$out" /tmp/nfqws2.$$ 2>/dev/null
+        curl -fsSL -k --connect-timeout 8 -m 180 "$url" -o "$out" 2>/dev/null || { rm -f "$out"; return 1; }
+        [ -s "$out" ] || { rm -f "$out"; return 1; }
+        tar -xz -O --wildcards "*/binaries/${ZAPRET_DIR}/nfqws2" < "$out" > /tmp/nfqws2.$$ 2>/dev/null
+        local size=$(wc -c < /tmp/nfqws2.$$ 2>/dev/null || echo 0)
+        rm -f "$out"
+        if [ "${size:-0}" -gt 50000 ]; then
+            cp -f /tmp/nfqws2.$$ /usr/bin/nfqws2
+            chmod +x /usr/bin/nfqws2
+            rm -f /tmp/nfqws2.$$
+            return 0
+        fi
+        rm -f /tmp/nfqws2.$$
+        return 1
+    }
+
+    # Прямой GitHub, затем зеркала; три попытки, потому что соединение бывает рваным.
+    for attempt in 1 2 3; do
+        _install_nfqws2 "$ZAPRET_URL" && break
+        _install_nfqws2 "https://ghproxy.net/$ZAPRET_URL" && break
+        _install_nfqws2 "https://gh-proxy.com/$ZAPRET_URL" && break
+        echo -e "${YELLOW}ℹ${NC} Попытка ${attempt} не удалась, повтор..."
+        sleep 2
+    done
 fi
 if [ -x /usr/bin/nfqws2 ]; then
     echo -e "${GREEN}✓${NC} Бинарник nfqws2 готов: ${BOLD}/usr/bin/nfqws2${NC}"
 else
-    echo -e "${YELLOW}[WARN] nfqws2 не найден, будет использован системный путь при наличии.${NC}"
+    NFQWS2_MISSING=1
+    echo -e "${RED}[ERROR] nfqws2 не установлен — без него служба не запустится.${NC}"
+    echo -e "${YELLOW}Установите вручную:${NC}"
+    echo -e "  cd /tmp"
+    echo -e "  curl -fsSL -k -m 180 \"https://github.com/bol-van/zapret2/releases/download/v1.0.7/zapret2-v1.0.7.tar.gz\" -o zap2.tgz"
+    echo -e "  tar -xz -O --wildcards \"*/binaries/linux-${ARCH}/nfqws2\" < zap2.tgz > /usr/bin/nfqws2"
+    echo -e "  chmod +x /usr/bin/nfqws2 && mkdir -p /opt/zapret2/nfq2 && ln -sf /usr/bin/nfqws2 /opt/zapret2/nfq2/nfqws2"
 fi
 
 # Rust-сканер blockcheckw ищет движок по <base>/nfq2/nfqws2 (src/config.rs),
@@ -408,3 +439,11 @@ echo -e "  🔗 Ссылка: ${CYAN}http://${ROUTER_IP}/cgi-bin/luci/admin/serv
 echo -e "В будущем вы сможете обновлять службу в 1 клик прямо из веб-интерфейса LuCI"
 echo -e "с помощью кнопки ${BOLD}[ 🔄 Проверить обновление ]${NC}."
 echo ""
+
+if [ "${NFQWS2_MISSING:-0}" = "1" ]; then
+    echo -e "${RED}${BOLD}ВНИМАНИЕ:${NC} ${RED}движок nfqws2 не установлен, служба не запустится.${NC}"
+    echo -e "Выполните команды из блока [ERROR] выше или запустите установщик повторно —"
+    echo -e "он скачает ядро с одного из зеркал. После установки проверьте:"
+    echo -e "  ${BOLD}blockcheckw-helper doctor${NC}"
+    exit 1
+fi
