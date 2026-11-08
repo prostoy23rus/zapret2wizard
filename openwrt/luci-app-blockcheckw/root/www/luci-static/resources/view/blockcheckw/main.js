@@ -804,6 +804,15 @@ return view.extend({
 			document.createTextNode(' Проверка обновлений (v' + curVer + ')...')
 		]);
 
+		var btnDiagnostics = E('button', {
+			class: 'bcw-header-item bcw-header-btn',
+			title: 'Проверить состояние службы и bypass: служба, движок, nft, живая проверка',
+			click: function() { showDiagnosticsModal(); }
+		}, [
+			E('span', {}, '🩺'),
+			' Диагностика'
+		]);
+
 		var btnFeedback = E('a', {
 			class: 'bcw-header-item bcw-header-btn',
 			href: 'https://github.com/prostoy23rus/zapret2wizard/issues',
@@ -840,6 +849,7 @@ return view.extend({
 			zapretBadgeEl,
 			themeSelectEl,
 			btnHostlists,
+			btnDiagnostics,
 			btnCheckUpdate,
 			btnFeedback,
 			btnUninstall
@@ -2387,7 +2397,10 @@ return view.extend({
 			}
 
 			var httpCode = (opts.applyResult && opts.applyResult.http_code) || opts.httpCode || null;
-			var isConnected = (opts.applyResult && opts.applyResult.connected) || opts.connected || (httpCode && parseInt(httpCode) > 0);
+			var codeNum = parseInt(httpCode || '0', 10) || 0;
+			// «000» — ответа нет: успехом это считать нельзя.
+			var netOk = codeNum > 0;
+			var isConnected = netOk;
 
 			var body = [
 				E('div', {
@@ -2395,7 +2408,7 @@ return view.extend({
 				}, [
 					E('div', { style: 'display: flex; align-items: center; gap: 10px; font-weight: bold; font-size: 15px; color: #00d1b2;' }, [
 						E('span', { style: 'font-size: 24px; line-height: 1;' }, '🚀'),
-						E('span', {}, 'Вам ничего не нужно настраивать — всё уже работает!')
+						E('span', {}, netOk ? 'Вам ничего не нужно настраивать — всё уже работает!' : 'Стратегия сохранена, но ресурс не ответил')
 					]),
 					E('p', { style: 'margin: 8px 0 0 0; font-size: 13px; color: #e5e9f0; line-height: 1.5;' },
 						'Найденная стратегия уже ' + (isAuto ? 'автоматически' : 'успешно') + ' сохранена в конфигурацию роутера, а служба Zapret2 перезапущена. ' +
@@ -2418,10 +2431,13 @@ return view.extend({
 						E('span', { style: 'color: #abb2bf;' }, '⚙️ Статус службы:'),
 						E('span', { style: 'color: #98c379; font-weight: bold;' }, '✓ Zapret2 перезапущен и активен')
 					]),
-					isConnected ? E('div', { style: 'display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px;' }, [
+					netOk ? E('div', { style: 'display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px;' }, [
 						E('span', { style: 'color: #abb2bf;' }, '🌐 Проверка сети:'),
-						E('span', { style: 'color: #98c379; font-weight: bold;' }, '✓ Ресурс успешно отвечает' + (httpCode ? ' (HTTP ' + httpCode + ')' : ''))
-					]) : null
+						E('span', { style: 'color: #98c379; font-weight: bold;' }, '✓ Ресурс отвечает (HTTP ' + httpCode + ')')
+					]) : E('div', { style: 'display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px;' }, [
+						E('span', { style: 'color: #abb2bf;' }, '🌐 Проверка сети:'),
+						E('span', { style: 'color: #e5605c; font-weight: bold;' }, '✗ Ответа нет' + (httpCode ? ' (HTTP ' + httpCode + ')' : '') + ' — обход не подтверждён')
+					])
 				].filter(Boolean)),
 
 				E('div', { style: 'font-size: 13px; line-height: 1.5; color: #abb2bf;' }, [
@@ -3415,6 +3431,24 @@ return view.extend({
 					}, 'Закрыть')
 				]);
 			});
+		}
+
+		// Диагностика: selftest в модальном окне с копированием результата.
+		function showDiagnosticsModal() {
+			var pre = E('pre', { style: 'max-height: 460px; overflow: auto; margin: 0; padding: 12px; background: #0c1016; border: 1px solid var(--bcw-border-divider); border-radius: 8px; font: 12px/1.5 ui-monospace, monospace; color: #cfe0ff; white-space: pre-wrap;' }, 'Собираю отчёт…');
+			var copyBtn = E('button', {
+				class: 'btn cbi-button cbi-button-action',
+				click: function() {
+					var text = pre.textContent || '';
+					if (navigator.clipboard) { navigator.clipboard.writeText(text); }
+					else { var r = document.createRange(); r.selectNodeContents(pre); var s = window.getSelection(); s.removeAllRanges(); s.addRange(r); }
+				}
+			}, '📋 Скопировать');
+			var closeBtn = E('button', { class: 'btn cbi-button cbi-button-neutral', click: function() { ui.hideModal(); } }, 'Закрыть');
+			bcwShowModal('🩺 Диагностика службы', [pre], [copyBtn, closeBtn]);
+			fs.exec(HELPER_BIN, ['selftest']).then(function(res) {
+				pre.textContent = (res && res.stdout) ? res.stdout.trim() : 'Нет ответа от helper';
+			}).catch(function() { pre.textContent = 'Ошибка вызова helper'; });
 		}
 
 		function showHostlistsModal(hostlists) {
