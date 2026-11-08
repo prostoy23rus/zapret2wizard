@@ -779,12 +779,22 @@ return view.extend({
 			'Удалить службу'
 		]);
 
+		var btnHostlists = E('button', {
+			class: 'bcw-header-item bcw-header-btn',
+			title: 'Просмотр и правка списков доменов, которые обходит служба',
+			click: function() { showHostlistsModal(zapretInfo.hostlists); }
+		}, [
+			E('span', {}, '📋'),
+			'Списки доменов'
+		]);
+
 		var headerRightActions = E('div', {
 			class: 'bcw-header-actions',
 			style: 'display: flex; align-items: center; gap: 8px; flex-wrap: wrap;'
 		}, [
 			zapretBadgeEl,
 			themeSelectEl,
+			btnHostlists,
 			btnCheckUpdate,
 			btnFeedback,
 			btnUninstall
@@ -2903,45 +2913,142 @@ return view.extend({
 		}
 
 		function showHostlistsModal(hostlists) {
-			var lists = hostlists || zapretInfo.hostlists || [];
-			var rows = [];
+			var lists = (hostlists || zapretInfo.hostlists || []).slice();
 
 			if (!lists || lists.length === 0) {
 				lists = [
-					{ key: 'youtube', name: 'YouTube', file: '/etc/zapret2wizard/ipset/zapret_hosts_youtube.txt', domains_count: 9, uci_configured: true },
-					{ key: 'discord', name: 'Discord', file: '/etc/zapret2wizard/ipset/zapret_hosts_discord.txt', domains_count: 9, uci_configured: true },
-					{ key: 'x', name: 'X (Twitter)', file: '/etc/zapret2wizard/ipset/zapret_hosts_x.txt', domains_count: 10, uci_configured: true },
-					{ key: 'instagram', name: 'Instagram', file: '/etc/zapret2wizard/ipset/zapret_hosts_instagram.txt', domains_count: 9, uci_configured: true },
-					{ key: 'twitch', name: 'Twitch', file: '/etc/zapret2wizard/ipset/zapret_hosts_twitch.txt', domains_count: 6, uci_configured: true },
-					{ key: 'user', name: 'Общие сайты (User)', file: '/etc/zapret2wizard/ipset/zapret_hosts_user.txt', domains_count: 33, uci_configured: true }
+					{ key: 'youtube', name: 'YouTube', file: '/etc/zapret2wizard/ipset/zapret_hosts_youtube.txt', domains_count: 0, uci_configured: true },
+					{ key: 'discord', name: 'Discord', file: '/etc/zapret2wizard/ipset/zapret_hosts_discord.txt', domains_count: 0, uci_configured: true },
+					{ key: 'x', name: 'X (Twitter)', file: '/etc/zapret2wizard/ipset/zapret_hosts_x.txt', domains_count: 0, uci_configured: true },
+					{ key: 'instagram', name: 'Instagram', file: '/etc/zapret2wizard/ipset/zapret_hosts_instagram.txt', domains_count: 0, uci_configured: true },
+					{ key: 'twitch', name: 'Twitch', file: '/etc/zapret2wizard/ipset/zapret_hosts_twitch.txt', domains_count: 0, uci_configured: true },
+					{ key: 'user', name: 'Общие сайты (User)', file: '/etc/zapret2wizard/ipset/zapret_hosts_user.txt', domains_count: 0, uci_configured: true },
+					{ key: 'exclude', name: 'Исключения (не обходить)', file: '/etc/zapret2wizard/ipset/zapret_hosts_user_exclude.txt', domains_count: 0, uci_configured: true }
 				];
 			}
 
-			lists.forEach(function(hl) {
-				var countText = (hl.domains_count || 0) + ' доменов';
-				var isOk = (hl.domains_count > 0 && hl.uci_configured);
-				rows.push(E('div', {
-					style: 'display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; background: rgba(255,255,255,0.03); border: 1px solid #383e4a; border-radius: 6px; margin-bottom: 8px;'
-				}, [
-					E('div', {}, [
-						E('div', { style: 'font-weight: bold; color: #e5e9f0; font-size: 13px; display: flex; align-items: center; gap: 6px;' }, [
-							E('span', { style: 'color: ' + (isOk ? '#98c379' : '#e5c07b') }, isOk ? '✓' : '⚠️'),
-							hl.name
-						]),
-						E('div', { style: 'font-size: 11.5px; color: #abb2bf; font-family: monospace; margin-top: 3px;' }, hl.file)
-					]),
-					E('div', { style: 'text-align: right;' }, [
-						E('div', { style: 'font-weight: bold; color: ' + (hl.domains_count > 0 ? '#98c379' : '#e06c75') + '; font-size: 13px;' },
-							countText
-						),
-						E('div', { style: 'font-size: 11px; color: ' + (hl.uci_configured ? '#61afef' : '#e5c07b') + ';' },
-							hl.uci_configured ? 'Zapret2 подключен' : 'Секция создается...'
-						)
-					])
-				]));
-			});
+			var listContainer = E('div', { id: 'bcw-hostlists-container' });
 
-			var statusContainer = E('div', { id: 'bcw-hostlists-container' }, rows);
+			function parseHelperJson(res) {
+				if (res && res.stdout) {
+					try { return JSON.parse(res.stdout); } catch (e) {}
+				}
+				return null;
+			}
+
+			function buildRow(hl) {
+				var count = hl.domains_count || 0;
+				var isOk = (count > 0 && hl.uci_configured);
+
+				var status = E('div', { style: 'font-size: 12px; margin-top: 6px; color: #abb2bf;' }, '');
+				var area = E('textarea', {
+					rows: 6,
+					spellcheck: 'false',
+					style: 'width: 100%; box-sizing: border-box; font-family: monospace; font-size: 12px; background: #1b1f27; color: #e5e9f0; border: 1px solid #383e4a; border-radius: 6px; padding: 8px;'
+				});
+
+				var editor = E('div', { style: 'display: none; margin-top: 10px;' }, [
+					E('div', { style: 'font-size: 12px; color: #abb2bf; margin-bottom: 6px;' },
+						'По одному домену в строке. Префикс «^» исключает поддомен. После сохранения служба перезапустится.'),
+					area,
+					E('div', { style: 'margin-top: 8px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;' }, [
+						E('button', {
+							class: 'bcw-btn-launch',
+							style: 'height: 32px; font-size: 12.5px;',
+							click: function() {
+								var self = this;
+								var domains = (area.value || '').split('\n').map(function(s) {
+									return s.trim();
+								}).filter(function(s) {
+									return s.length > 0;
+								});
+								self.disabled = true;
+								status.textContent = '⏳ Сохраняю и перезапускаю службу...';
+								fs.exec(HELPER_BIN, ['write_hostlist', hl.key].concat(domains)).then(function(res) {
+									var out = parseHelperJson(res);
+									if (!out || !out.success) {
+										status.textContent = '✗ ' + ((out && out.error) || 'не удалось сохранить список');
+										return null;
+									}
+									status.textContent = '✓ Записано: ' + out.written + ', пропущено: ' + out.skipped + ', всего: ' + out.count;
+									return getZapretInfo().then(function(info) {
+										zapretInfo = info || {};
+										lists = (zapretInfo.hostlists || lists).slice();
+										renderAll();
+										ui.addNotification(null, E('p', {}, '✓ Список «' + hl.name + '» сохранён'), 'info');
+									});
+								}).catch(function(err) {
+									status.textContent = '✗ Ошибка: ' + err;
+								}).then(function() {
+									self.disabled = false;
+								});
+							}
+						}, '💾 Сохранить'),
+						E('button', {
+							class: 'bcw-btn-secondary',
+							style: 'height: 32px; font-size: 12.5px;',
+							click: function() { editor.style.display = 'none'; }
+						}, 'Отмена'),
+						status
+					])
+				]);
+
+				var btnEdit = E('button', {
+					class: 'bcw-btn-secondary',
+					style: 'height: 30px; font-size: 12px;',
+					click: function() {
+						var opening = (editor.style.display === 'none');
+						editor.style.display = opening ? 'block' : 'none';
+						if (!opening) return;
+						area.value = '';
+						status.textContent = '⏳ Читаю список...';
+						fs.exec(HELPER_BIN, ['read_hostlist', hl.key]).then(function(res) {
+							var out = parseHelperJson(res);
+							if (out && out.success) {
+								area.value = (out.domains || []).join('\n');
+								status.textContent = 'Доменов: ' + out.count + ' — правьте и сохраняйте';
+							} else {
+								status.textContent = '✗ ' + ((out && out.error) || 'не удалось прочитать список');
+							}
+						}).catch(function(err) {
+							status.textContent = '✗ Ошибка: ' + err;
+						});
+					}
+				}, '✏️ Изменить');
+
+				return E('div', {
+					style: 'padding: 10px 14px; background: rgba(255,255,255,0.03); border: 1px solid #383e4a; border-radius: 6px; margin-bottom: 8px;'
+				}, [
+					E('div', { style: 'display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;' }, [
+						E('div', {}, [
+							E('div', { style: 'font-weight: bold; color: #e5e9f0; font-size: 13px; display: flex; align-items: center; gap: 6px;' }, [
+								E('span', { style: 'color: ' + (isOk ? '#98c379' : '#e5c07b') }, isOk ? '✓' : '⚠️'),
+								hl.name
+							]),
+							E('div', { style: 'font-size: 11.5px; color: #abb2bf; font-family: monospace; margin-top: 3px;' }, hl.file)
+						]),
+						E('div', { style: 'display: flex; align-items: center; gap: 10px;' }, [
+							E('div', { style: 'text-align: right;' }, [
+								E('div', { style: 'font-weight: bold; color: ' + (count > 0 ? '#98c379' : '#e06c75') + '; font-size: 13px;' },
+									count + ' доменов'),
+								E('div', { style: 'font-size: 11px; color: ' + (hl.uci_configured ? '#61afef' : '#e5c07b') + ';' },
+									hl.uci_configured ? 'Zapret2 подключен' : 'Секция создается...')
+							]),
+							btnEdit
+						])
+					]),
+					editor
+				]);
+			}
+
+			function renderAll() {
+				listContainer.innerHTML = '';
+				(lists || []).forEach(function(hl) {
+					listContainer.appendChild(buildRow(hl));
+				});
+			}
+
+			renderAll();
 
 			var refreshBtn = E('button', {
 				class: 'bcw-btn-launch',
@@ -2954,12 +3061,14 @@ return view.extend({
 						return getZapretInfo();
 					}).then(function(info) {
 						zapretInfo = info || {};
-						showHostlistsModal(zapretInfo.hostlists);
+						lists = (zapretInfo.hostlists || lists).slice();
+						renderAll();
 						ui.addNotification(null, E('p', {}, '✓ Все списки доменов проверены и синхронизированы с Zapret2!'), 'info');
 					}).catch(function(err) {
-						self.disabled = false;
-						self.textContent = '🔄 Повторить проверку';
 						ui.addNotification(null, E('p', {}, 'Ошибка проверки: ' + err), 'danger');
+					}).then(function() {
+						self.disabled = false;
+						self.textContent = '🔄 Проверить и восстановить сейчас';
 					});
 				}
 			}, [ '🔄 Проверить и восстановить сейчас' ]);
@@ -2970,13 +3079,14 @@ return view.extend({
 				click: function() { ui.hideModal(); }
 			}, [ 'Закрыть' ]);
 
-			bcwShowModal('📋 Изолированные списки доменов Zapret2', [
+			bcwShowModal('📋 Списки доменов Zapret2', [
 				E('div', { style: 'margin-bottom: 14px; font-size: 13px; color: #abb2bf; line-height: 1.5;' }, [
-					'BlockcheckW автоматически поддерживает и восстанавливает отдельные списки доменов в ',
+					'Списки лежат в ',
 					E('code', { style: 'color: #98c379;' }, '/etc/zapret2wizard/ipset/'),
-					' при каждом открытии страницы и перед запуском сканирования. Ваши добавленные домены всегда сохраняются.'
+					'. Кнопка «Изменить» открывает редактор: правки сохраняются в файл и применяются перезапуском службы. ',
+					'Список «Исключения» работает наоборот — его домены служба обходить не будет.'
 				]),
-				statusContainer
+				listContainer
 			], [ refreshBtn, closeBtn ]);
 		}
 

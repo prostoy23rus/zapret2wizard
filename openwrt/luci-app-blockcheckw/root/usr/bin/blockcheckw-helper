@@ -2319,7 +2319,8 @@ cmd_info() {
             { key = "x", name = "X (Twitter)", fname = "zapret_hosts_x.txt", uci_sec = "list_hosts_x" },
             { key = "instagram", name = "Instagram", fname = "zapret_hosts_instagram.txt", uci_sec = "list_hosts_instagram" },
             { key = "twitch", name = "Twitch", fname = "zapret_hosts_twitch.txt", uci_sec = "list_hosts_twitch" },
-            { key = "user", name = "Общие сайты (User)", fname = "zapret_hosts_user.txt", uci_sec = "list_hosts_user" }
+            { key = "user", name = "Общие сайты (User)", fname = "zapret_hosts_user.txt", uci_sec = "list_hosts_user" },
+            { key = "exclude", name = "Исключения (не обходить)", fname = "zapret_hosts_user_exclude.txt", uci_sec = "list_hosts_user_exclude" }
         }
         local hl_res = {}
         for _, hl in ipairs(hostlists_info) do
@@ -2899,6 +2900,214 @@ cmd_ensure_hostlists() {
     cmd_info
 }
 
+# Единый маппинг «цель -> файл списка доменов». Держит пути в одном месте,
+# чтобы add/remove/read/write не разъезжались между собой.
+_hostlist_path() {
+    case "$1" in
+        youtube|preset_youtube) echo "/etc/zapret2wizard/ipset/zapret_hosts_youtube.txt" ;;
+        discord|preset_discord) echo "/etc/zapret2wizard/ipset/zapret_hosts_discord.txt" ;;
+        x|preset_x) echo "/etc/zapret2wizard/ipset/zapret_hosts_x.txt" ;;
+        instagram|preset_instagram) echo "/etc/zapret2wizard/ipset/zapret_hosts_instagram.txt" ;;
+        twitch|preset_twitch) echo "/etc/zapret2wizard/ipset/zapret_hosts_twitch.txt" ;;
+        user|general|builtin) echo "/etc/zapret2wizard/ipset/zapret_hosts_user.txt" ;;
+        exclude) echo "/etc/zapret2wizard/ipset/zapret_hosts_user_exclude.txt" ;;
+        *) echo "" ;;
+    esac
+}
+
+# Нормализация домена: обрезка пробелов, нижний регистр, снятие конечной точки.
+_hl_sanitize() {
+    printf '%s' "$1" | tr -d ' \t\r\n' | tr '[:upper:]' '[:lower:]' | sed 's/\.$//'
+}
+
+# Проверка домена. Поддерживает отменяющую запись с префиксом «^».
+# Возвращает 0 для валидного, 1 — для мусора.
+_hl_valid() {
+    local d="${1#^}"
+    [ -n "$d" ] || return 1
+    [ "${#d}" -le 253 ] || return 1
+    case "$d" in
+        *[!a-z0-9.-]*|.*|*.|*-) return 1 ;;
+    esac
+    printf '%s' "$d" | grep -Eq '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$'
+}
+
+# Перезапуск службы после правки списков (если не передан --no-restart).
+_hl_restart() {
+    [ "$1" = "1" ] && return 0
+    /etc/init.d/zapret2wizard restart >/dev/null 2>&1 &
+    return 0
+}
+
+# Счётчик значимых строк списка (без пустых и комментариев).
+_hl_count() {
+    local file="$1"
+    [ -f "$file" ] || { echo 0; return 0; }
+    grep -vcE '^[[:space:]]*(#|$)' "$file" 2>/dev/null || echo 0
+}
+
+cmd_read_hostlist() {
+    local target="${1:-user}"
+    local file
+    file=$(_hostlist_path "$target")
+    if [ -z "$file" ]; then
+        echo '{"success":false,"error":"Unknown hostlist target"}'
+        return 1
+    fi
+    BCW_HL_FILE="$file" BCW_HL_TARGET="$target" lua -e '
+        local jsonc = require "luci.jsonc"
+        local file = os.getenv("BCW_HL_FILE")
+        local list = {}
+        local f = io.open(file, "r")
+        local exists = (f ~= nil)
+        if f then
+            for line in f:lines() do
+                line = line:gsub("^%s+", ""):gsub("%s+$", "")
+                if line ~= "" then table.insert(list, line) end
+            end
+            f:close()
+        end
+        print(jsonc.stringify({
+            success = true,
+            target = os.getenv("BCW_HL_TARGET"),
+            file = file,
+            exists = exists,
+            count = #list,
+            domains = list
+        }))
+    '
+}
+
+cmd_add_hostlist_domain() {
+    local target="${1:-user}"
+    local domain="${2:-}"
+    local no_restart=0
+    case "${3:-}" in --no-restart) no_restart=1 ;; esac
+
+    local file
+    file=$(_hostlist_path "$target")
+    [ -n "$file" ] || file=$(_hostlist_path user)
+
+    domain=$(_hl_sanitize "$domain")
+    if [ -z "$domain" ]; then
+        echo '{"success":false,"error":"Domain is empty"}'
+        return 1
+    fi
+    if ! _hl_valid "$domain"; then
+        echo "{\"success\":false,\"error\":\"Invalid domain\",\"domain\":\"$domain\"}"
+        return 1
+    fi
+
+    mkdir -p "${file%/*}" 2>/dev/null
+    [ -f "$file" ] || : > "$file" 2>/dev/null
+
+    if grep -qxF -e "$domain" "$file" 2>/dev/null; then
+        echo "{\"success\":true,\"domain\":\"$domain\",\"file\":\"$file\",\"already_exists\":true,\"count\":$(_hl_count "$file")}"
+        return 0
+    fi
+
+    printf '%s\n' "$domain" >> "$file"
+    _hl_restart "$no_restart"
+    echo "{\"success\":true,\"domain\":\"$domain\",\"file\":\"$file\",\"added\":true,\"count\":$(_hl_count "$file")}"
+}
+
+cmd_remove_hostlist_domain() {
+    local target="${1:-user}"
+    local domain="${2:-}"
+    local no_restart=0
+    case "${3:-}" in --no-restart) no_restart=1 ;; esac
+
+    local file
+    file=$(_hostlist_path "$target")
+    if [ -z "$file" ] || [ ! -f "$file" ]; then
+        echo '{"success":false,"error":"Hostlist not found"}'
+        return 1
+    fi
+
+    domain=$(_hl_sanitize "$domain")
+    if [ -z "$domain" ]; then
+        echo '{"success":false,"error":"Domain is empty"}'
+        return 1
+    fi
+
+    if ! grep -qxF -e "$domain" "$file" 2>/dev/null; then
+        echo "{\"success\":true,\"domain\":\"$domain\",\"file\":\"$file\",\"already_absent\":true,\"count\":$(_hl_count "$file")}"
+        return 0
+    fi
+
+    local tmp="$file.tmp.$$"
+    grep -vxF -e "$domain" "$file" > "$tmp" 2>/dev/null
+    cat "$tmp" > "$file" 2>/dev/null
+    rm -f "$tmp"
+    _hl_restart "$no_restart"
+    echo "{\"success\":true,\"domain\":\"$domain\",\"file\":\"$file\",\"removed\":true,\"count\":$(_hl_count "$file")}"
+}
+
+cmd_write_hostlist() {
+    # Полная замена списка. Источники (по приоритету): аргументы-домены,
+    # --file <путь>, иначе stdin. Мусор и дубликаты отбрасываются.
+    local target="${1:-user}"
+    shift 2>/dev/null || true
+    local no_restart=0 src_file=""
+    local domains=""
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --no-restart) no_restart=1 ;;
+            --file) src_file="${2:-}"; shift ;;
+            *) domains="$domains
+$1" ;;
+        esac
+        shift
+    done
+
+    local file
+    file=$(_hostlist_path "$target")
+    if [ -z "$file" ]; then
+        echo '{"success":false,"error":"Unknown hostlist target"}'
+        return 1
+    fi
+    if [ -n "$src_file" ] && [ ! -f "$src_file" ]; then
+        echo "{\"success\":false,\"error\":\"Source file not found\",\"file\":\"$src_file\"}"
+        return 1
+    fi
+
+    mkdir -p "${file%/*}" 2>/dev/null
+    local tmp="$file.tmp.$$"
+    : > "$tmp" 2>/dev/null
+    local written=0 skipped=0 line
+
+    _hl_collect() {
+        while IFS= read -r line; do
+            line=$(_hl_sanitize "$line")
+            [ -n "$line" ] || continue
+            case "$line" in "#"*) continue ;; esac
+            if ! _hl_valid "$line"; then
+                skipped=$((skipped + 1))
+                continue
+            fi
+            grep -qxF -e "$line" "$tmp" 2>/dev/null && continue
+            printf '%s\n' "$line" >> "$tmp"
+            written=$((written + 1))
+        done
+    }
+
+    if [ -n "$domains" ]; then
+        # heredoc, а не pipe: функция должна менять счётчики в текущем шелле
+        _hl_collect <<EOF
+$domains
+EOF
+    elif [ -n "$src_file" ]; then
+        _hl_collect < "$src_file"
+    else
+        _hl_collect
+    fi
+
+    cat "$tmp" > "$file" 2>/dev/null
+    rm -f "$tmp"
+    _hl_restart "$no_restart"
+    echo "{\"success\":true,\"file\":\"$file\",\"written\":$written,\"skipped\":$skipped,\"count\":$(_hl_count "$file")}"
+}
+
 case "$1" in
     start) shift; cmd_start "$@" ;;
     status) cmd_status ;;
@@ -2915,8 +3124,12 @@ case "$1" in
     uninstall) shift; cmd_uninstall "$@" ;;
     diag) shift; cmd_diag "$@" ;;
     ensure_hostlists) shift; cmd_ensure_hostlists "$@" ;;
+    read_hostlist) shift; cmd_read_hostlist "$@" ;;
+    add_hostlist_domain) shift; cmd_add_hostlist_domain "$@" ;;
+    remove_hostlist_domain) shift; cmd_remove_hostlist_domain "$@" ;;
+    write_hostlist) shift; cmd_write_hostlist "$@" ;;
     *)
-        echo "Usage: $0 {start|status|stop|apply|activate|delete_strategy|test|speedtest|info|logs|check_update|update|uninstall|diag|ensure_hostlists}"
+        echo "Usage: $0 {start|status|stop|apply|activate|delete_strategy|test|speedtest|info|logs|check_update|update|uninstall|diag|ensure_hostlists|read_hostlist|add_hostlist_domain|remove_hostlist_domain|write_hostlist}"
         exit 1
         ;;
 esac

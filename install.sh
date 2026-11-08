@@ -270,6 +270,13 @@ else
     echo -e "${YELLOW}[WARN] nfqws2 не найден, будет использован системный путь при наличии.${NC}"
 fi
 
+# Rust-сканер blockcheckw ищет движок по <base>/nfq2/nfqws2 (src/config.rs),
+# поэтому кладём совместимый симлинк рядом с остальными legacy-путями.
+mkdir -p /opt/zapret2/nfq2 2>/dev/null || true
+if [ -x /usr/bin/nfqws2 ] && [ ! -e /opt/zapret2/nfq2/nfqws2 ]; then
+    ln -sf /usr/bin/nfqws2 /opt/zapret2/nfq2/nfqws2 2>/dev/null || true
+fi
+
 # 6. Скачивание и установка компонентов автономной службы и LuCI
 echo -e "${BLUE}ℹ${NC} Установка модулей Zapret2Wizard All-in-One..."
 

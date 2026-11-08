@@ -209,6 +209,14 @@ prepare_environment() {
 	[ -e /opt/zapret2/lua ] || ln -sf "$LUA_DIR" /opt/zapret2/lua 2>/dev/null || true
 	[ -e /opt/zapret2/ipset ] || ln -sf "$IPSET_DIR" /opt/zapret2/ipset 2>/dev/null || true
 
+	# Rust-сканер blockcheckw ищет движок по пути <base>/nfq2/nfqws2
+	# (src/config.rs, zapret_base=/opt/zapret2), а установщик кладёт его в /usr/bin.
+	# Без этого симлинка preflight сканера завершается кодом 6 на чистой установке.
+	mkdir -p /opt/zapret2/nfq2 2>/dev/null || true
+	if [ -n "$NFQWS_BIN" ] && [ "$NFQWS_BIN" != "/opt/zapret2/nfq2/nfqws2" ]; then
+		[ -e /opt/zapret2/nfq2/nfqws2 ] || ln -sf "$NFQWS_BIN" /opt/zapret2/nfq2/nfqws2 2>/dev/null || true
+	fi
+
 	# Compile UCI config into shell config
 	if [ -x "$UCI2CONFIG" ]; then
 		"$UCI2CONFIG" >/dev/null 2>&1 || true
