@@ -30,7 +30,10 @@ const DPI_LIMIT_RANGE: std::ops::Range<u64> = 10_240..25_600;
 /// How much HTTP body to download.
 #[derive(Debug, Clone, Copy)]
 pub enum BodyMode {
-    /// HEAD request — don't download body (fast handshake check)
+    /// HEAD request — don't download body (fast handshake check).
+    /// Оставлен для совместимости: сканер больше не использует HEAD, так как
+    /// он не видит обрезку ответа. Ветка сохранена, чтобы не ломать API.
+    #[allow(dead_code)]
     Head,
     /// GET request — download entire body
     Unlimited,
@@ -277,7 +280,10 @@ pub fn make_tls_config(protocol: Protocol) -> Arc<ClientConfig> {
 /// Perform an HTTP(S) test request using a pre-marked TCP socket.
 ///
 /// For HTTP: GET request (need to see response body/redirect).
-/// For HTTPS: HEAD request (fast handshake check).
+/// For HTTPS: GET с ограничением тела (16 КБ). HEAD не видит обрезку ответа
+/// на ~16 КБ, из-за чего сканер засчитывал «рабочие» стратегии, которые на
+/// деле не отдают страницу (классический DPI-лимит). Ограниченный GET ловит
+/// это тем же эвристическим диапазоном `DPI_LIMIT_RANGE`.
 pub async fn http_test(
     protocol: Protocol,
     domain: &str,
@@ -297,7 +303,7 @@ pub async fn http_test(
             ip,
             fwmark,
             ROOT_PATH,
-            BodyMode::Head,
+            BodyMode::LimitedTo(16 * 1024),
             via,
             None,
             &reached,
