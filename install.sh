@@ -256,6 +256,18 @@ if [ ! -x /usr/bin/nfqws2 ]; then
     fi
 fi
 if [ ! -x /usr/bin/nfqws2 ]; then
+    # Сначала берём движок из нашего репозитория (raw-канал работает там,
+    # где github.com с релизами недоступен).
+    RAW_ENGINE="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main/openwrt/engine/nfqws2-linux-${ARCH}?_t=$(date +%s)"
+    if curl -fsSL -k --connect-timeout 6 -m 120 "$RAW_ENGINE" -o /tmp/nfqws2.raw 2>/dev/null && [ "$(wc -c < /tmp/nfqws2.raw 2>/dev/null || echo 0)" -gt 50000 ]; then
+        cp -f /tmp/nfqws2.raw /usr/bin/nfqws2
+        chmod +x /usr/bin/nfqws2
+        echo -e "${GREEN}✓${NC} Движок nfqws2 получен из репозитория проекта."
+    fi
+    rm -f /tmp/nfqws2.raw
+fi
+
+if [ ! -x /usr/bin/nfqws2 ]; then
     ZAPRET_DIR="linux-${ARCH}"
     ZAPRET_TAG="v1.0.7"
     ZAPRET_TARBALL="zapret2-${ZAPRET_TAG}.tar.gz"

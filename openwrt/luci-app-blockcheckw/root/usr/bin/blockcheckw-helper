@@ -2696,34 +2696,48 @@ cmd_install_engine() {
     mkdir -p "$work" 2>/dev/null
 
     local attempt mirror got=""
+    local raw_engine="https://raw.githubusercontent.com/prostoy23rus/zapret2wizard/main/openwrt/engine/nfqws2-${dir}"
+
+    # 1. Свой репозиторий: тот же канал raw, которым работает обновление.
     for attempt in 1 2 3; do
-        for mirror in "$url" "https://ghproxy.net/$url" "https://gh-proxy.com/$url"; do
-            rm -f "$work/pkg.tgz" "$work/nfqws2"
-            if ! curl -fsSL -k --connect-timeout 8 -m 180 "$mirror" -o "$work/pkg.tgz" 2>/dev/null; then
-                continue
-            fi
-            [ -s "$work/pkg.tgz" ] || continue
-
-            # основной путь: распаковать только нужный файл
-            tar -xz -O --wildcards "*/binaries/${dir}/nfqws2" < "$work/pkg.tgz" > "$work/nfqws2" 2>/dev/null
-            if [ "$(wc -c < "$work/nfqws2" 2>/dev/null || echo 0)" -lt 50000 ]; then
-                # запасной путь: распаковать архив целиком и взять файл по пути
-                rm -rf "$work/x"
-                mkdir -p "$work/x"
-                tar -xzf "$work/pkg.tgz" -C "$work/x" 2>/dev/null
-                local found
-                found=$(find "$work/x" -path "*/binaries/${dir}/nfqws2" -type f 2>/dev/null | head -1)
-                [ -n "$found" ] && cp -f "$found" "$work/nfqws2" 2>/dev/null
-            fi
-
-            if [ "$(wc -c < "$work/nfqws2" 2>/dev/null || echo 0)" -gt 50000 ]; then
-                got="$mirror"
-                break
-            fi
-        done
-        [ -n "$got" ] && break
+        rm -f "$work/nfqws2"
+        curl -fsSL -k --connect-timeout 6 -m 120 "$raw_engine?_t=$(date +%s)" -o "$work/nfqws2" 2>/dev/null
+        if [ "$(wc -c < "$work/nfqws2" 2>/dev/null || echo 0)" -gt 50000 ]; then
+            got="repo-raw"
+            break
+        fi
         sleep 2
     done
+
+    # 2. Если raw недоступен — архив релиза zapret2 с зеркал.
+    if [ -z "$got" ]; then
+        for attempt in 1 2 3; do
+            for mirror in "$url" "https://ghproxy.net/$url" "https://gh-proxy.com/$url"; do
+                rm -f "$work/pkg.tgz" "$work/nfqws2"
+                if ! curl -fsSL -k --connect-timeout 8 -m 180 "$mirror" -o "$work/pkg.tgz" 2>/dev/null; then
+                    continue
+                fi
+                [ -s "$work/pkg.tgz" ] || continue
+
+                tar -xz -O --wildcards "*/binaries/${dir}/nfqws2" < "$work/pkg.tgz" > "$work/nfqws2" 2>/dev/null
+                if [ "$(wc -c < "$work/nfqws2" 2>/dev/null || echo 0)" -lt 50000 ]; then
+                    rm -rf "$work/x"
+                    mkdir -p "$work/x"
+                    tar -xzf "$work/pkg.tgz" -C "$work/x" 2>/dev/null
+                    local found
+                    found=$(find "$work/x" -path "*/binaries/${dir}/nfqws2" -type f 2>/dev/null | head -1)
+                    [ -n "$found" ] && cp -f "$found" "$work/nfqws2" 2>/dev/null
+                fi
+
+                if [ "$(wc -c < "$work/nfqws2" 2>/dev/null || echo 0)" -gt 50000 ]; then
+                    got="$mirror"
+                    break
+                fi
+            done
+            [ -n "$got" ] && break
+            sleep 2
+        done
+    fi
 
     if [ -z "$got" ]; then
         rm -rf "$work"
@@ -3116,10 +3130,27 @@ EOF
     rm -f "$tmp_ver"
 }
 
+# Свежий version.json: GitHub API не кэшируется, raw — запасной путь.
+fetch_remote_version() {
+    local dest="$1" api="/tmp/bcw_api_ver.$$"
+    rm -f "$api" "$dest"
+    curl -fsSL -k --connect-timeout 4 -m 12 \
+        -H "Accept: application/vnd.github.raw" \
+        -H "Cache-Control: no-cache" \
+        "https://api.github.com/repos/prostoy23rus/zapret2wizard/contents/openwrt/version.json?ref=main&t=$(date +%s)" \
+        -o "$api" 2>/dev/null
+    if [ -s "$api" ] && grep -q '"version"' "$api" 2>/dev/null; then
+        cp -f "$api" "$dest"
+        rm -f "$api"
+        return 0
+    fi
+    rm -f "$api"
+    fetch_file "openwrt/version.json" "$dest" 8
+}
+
 cmd_update() {
     local tmp_dir="/tmp/bcw_update_$$"
     mkdir -p "$tmp_dir"
-
     echo "[blockcheckw-helper] Starting update from $REPO_RAW..." >> "$LOG_FILE"
 
     # Download updated files via CDN / mirror fallbacks
@@ -3128,7 +3159,7 @@ cmd_update() {
     fetch_file "openwrt/luci-app-blockcheckw/root/usr/bin/circular-builder.lua" "$tmp_dir/circular-builder.lua" 8 || ok=0
     fetch_file "openwrt/luci-app-blockcheckw/root/www/luci-static/resources/view/blockcheckw/main.js" "$tmp_dir/main.js" 8 || ok=0
     fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/blockcheckw/zapret2_presets.json" "$tmp_dir/zapret2_presets.json" 8 || fetch_file "strategies/zapret2_presets.json" "$tmp_dir/zapret2_presets.json" 8 || ok=0
-    fetch_file "openwrt/version.json" "$tmp_dir/version.json" 8 || ok=0
+    fetch_remote_version "$tmp_dir/version.json" || ok=0
     fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/luci/menu.d/luci-app-blockcheckw.json" "$tmp_dir/menu.json" 8 || true
     fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/rpcd/acl.d/luci-app-blockcheckw.json" "$tmp_dir/acl.json" 8 || true
 
