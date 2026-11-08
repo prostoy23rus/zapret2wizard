@@ -1811,6 +1811,7 @@ return view.extend({
 		var scanTimerInterval = null;
 		var lastProgressChangeTime = Date.now();
 		var lastPercentVal = -1;
+		var doneRefreshRequested = false;
 
 		function formatDuration(ms) {
 			if (!ms || ms < 0) return '00:00';
@@ -2692,6 +2693,15 @@ return view.extend({
 				btnCopyDiagOnError.style.display = 'none';
 				if (st.auto_applied || (st.apply_result && st.apply_result.success)) {
 					monitorSuccessAlertEl.style.display = 'block';
+				}
+				// После подбора перечитываем конфигурацию: иначе строки сервисов
+				// остаются «не настроен», пока не перезагрузишь страницу.
+				if (!doneRefreshRequested) {
+					doneRefreshRequested = true;
+					getZapretInfo().then(function(info) {
+						zapretInfo = info || {};
+						try { updateActiveStrategyDisplay(); } catch (e) {}
+					});
 				}
 			} else if (st.status === 'error') {
 				progressPhaseEl.textContent = 'Ошибка сканирования';

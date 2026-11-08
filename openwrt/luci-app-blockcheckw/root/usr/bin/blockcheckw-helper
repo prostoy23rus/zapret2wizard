@@ -2756,6 +2756,45 @@ cmd_install_engine() {
     printf '{"success":true,"installed":true,"arch":"%s","size":%s,"mirror":"%s"}\n' "$dir" "$size" "$got"
 }
 
+# Компактный отчёт: состояние службы + живая проверка сервиса.
+cmd_selftest() {
+    local target="${1:-preset_youtube}"
+    local ver=$(grep -o '"version": *"[^"]*"' /usr/share/blockcheckw/version.json 2>/dev/null | head -1 | cut -d'"' -f4)
+    local svc_state="остановлена"
+    /etc/init.d/zapret2wizard running >/dev/null 2>&1 && svc_state="работает"
+
+    local engines=0 c name
+    for c in /proc/[0-9]*/comm; do
+        [ -r "$c" ] || continue
+        name=$(cat "$c" 2>/dev/null)
+        case "$name" in nfqws2|nfqws) engines=$((engines + 1)) ;; esac
+    done
+
+    echo "=== Zapret2Wizard selftest ==="
+    echo "версия:            ${ver:-?}"
+    echo "платформа:         $(uname -m)"
+    echo "служба:            $svc_state"
+    echo "движки nfqws2:     $engines"
+    echo "nft-таблица:       $(nft list tables 2>/dev/null | grep -c 'inet zapret2wizard')"
+    echo "стратегий:         $(uci show zapret2wizard 2>/dev/null | grep -c '=strategy')"
+    echo "lua-модулей:       $(ls /usr/share/zapret2wizard/lua/*.lua 2>/dev/null | wc -l)"
+    echo "fake-блобов:       $(ls /usr/share/zapret2wizard/fake/*.bin 2>/dev/null | wc -l)"
+    echo "доменов в списках: $(cat /etc/zapret2wizard/ipset/zapret_hosts_*.txt 2>/dev/null | grep -vc '^#')"
+    echo
+    echo "--- живая проверка ($target) ---"
+    local out
+    out=$(cmd_test "$target" "" 2>/dev/null | tail -n 1)
+    local status=$(printf '%s' "$out" | grep -o '"overall_status":"[a-z]*"' | head -1 | cut -d'"' -f4)
+    local code=$(printf '%s' "$out" | grep -o '"http_code":"[0-9]*"' | head -1 | cut -d'"' -f4)
+    local size=$(printf '%s' "$out" | grep -o '"size_bytes":[0-9]*' | head -1 | cut -d: -f2)
+    echo "статус:            ${status:-нет ответа}"
+    echo "http-код:          ${code:-?}"
+    echo "получено байт:     ${size:-0}"
+    echo
+    echo "--- последние строки лога ---"
+    tail -n 6 /tmp/blockcheckw_run.log 2>/dev/null || echo "(лог пуст)"
+}
+
 cmd_info() {
     ensure_all_hostlists
     local zapret_running=$(get_dpi_service_status)
@@ -3664,6 +3703,7 @@ case "$1" in
     conflicts) cmd_conflicts ;;
     doctor) shift; cmd_doctor "$@" ;;
     install_engine) cmd_install_engine ;;
+    selftest) shift; cmd_selftest "$@" ;;
     *)
         echo "Usage: $0 {start|status|stop|apply|activate|delete_strategy|test|speedtest|info|logs|check_update|update|uninstall|diag|ensure_hostlists|read_hostlist|add_hostlist_domain|remove_hostlist_domain|write_hostlist|metrics|toggle|conflicts|doctor}"
         exit 1
