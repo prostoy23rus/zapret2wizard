@@ -865,7 +865,7 @@ return view.extend({
 			'.bcw-stat .k{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--bcw-text-muted,#93a0b4);}',
 			'.bcw-stat .v{margin-top:5px;font-size:14px;font-weight:600;color:var(--bcw-text-title,#e7ecf3);}',
 			'.bcw-tiles-grid{display:flex;flex-direction:column;gap:0;margin:0;}',
-			'.bcw-tile-btn{display:grid;grid-template-columns:34px minmax(0,1fr) auto;gap:12px;align-items:center;padding:12px 16px;border:0;border-bottom:1px solid var(--bcw-border-divider,#2a313d);border-radius:0;background:transparent;cursor:pointer;}',
+			'.bcw-tile-btn{display:grid;grid-template-columns:34px minmax(0,1fr) auto auto;gap:12px;align-items:center;padding:12px 16px;border:0;border-bottom:1px solid var(--bcw-border-divider,#2a313d);border-radius:0;background:transparent;cursor:pointer;}',
 			'.bcw-tile-btn:last-child{border-bottom:0;}',
 			'.bcw-tile-btn:hover{background:var(--bcw-bg-card-sub,#1d232d);}',
 			'.bcw-tile-btn.active{background:rgba(76,141,255,.10);box-shadow:inset 3px 0 0 #4c8dff;}',
@@ -895,6 +895,12 @@ return view.extend({
 			'.bcw-matrix-code{margin:0;background:#0c1016;border:1px solid var(--bcw-border-divider,#2a313d);border-radius:9px;padding:12px;font:12px/1.5 ui-monospace,monospace;color:#a9bcd8;white-space:pre-wrap;}',
 			'.bcw-matrix-actions{display:flex;flex-direction:column;gap:8px;}',
 			'.bcw-matrix-check{font-size:12.5px;color:var(--bcw-text-muted,#93a0b4);white-space:nowrap;}',
+			'.bcw-matrix-status-cell{display:flex;align-items:center;gap:10px;}',
+			'.bcw-switch{width:36px;height:20px;border-radius:999px;background:var(--bcw-bg-card-sub,#1d232d);border:1px solid var(--bcw-border-divider,#2a313d);position:relative;cursor:pointer;display:inline-block;vertical-align:middle;transition:.15s;}',
+			'.bcw-switch.on{background:rgba(53,192,122,.25);border-color:rgba(53,192,122,.5);}',
+			'.bcw-switch .bcw-switch-dot{position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#93a0b4;transition:.15s;}',
+			'.bcw-switch.on .bcw-switch-dot{left:18px;background:#35c07a;}',
+			'.bcw-switch-busy{opacity:.5;pointer-events:none;}',
 			'.bcw-history{display:flex;flex-direction:column;}',
 			'.bcw-history-row{display:grid;grid-template-columns:56px 28px minmax(0,1fr);gap:10px;align-items:center;padding:12px 16px;border-top:1px solid var(--bcw-border-divider,#2a313d);}',
 			'.bcw-history-time{font-size:12px;color:var(--bcw-text-muted,#93a0b4);font-variant-numeric:tabular-nums;}',
@@ -959,8 +965,7 @@ return view.extend({
 			{ id: 'preset_x', icon: '🐦', name: 'X / Twitter' },
 			{ id: 'preset_instagram', icon: '📸', name: 'Instagram' },
 			{ id: 'builtin', icon: '🌐', name: 'Встроенные хосты (33)' },
-			{ id: 'domains', icon: '🎯', name: 'Свои домены' },
-			{ id: 'test_strategy', icon: '🧪', name: 'Тест стратегии' }
+			{ id: 'domains', icon: '🎯', name: 'Свои домены' }
 		];
 
 		var chipButtonsMap = {};
@@ -972,17 +977,22 @@ return view.extend({
 			if (h && h.key) hlCounts[h.key] = h.domains_count;
 		});
 		function rowKeyOf(id) {
-			return id === 'builtin' ? 'user' : String(id).replace(/^preset_/, '');
+			if (id === 'builtin') return 'builtin';
+			return String(id).replace(/^preset_/, '');
+		}
+		// Ключ списка доменов отличается от ключа сервиса (у builtin это user).
+		function rowHostlistKey(id) {
+			if (id === 'builtin') return 'user';
+			if (id === 'domains' || id === 'test_strategy') return null;
+			return String(id).replace(/^preset_/, '');
 		}
 		function rowMetaOf(ch) {
-			var key = rowKeyOf(ch.id);
+			var key = rowHostlistKey(ch.id);
 			var parts = [];
-			if (hlCounts[key] !== undefined) parts.push(hlCounts[key] + ' доменов');
-			var svc = (zapretInfo && zapretInfo.services) ? zapretInfo.services[key] : null;
-			if (svc && svc.meta) parts.push(svc.meta);
+			if (key && hlCounts[key] !== undefined) parts.push(hlCounts[key] + ' доменов');
 			if (ch.id === 'domains') parts.push('свой домен или список');
 			if (ch.id === 'test_strategy') parts.push('ручная проверка строки десинка');
-			if (!parts.length) parts.push(key === 'user' ? 'общие сайты' : '—');
+			if (!parts.length) parts.push('—');
 			return parts.join(' · ');
 		}
 		function rowChipOf(ch) {
@@ -992,6 +1002,35 @@ return view.extend({
 			if (!svc) return { cls: 'mute', text: 'не настроен' };
 			if (svc.enabled) return { cls: 'ok', text: 'защищён' };
 			return { cls: 'warn', text: 'выключен' };
+		}
+
+		// Переключатель обхода: включить/выключить стратегию, не удаляя её.
+		function toggleService(key, el) {
+			el.classList.add('bcw-switch-busy');
+			fs.exec(HELPER_BIN, ['toggle', key]).then(function(res) {
+				el.classList.remove('bcw-switch-busy');
+				var out = null;
+				try { out = JSON.parse(res.stdout); } catch (e) {}
+				if (!out || !out.success) {
+					ui.addNotification(null, E('p', {}, 'Не удалось переключить обход: ' + ((out && out.error) || 'ошибка')), 'error');
+					return;
+				}
+				if (out.enabled) el.classList.add('on'); else el.classList.remove('on');
+				ui.addNotification(null, E('p', {}, out.enabled ? 'Обход включён' : 'Обход выключен'), 'info');
+			}).catch(function() {
+				el.classList.remove('bcw-switch-busy');
+			});
+		}
+
+		function serviceSwitchFor(targetId) {
+			var key = rowKeyOf(targetId);
+			var svc = (zapretInfo && zapretInfo.services) ? zapretInfo.services[key] : null;
+			if (!svc || !svc.script || !String(svc.script).trim()) return null;
+			return E('span', {
+				class: 'bcw-switch' + (svc.enabled ? ' on' : ''),
+				title: svc.enabled ? 'Выключить обход' : 'Включить обход',
+				click: function(e) { e.stopPropagation(); toggleService(key, this); }
+			}, [E('span', { class: 'bcw-switch-dot' })]);
 		}
 
 		quickChipsList.forEach(function(ch) {
@@ -1004,6 +1043,8 @@ return view.extend({
 				])
 			];
 			if (chip) children.push(E('span', { class: 'bcw-chip ' + chip.cls }, chip.text));
+			var sw = serviceSwitchFor(ch.id);
+			if (sw) children.push(sw);
 			var btn = E('div', {
 				class: 'bcw-tile-btn' + (currentTarget === ch.id ? ' active' : ''),
 				click: function() { selectTarget(ch.id); }
@@ -1020,11 +1061,41 @@ return view.extend({
 			style: 'width: 100%; max-width: 380px; height: 38px; font-size: 14px; padding: 0 12px; box-sizing: border-box;'
 		});
 
+		// Добавляет введённые домены в постоянный список «Общие сайты».
+		function addDomainsToGeneral() {
+			var raw = (customDomainInput.value || '').trim();
+			if (!raw) {
+				ui.addNotification(null, E('p', {}, 'Введите хотя бы один домен'), 'warning');
+				return;
+			}
+			var toAdd = raw.split(/[\s,]+/).filter(Boolean);
+			fs.exec(HELPER_BIN, ['read_hostlist', 'user']).then(function(res) {
+				var existing = [];
+				try { existing = (JSON.parse(res.stdout).domains) || []; } catch (e) {}
+				var merged = existing.slice();
+				toAdd.forEach(function(d) { if (merged.indexOf(d) === -1) merged.push(d); });
+				return fs.exec(HELPER_BIN, ['write_hostlist', 'user'].concat(merged));
+			}).then(function(res) {
+				var ok = false;
+				try { ok = !!JSON.parse(res.stdout).success; } catch (e) {}
+				ui.addNotification(null, E('p', {}, ok ? 'Домены добавлены в «Общие сайты»' : 'Не удалось добавить домены'), ok ? 'info' : 'error');
+			}).catch(function() {
+				ui.addNotification(null, E('p', {}, 'Не удалось добавить домены'), 'error');
+			});
+		}
+
 		var customDomainRow = E('div', {
 			style: 'display: none; margin-top: 14px; padding: 12px 14px; background: var(--bcw-bg-card-sub); border-radius: 6px; border: 1px solid var(--bcw-border-sub);'
 		}, [
 			E('label', { style: 'font-weight: bold; margin-right: 10px; display: inline-block; margin-bottom: 4px;' }, 'Домены для поиска (через пробел):'),
-			customDomainInput
+			customDomainInput,
+			E('div', { style: 'font-size: 12px; color: var(--bcw-text-muted); margin-top: 8px; line-height: 1.45;' },
+				'Подбор идёт для этих доменов. Чтобы обход действовал постоянно, добавьте их в список «Общие сайты» — иначе запись применится к общему набору доменов.'),
+			E('button', {
+				class: 'bcw-btn-sm cbi-button cbi-button-neutral',
+				style: 'margin-top: 8px;',
+				click: function() { addDomainsToGeneral(); }
+			}, '＋ Добавить в «Общие сайты»')
 		]);
 
 		var testUrlInput = E('input', {
@@ -1128,9 +1199,6 @@ return view.extend({
 		]);
 
 		var targetSectionCard = E('div', { class: 'bcw-card' }, [
-			E('div', { class: 'bcw-card-header' }, [
-				E('h3', { class: 'bcw-card-title' }, '1. Цель обхода (Пресеты Zapret Finder)')
-			]),
 			tilesGridEl,
 			customDomainRow,
 			testStrategyRow,
@@ -1365,15 +1433,8 @@ return view.extend({
 		]);
 
 		var unifiedScanCard = E('div', { class: 'bcw-card' }, [
-			E('div', { class: 'bcw-card-header' }, [
-				E('h3', { class: 'bcw-card-title' }, '2. Подбор стратегий и сканирование')
-			]),
 			circularToggleBox,
 			actionsGridEl,
-			E('div', { style: 'font-size: 12px; color: #abb2bf; margin-top: 10px; display: flex; align-items: center; gap: 6px; padding: 4px 2px;' }, [
-				E('span', { style: 'color: #00d1b2; font-weight: bold;' }, '⚡'),
-				E('span', {}, 'Умный точный поиск: мгновенный экспресс-зонд DPI провайдера с авто-калибровкой лучших связок 2026 года под вашу сеть.')
-			]),
 			monitorCard
 		]);
 		mainLayout.appendChild(unifiedScanCard);
@@ -1958,7 +2019,12 @@ return view.extend({
 					]),
 					E('td', { class: 'bcw-matrix-check' }, fmtLastTest(svc.key)),
 					E('td', {}, String(domainCount)),
-					E('td', {}, [statusChip]),
+					E('td', {}, [
+						E('div', { class: 'bcw-matrix-status-cell' }, [
+							statusChip,
+							serviceSwitchFor(svc.targetId) || E('span')
+						])
+					]),
 					E('td', {}, [chev])
 				]);
 
