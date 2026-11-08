@@ -3597,7 +3597,7 @@ return view.extend({
 								E('div', { style: 'font-weight: bold; color: ' + (count > 0 ? '#98c379' : '#e06c75') + '; font-size: 13px;' },
 									count + ' доменов'),
 								E('div', { style: 'font-size: 11px; color: ' + (hl.uci_configured === false ? '#e5c07b' : '#61afef') + ';' },
-									hl.uci_configured === false ? 'Секция создается...' : 'Zapret2 подключен')
+									(hl.uci_configured === false ? (count > 0 ? 'Нет стратегии — запустите поиск' : 'Список пуст') : 'Zapret2 подключен'))
 							]),
 							btnEdit
 						])
