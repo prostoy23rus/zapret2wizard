@@ -981,6 +981,14 @@ cmd_start() {
 
         echo "[blockcheckw-helper] Starting Unified Smart Scan for $domain (target=$target, workers=$workers, auto_apply=$auto_apply)..." >> "$LOG_FILE"
         history_add "scan_start" "$(metric_target_key "$target")" "Начат подбор для $domain"
+        # На время подбора службу останавливаем: иначе её правила перехватывают
+        # пробный трафик и сканер видит искажённую картину.
+        if /etc/init.d/zapret2wizard running >/dev/null 2>&1; then
+            /etc/init.d/zapret2wizard stop >/dev/null 2>&1
+            echo "[blockcheckw-helper] Служба остановлена на время подбора" >> "$LOG_FILE"
+            history_add "scan_pause" "$(metric_target_key "$target")" "Служба остановлена на время подбора"
+        fi
+
         write_status "running" 15 "Фаза 1: Экспресс-тест векторов DPI ($domain)..."
 
         local probe_corpus="/tmp/blockcheckw_probe_corpus.txt"
@@ -1305,6 +1313,40 @@ EOF
             local apply_res="" attempt=0 max_attempts=4 first_cand=""
             local candidates="/tmp/blockcheckw_candidates.$$"
             : > "$candidates"
+
+            # Проверка с реальной передачей данных: проба сканера может пройти,
+            # а полный ответ — нет. Верифицированную стратегию ставим первой.
+            local verified="/tmp/bcw_verified.$$"
+            rm -f "$verified"
+            if [ -s "$OUTPUT_SCAN" ]; then
+                local chk="/tmp/bcw_check.$$.json"
+                /usr/bin/blockcheckw check --from-file "$OUTPUT_SCAN" -d "$domain" --timeout 12 --auto > "$chk" 2>/dev/null || true
+                if [ -s "$chk" ]; then
+                    lua - "$chk" "$verified" << 'EOF' 2>/dev/null
+local json = require("luci.jsonc")
+local f = io.open(arg[1], "r")
+local d = f and json.parse(f:read("*a")) or nil
+if f then f:close() end
+if d and d.strategies then
+    local out = io.open(arg[2], "w")
+    for _, s in ipairs(d.strategies) do
+        if s.working == true and s.args and #s.args > 0 then
+            out:write(s.args, "\n")
+            break
+        end
+    end
+    out:close()
+end
+EOF
+                fi
+                rm -f "$chk"
+            fi
+            if [ -s "$verified" ]; then
+                head -n 1 "$verified" >> "$candidates"
+                echo "[blockcheckw-helper] Найдена стратегия с реальной передачей данных" >> "$LOG_FILE"
+            fi
+            rm -f "$verified"
+
             if [ "$do_circular" = "1" ] && [ -f "$OUTPUT_CIRCULAR" ] && [ -s "$OUTPUT_CIRCULAR" ]; then
                 head -n 2 "$OUTPUT_CIRCULAR" >> "$candidates"
             fi

@@ -208,6 +208,14 @@ disable_flow_offloading() {
 
 prepare_environment() {
     disable_flow_offloading
+
+    # nfqws2 работает от пользователя daemon: каталоги и списки должны быть читаемы,
+    # иначе основной экземпляр падает с "file_open_test: Permission denied".
+    chmod 755 /etc/zapret2wizard /etc/zapret2wizard/ipset 2>/dev/null || true
+    chmod 644 /etc/zapret2wizard/ipset/*.txt 2>/dev/null || true
+    chmod 755 /usr/share/zapret2wizard /usr/share/zapret2wizard/lua /usr/share/zapret2wizard/fake 2>/dev/null || true
+    chmod 644 /usr/share/zapret2wizard/lua/*.lua 2>/dev/null || true
+    chmod 644 /usr/share/zapret2wizard/fake/*.bin 2>/dev/null || true
 	# Ensure runtime folders and hostlists
 	mkdir -p /etc/zapret2wizard/ipset /tmp/zapret2
 	if [ -d "$SHARE_DIR/ipset" ]; then
