@@ -3080,6 +3080,138 @@ _info_json_shell() {
         "$running" "$ver" "$svc" "$strat" "$hl_json"
 }
 
+# Первый запуск: если стратегий нет — подобрать для YouTube и Discord.
+cmd_autosetup() {
+    ensure_all_hostlists >/dev/null 2>&1 || true
+    /etc/init.d/zapret2wizard start >/dev/null 2>&1 || true
+
+    local have=$(uci show zapret2wizard 2>/dev/null | grep -c '=strategy')
+    if [ "${have:-0}" -gt 0 ]; then
+        echo "{\"success\":true,\"skipped\":true,\"strategies\":$have}"
+        return 0
+    fi
+
+    local log="/tmp/bcw_autosetup.log"
+    echo "[autosetup] старт $(date)" > "$log"
+    local target
+    for target in preset_youtube preset_discord; do
+        echo "[autosetup] подбор для $target" >> "$log"
+        cmd_start --target "$target" --mode smart --circular 1 --auto-apply 1 >> "$log" 2>&1 || true
+        local i=0 st=""
+        while [ "$i" -lt 80 ]; do
+            sleep 15
+            i=$((i + 1))
+            st=$(grep -o '"status": *"[a-z]*"' "$STATUS_FILE" 2>/dev/null | head -n 1 | sed 's/.*"\([a-z]*\)"$/\1/')
+            case "$st" in done|error) break ;; esac
+        done
+        echo "[autosetup] $target завершён: ${st:-timeout}" >> "$log"
+    done
+
+    /etc/init.d/zapret2wizard start >/dev/null 2>&1 || true
+    local done_n=$(uci show zapret2wizard 2>/dev/null | grep -c '=strategy')
+    echo "{\"success\":true,\"strategies\":$done_n}"
+}
+
+# Эволюционный подбор: синтезирует новые комбинации примитивов zapret2,
+# проверяет их и запоминает результаты по провайдеру между запусками.
+cmd_evolve() {
+    local target="preset_youtube" count=16 verify_n=3
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --target) target="$2"; shift 2 ;;
+            --count) count="$2"; shift 2 ;;
+            --verify) verify_n="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    local domain="www.youtube.com"
+    case "$target" in
+        preset_discord|discord) domain="discord.com" ;;
+        preset_twitch|twitch) domain="twitch.tv" ;;
+        preset_x|x) domain="x.com" ;;
+        preset_instagram|instagram) domain="instagram.com" ;;
+    esac
+
+    local evo="/usr/share/zapret2wizard/evolve.lua"
+    if [ ! -f "$evo" ]; then
+        echo '{"success":false,"error":"нет evolve.lua - переустановите службу"}'
+        return 1
+    fi
+
+    local genomes="/etc/zapret2wizard/genomes.json"
+    local provider=$(lua "$evo" provider /tmp/blockcheckw_status.json 2>/dev/null)
+    [ -n "$provider" ] || provider="default"
+
+    local corpus="/tmp/bcw_evolve_corpus.txt"
+    local scan="/tmp/bcw_evolve_scan.json"
+    local verified="/tmp/bcw_evolve_verified.txt"
+
+    echo "=== Эволюционный подбор ==="
+    echo "  провайдер:  $provider"
+    echo "  домен:      $domain"
+    echo "  кандидатов: $count, проверка до $verify_n"
+
+    if /etc/init.d/zapret2wizard running >/dev/null 2>&1; then
+        /etc/init.d/zapret2wizard stop >/dev/null 2>&1
+    fi
+    : > /tmp/bcw_scan_paused
+
+    lua "$evo" gen "$genomes" "$provider" "$corpus" "$domain" "$count" 2>/dev/null
+    if [ ! -s "$corpus" ]; then
+        echo "  ОШИБКА: не удалось сгенерировать кандидатов"
+        /etc/init.d/zapret2wizard start >/dev/null 2>&1
+        rm -f /tmp/bcw_scan_paused
+        return 1
+    fi
+
+    echo "  проба (scan)..."
+    /usr/bin/blockcheckw -w 2 scan -d "$domain" -p tls12,tls13 --dns auto \
+        --from-file "$corpus" -o "$scan" >/dev/null 2>&1 || true
+
+    local shortlist
+    shortlist=$(lua "$evo" shortlist "$corpus.candidates" "$scan" "$verify_n" 2>/dev/null)
+
+    local verified_lines="" applied=0
+    while IFS='|' read -r id args; do
+        [ -n "$id" ] || continue
+        [ -n "$args" ] || continue
+        printf '%s\n' "$args" > /tmp/bcw_ev_try.txt
+        local res ok=0 bytes=0
+        res=$(cmd_apply --target "$target" --file /tmp/bcw_ev_try.txt 2>/dev/null)
+        if printf '%s' "$res" | grep -q '"all_ok":true'; then ok=1; fi
+        bytes=$(printf '%s' "$res" | grep -o '"size_bytes":[0-9]*' | head -n 1 | cut -d: -f2)
+        [ -n "$bytes" ] || bytes=0
+        verified_lines="${verified_lines}${id}|${ok}|${bytes}
+"
+        if [ "$ok" = "1" ]; then
+            echo "  OK   $args"
+            applied=1
+            break
+        else
+            echo "  --   $args"
+        fi
+    done <<EVOLIST
+$shortlist
+EVOLIST
+    rm -f /tmp/bcw_ev_try.txt
+    printf '%s' "$verified_lines" > "$verified"
+
+    local stats
+    stats=$(lua "$evo" update "$genomes" "$provider" "$corpus.candidates" "$scan" "$verified" 2>/dev/null)
+    echo "  память: $stats"
+
+    /etc/init.d/zapret2wizard start >/dev/null 2>&1
+    rm -f /tmp/bcw_scan_paused
+
+    echo "---"
+    if [ "$applied" = "1" ]; then
+        echo "Применена новая стратегия. Память: $genomes"
+    else
+        echo "Рабочих кандидатов не найдено. Память обновлена."
+    fi
+}
+
 cmd_info() {
     ensure_dpi_service
     ensure_all_hostlists >/dev/null 2>&1 || true
@@ -3998,6 +4130,7 @@ case "$1" in
     selftest) shift; cmd_selftest "$@" ;;
     class) shift; cmd_class "$@" ;;
     autosetup) shift; cmd_autosetup "$@" ;;
+    evolve) shift; cmd_evolve "$@" ;;
     *)
         echo "Usage: $0 {start|status|stop|apply|activate|delete_strategy|test|speedtest|info|logs|check_update|update|uninstall|diag|ensure_hostlists|read_hostlist|add_hostlist_domain|remove_hostlist_domain|write_hostlist|metrics|toggle|conflicts|doctor}"
         exit 1
