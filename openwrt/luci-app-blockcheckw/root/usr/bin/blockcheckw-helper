@@ -3042,8 +3042,16 @@ _info_json_shell() {
         if [ "$first_s" = "1" ]; then svc="$obj"; first_s=0; else svc="$svc,$obj"; fi
         if [ "$first_a" = "1" ]; then strat="$aobj"; first_a=0; else strat="$strat,$aobj"; fi
     done
-    printf '{"zapret2_running":"%s","version":"%s","services":{%s},"all_strategies":[%s]}\n' \
-        "$running" "$ver" "$svc" "$strat"
+    local hl_json="" first_h=1
+    for f in /etc/zapret2wizard/ipset/zapret_hosts_*.txt; do
+        [ -f "$f" ] || continue
+        local k=$(basename "$f" .txt); k=${k#zapret_hosts_}
+        local c=$(grep -vc '^#' "$f" 2>/dev/null || echo 0)
+        local hobj="{\"key\":\"$k\",\"name\":\"$k\",\"domains_count\":$c}"
+        if [ "$first_h" = "1" ]; then hl_json="$hobj"; first_h=0; else hl_json="$hl_json,$hobj"; fi
+    done
+    printf '{"zapret2_running":"%s","version":"%s","services":{%s},"all_strategies":[%s],"hostlists":[%s]}\n' \
+        "$running" "$ver" "$svc" "$strat" "$hl_json"
 }
 
 cmd_info() {
