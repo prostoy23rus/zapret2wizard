@@ -52,7 +52,7 @@
         {
           "name": "Превью и медиа (i.ytimg.com)",
           "url": "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg",
-          "range": "0-16383"
+          "range": "0-262143"
         },
         {
           "name": "Видеопотоки CDN (manifest.googlevideo.com)",
@@ -111,7 +111,7 @@
         {
           "name": "API авторизации (discord.com/api)",
           "url": "https://discord.com/api/v9/experiments",
-          "range": "0-16383"
+          "range": "0-262143"
         },
         {
           "name": "Медиа CDN (cdn.discordapp.com)",
