@@ -2905,6 +2905,56 @@ cmd_selftest() {
     tail -n 6 /tmp/blockcheckw_run.log 2>/dev/null || echo "(лог пуст)"
 }
 
+# Матрица «класс ТСПУ»: 9 базовых приёмов desync (как в tspu-class-test).
+# Показывает, какие механики провайдер пропускает, и подсказывает класс блокировки.
+cmd_class() {
+    local target="${1:-preset_youtube}"
+    local sec="" domain=""
+    case "$target" in
+        preset_discord|discord) sec="BlockcheckW_Discord"; domain="discord.com" ;;
+        builtin|user) sec="BlockcheckW_General"; domain="rutracker.org" ;;
+        *) sec="BlockcheckW_YouTube"; domain="www.youtube.com" ;;
+    esac
+
+    local backup=$(uci -q get "zapret2wizard.$sec.script")
+    local n=0 passed=0 name args res
+    echo "=== Класс ТСПУ: $domain ==="
+    while IFS='|' read -r name args; do
+        [ -n "$name" ] || continue
+        n=$((n + 1))
+        printf '%s\n' "$args" > /tmp/bcw_class.txt
+        res=$(cmd_apply --target "$target" --file /tmp/bcw_class.txt 2>/dev/null)
+        if printf '%s' "$res" | grep -q '"all_ok":true'; then
+            passed=$((passed + 1))
+            echo "  OK   $n. $name"
+        else
+            echo "  --   $n. $name"
+        fi
+    done <<'CLASSLIST'
+1. multidisorder midsld|--payload=tls_client_hello --lua-desync=multidisorder:pos=midsld
+2. multisplit midsld|--payload=tls_client_hello --lua-desync=multisplit:pos=midsld
+3. multidisorder sld|--payload=tls_client_hello --lua-desync=multidisorder:pos=sld
+4. fake (autottl)|--payload=tls_client_hello --lua-desync=fake:blob=fake_default_tls:ip_autottl=-2,3-20:repeats=6
+5. fake + multisplit|--payload=tls_client_hello --lua-desync=fake:blob=fake_default_tls:tcp_md5:repeats=6 --lua-desync=multisplit:pos=midsld
+6. fake + multidisorder|--payload=tls_client_hello --lua-desync=fake:blob=fake_default_tls:tcp_md5:repeats=6 --lua-desync=multidisorder:pos=midsld
+7. fakeddisorder|--payload=tls_client_hello --lua-desync=fakeddisorder:pos=midsld:tcp_md5
+8. rst (autottl)|--payload=tls_client_hello --lua-desync=rst:ip_autottl=-2,3-20
+9. fake (tcp_md5)|--payload=tls_client_hello --lua-desync=fake:blob=fake_default_tls:tcp_md5:repeats=6
+CLASSLIST
+
+    if [ -n "$backup" ]; then
+        printf '%s\n' "$backup" > /tmp/bcw_class.txt
+        cmd_apply --target "$target" --file /tmp/bcw_class.txt >/dev/null 2>&1
+    fi
+    rm -f /tmp/bcw_class.txt
+    echo "--- прошло: $passed из $n ---"
+    if [ "$passed" -eq 0 ]; then
+        echo "Ни один приём не прошёл: возможна блокировка по IP или по отпечатку клиента."
+    elif [ "$passed" -ge 5 ]; then
+        echo "Провайдер пропускает большинство приёмов: подойдёт простая стратегия."
+    fi
+}
+
 cmd_info() {
     ensure_all_hostlists
     local zapret_running=$(get_dpi_service_status)
@@ -3814,6 +3864,7 @@ case "$1" in
     doctor) shift; cmd_doctor "$@" ;;
     install_engine) cmd_install_engine ;;
     selftest) shift; cmd_selftest "$@" ;;
+    class) shift; cmd_class "$@" ;;
     *)
         echo "Usage: $0 {start|status|stop|apply|activate|delete_strategy|test|speedtest|info|logs|check_update|update|uninstall|diag|ensure_hostlists|read_hostlist|add_hostlist_domain|remove_hostlist_domain|write_hostlist|metrics|toggle|conflicts|doctor}"
         exit 1

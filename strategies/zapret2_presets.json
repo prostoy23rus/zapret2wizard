@@ -35,7 +35,11 @@
         "--payload=tls_client_hello --lua-desync=hostfakesplit:host=alfabank.ru:tcp_ts=-600000",
         "--payload=tls_client_hello --lua-desync=hostfakesplit:host=rzd.ru:tcp_ts=-600000",
         "--payload=tls_client_hello --lua-desync=hostfakesplit:host=vk.com:tcp_ts=-600000",
-        "--payload=tls_client_hello --lua-desync=hostfakesplit:host=avito.ru:tcp_ts=-600000"
+        "--payload=tls_client_hello --lua-desync=hostfakesplit:host=avito.ru:tcp_ts=-600000",
+        "--payload=tls_client_hello --lua-desync=multidisorder:pos=sld",
+        "--payload=tls_client_hello --lua-desync=fake:blob=fake_default_tls:tcp_md5:repeats=6",
+        "--payload=tls_client_hello --lua-desync=fake:blob=fake_default_tls:ip_autottl=-2,3-20:repeats=6",
+        "--payload=tls_client_hello --lua-desync=fake:blob=fake_default_tls:tcp_md5:repeats=6 --lua-desync=multidisorder:pos=midsld"
       ]
     },
     "preset_youtube": {
@@ -94,7 +98,11 @@
         "--payload=tls_client_hello --lua-desync=hostfakesplit:host=rzd.ru:tcp_ts=-600000",
         "--payload=tls_client_hello --lua-desync=hostfakesplit:host=vk.com:tcp_ts=-600000",
         "--payload=tls_client_hello --lua-desync=hostfakesplit:host=ozon.ru:tcp_seq=0:tcp_ack=-66000:badsum",
-        "--payload=tls_client_hello --lua-desync=hostfakesplit:host=gosuslugi.ru:tcp_ts=-600000 --lua-desync=multisplit:pos=sniext+1,endhost-1"
+        "--payload=tls_client_hello --lua-desync=hostfakesplit:host=gosuslugi.ru:tcp_ts=-600000 --lua-desync=multisplit:pos=sniext+1,endhost-1",
+        "--payload=tls_client_hello --lua-desync=multidisorder:pos=sld",
+        "--payload=tls_client_hello --lua-desync=fake:blob=fake_default_tls:tcp_md5:repeats=6",
+        "--payload=tls_client_hello --lua-desync=fake:blob=fake_default_tls:ip_autottl=-2,3-20:repeats=6",
+        "--payload=tls_client_hello --lua-desync=fake:blob=fake_default_tls:tcp_md5:repeats=6 --lua-desync=multidisorder:pos=midsld"
       ]
     },
     "preset_discord": {
