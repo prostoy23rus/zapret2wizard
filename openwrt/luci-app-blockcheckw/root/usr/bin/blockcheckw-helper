@@ -3321,6 +3321,45 @@ bp_resolve_ips() {
     rm -f "$BP_WARM_MARK"
 }
 
+# Диапазоны Google/YouTube: гарантируют, что весь трафик сервисов идёт напрямую,
+# а не наполовину через туннель (иначе YouTube видит разные IP и теряет регион).
+BP_RANGES="/etc/zapret2wizard/bypass_ranges.txt"
+
+bp_load_ranges() {
+    local tmp="/tmp/bcw_ranges.json"
+    curl -fsSL -m 30 "https://www.gstatic.com/ipranges/goog.json" -o "$tmp" 2>/dev/null || return 0
+    [ -s "$tmp" ] || return 0
+    grep -o '"ipv4Prefix": *"[^"]*"' "$tmp" | cut -d'"' -f4 | sort -u > "$BP_RANGES"
+    rm -f "$tmp"
+}
+
+bp_apply_ranges() {
+    [ -s "$BP_RANGES" ] || return 0
+    [ -f "$BP_STATE" ] || return 0
+    local fam tbl ch batch n r
+    while read -r fam tbl ch; do
+        [ -n "$fam" ] || continue
+        case "$fam" in iptables) continue ;; esac
+        bp_set_exists "$fam" "$tbl" || continue
+        batch=""
+        n=0
+        while IFS= read -r r; do
+            [ -n "$r" ] || continue
+            case "$batch" in
+                "") batch="$r" ;;
+                *) batch="$batch, $r" ;;
+            esac
+            n=$((n + 1))
+            if [ "$n" -ge 60 ]; then
+                nft add element "$fam" "$tbl" "$BP_SET" "{ $batch }" 2>/dev/null || true
+                batch=""
+                n=0
+            fi
+        done < "$BP_RANGES"
+        [ -n "$batch" ] && nft add element "$fam" "$tbl" "$BP_SET" "{ $batch }" 2>/dev/null || true
+    done < "$BP_STATE"
+}
+
 # Залить IP из кэша во все наборы-исключения.
 bp_apply_ips() {
     [ -s "$BP_CACHE" ] || return 0
@@ -3364,7 +3403,14 @@ bp_sync() {
     if [ -n "$targets" ]; then
         echo "$targets" | while read -r fam tbl ch; do
             [ -n "$fam" ] || continue
-            bp_set_exists "$fam" "$tbl" || nft add set "$fam" "$tbl" "$BP_SET" '{ type ipv4_addr; }' 2>/dev/null || true
+            if bp_set_exists "$fam" "$tbl" && ! nft list set "$fam" "$tbl" "$BP_SET" 2>/dev/null | grep -q 'flags interval'; then
+                # старый набор без interval — снимаем правило, пересоздаём
+                for h in $(bp_rule_line "$fam" "$tbl" "$ch" | awk '{print $NF}'); do
+                    nft delete rule "$fam" "$tbl" "$ch" handle "$h" 2>/dev/null || true
+                done
+                nft delete set "$fam" "$tbl" "$BP_SET" 2>/dev/null || true
+            fi
+            bp_set_exists "$fam" "$tbl" || nft add set "$fam" "$tbl" "$BP_SET" '{ type ipv4_addr; flags interval; }' 2>/dev/null || true
             bp_set_exists "$fam" "$tbl" || continue
             if ! bp_rule_line "$fam" "$tbl" "$ch" | grep -q "$BP_COMMENT"; then
                 nft insert rule "$fam" "$tbl" "$ch" \
@@ -3388,7 +3434,11 @@ bp_sync() {
     if [ ! -s "$BP_CACHE" ] || [ -n "$(find "$BP_CACHE" -mmin +$((BP_CACHE_TTL / 60)) 2>/dev/null)" ]; then
         bp_warm_detached
     fi
+    if [ ! -s "$BP_RANGES" ] || [ -n "$(find "$BP_RANGES" -mmin +1440 2>/dev/null)" ]; then
+        bp_load_ranges
+    fi
     bp_apply_ips
+    bp_apply_ranges
 }
 
 bp_warm_detached() {
