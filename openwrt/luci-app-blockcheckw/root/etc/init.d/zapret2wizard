@@ -298,7 +298,25 @@ guard_conflicts() {
 	done
 }
 
+# Убираем чужие nfqws2 (например, старый /opt/zapret2), иначе они держат очередь.
+kill_foreign_engines() {
+	local c name p cmd
+	for c in /proc/[0-9]*/comm; do
+		[ -r "$c" ] || continue
+		name=$(cat "$c" 2>/dev/null)
+		case "$name" in nfqws|nfqws2) ;; *) continue ;; esac
+		p=${c#/proc/}; p=${p%/comm}
+		cmd=$(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null)
+		case "$cmd" in
+			*zapret2wizard*) ;;
+			*) kill -9 "$p" 2>/dev/null; logger -t zapret2wizard "удалён чужой движок pid=$p" ;;
+		esac
+	done
+}
+
 start_service() {
+	kill_foreign_engines
+
 	local uci_pkg="zapret2wizard"
 	[ -f /etc/config/zapret2wizard ] || uci_pkg="zapret2"
 

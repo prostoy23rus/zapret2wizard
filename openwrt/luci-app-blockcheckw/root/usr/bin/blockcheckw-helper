@@ -2820,6 +2820,23 @@ cmd_conflicts() {
 
 # Самодиагностика: проверяет всё, что нужно сканеру и службе.
 # Печатает человекочитаемый список и итоговый JSON.
+# Убить чужие nfqws2, которые держат очередь.
+cmd_kill_foreign() {
+    local c name p cmd killed=0
+    for c in /proc/[0-9]*/comm; do
+        [ -r "$c" ] || continue
+        name=$(cat "$c" 2>/dev/null)
+        case "$name" in nfqws|nfqws2) ;; *) continue ;; esac
+        p=${c#/proc/}; p=${p%/comm}
+        cmd=$(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null)
+        case "$cmd" in
+            *zapret2wizard*) ;;
+            *) kill -9 "$p" 2>/dev/null && killed=$((killed+1)) ;;
+        esac
+    done
+    echo "{\"ok\":true,\"killed\":$killed}"
+}
+
 cmd_doctor() {
     local ok=1
     local checks=""
@@ -5022,6 +5039,7 @@ case "$1" in
     ensure_hostlists_bg) cmd_ensure_hostlists_bg ;;
     service) shift; cmd_service "$@" ;;
     svc_heal) _svc_heal ;;
+    kill_foreign) cmd_kill_foreign ;;
     genome_args) shift; cmd_genome_args "$@" ;;
     genome_apply) shift; cmd_genome_apply "$@" ;;
     strategy_get) shift; cmd_strategy_get "$@" ;;

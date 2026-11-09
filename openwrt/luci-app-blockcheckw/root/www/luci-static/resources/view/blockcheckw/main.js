@@ -1107,6 +1107,15 @@ return view.extend({
 		mainLayout.appendChild(repairCard);
 
 		function renderRepairBanner() {
+			// Во время подбора служба остановлена намеренно — это не ошибка
+			if (activeScanInProgress || isRunning) {
+				repairCard.style.display = 'block';
+				repairCard.innerHTML = '';
+				repairCard.appendChild(E('div', { style: 'font-weight:600;color:#00d1b2;font-size:14px;' }, '⏳ Идёт подбор — служба временно приостановлена'));
+				repairCard.appendChild(E('div', { style: 'font-size:12.5px;color:var(--bcw-text-muted);margin-top:4px;' },
+					'После завершения подбора служба поднимется автоматически.'));
+				return;
+			}
 			if (!doctorInfo || doctorInfo.ok) { repairCard.style.display = 'none'; return; }
 			var failed = (doctorInfo.checks || []).filter(function(c) { return c && !c.ok; });
 			if (!failed.length) { repairCard.style.display = 'none'; return; }
