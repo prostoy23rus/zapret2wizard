@@ -131,9 +131,12 @@ fi
 # страница закрыта). Тогда поднимаем её и убираем маркер.
 ensure_dpi_service() {
     [ -f /tmp/bcw_scan_paused ] || return 0
-    # Пока подбор идёт, службу не поднимаем: иначе она перехватывает пробный трафик
-    if [ -f /var/run/bcw_scan.active ]; then
-        return 0
+    # Пока подбор идёт (живой лок), службу не поднимаем: она перехватывает пробный трафик
+    if [ -d /var/run/bcw_scan.lock ]; then
+        local _sp=$(cat /var/run/bcw_scan.lock/pid 2>/dev/null)
+        if [ -n "$_sp" ] && kill -0 "$_sp" 2>/dev/null; then
+            return 0
+        fi
     fi
     if get_dpi_service_status | grep -q running; then
         rm -f /tmp/bcw_scan_paused
@@ -1072,9 +1075,11 @@ cmd_start() {
             rm -rf "$SCAN_LOCK"
             mkdir "$SCAN_LOCK" 2>/dev/null || true
         fi
-        echo $$ > "$SCAN_LOCK/pid" 2>/dev/null || true
-        echo $$ > /var/run/bcw_scan.active 2>/dev/null || true
-        trap 'rm -f /var/run/bcw_scan.active' EXIT INT TERM
+        # $$ в subshell ash указывает на родителя; держим отдельный «сторожевой» pid,
+        # чтобы лок считался живым ровно на время подбора.
+        sleep 7200 &
+        SCAN_KEEPER=$!
+        echo "$SCAN_KEEPER" > "$SCAN_LOCK/pid" 2>/dev/null || true
 
         echo "[blockcheckw-helper] Starting Unified Smart Scan for $domain (target=$target, workers=$workers, auto_apply=$auto_apply)..." >> "$LOG_FILE"
         history_add "scan_start" "$(metric_target_key "$target")" "Начат подбор для $domain"
@@ -1514,6 +1519,8 @@ EOF
         fi
 
         rm -f "$PID_FILE"
+        kill "$SCAN_KEEPER" 2>/dev/null
+        rm -rf "$SCAN_LOCK" /var/run/bcw_scan.active 2>/dev/null
     ) </dev/null >/dev/null 2>&1 &
 
     local pid=$!
@@ -1666,14 +1673,10 @@ EOF
 
 # Запуск подбора в фоне: rpcd/uhttpd не ждут многоминутный скан.
 cmd_start_bg() {
+    exec 2>>/tmp/bcw_sb_trace.log
+    echo "=== $(date +%H:%M:%S) start_bg begin ===" >> /tmp/bcw_sb_trace.log
+    set -x
     # Не даём запускать второй подбор: флаг, лок и живые процессы
-    if [ -f /var/run/bcw_scan.active ]; then
-        local _ap=$(cat /var/run/bcw_scan.active 2>/dev/null)
-        if [ -z "$_ap" ] || kill -0 "$_ap" 2>/dev/null; then
-            echo '{"ok":false,"error":"Подбор уже выполняется"}'
-            return 0
-        fi
-    fi
     if [ -d /var/run/bcw_scan.lock ]; then
         local _p=$(cat /var/run/bcw_scan.lock/pid 2>/dev/null)
         if [ -n "$_p" ] && kill -0 "$_p" 2>/dev/null; then
@@ -1693,11 +1696,13 @@ cmd_start_bg() {
     done
     if command -v setsid >/dev/null 2>&1; then
         : > /tmp/bcw_scan_bg.log
-        setsid /bin/sh -c "exec /usr/bin/blockcheckw-helper start$quoted" >>/tmp/bcw_scan_bg.log 2>&1 &
+        setsid /bin/sh -c "exec /usr/bin/blockcheckw-helper start$quoted" </dev/null >>/tmp/bcw_scan_bg.log 2>&1 &
     else
         start-stop-daemon -S -b -x /bin/sh -- -c "/usr/bin/blockcheckw-helper start$quoted" >/dev/null 2>&1 \
             || ( /bin/sh -c "/usr/bin/blockcheckw-helper start$quoted" >/dev/null 2>&1 & )
     fi
+    set +x
+    echo "=== $(date +%H:%M:%S) start_bg end ===" >> /tmp/bcw_sb_trace.log
     echo '{"ok":true,"started":true}'
 }
 
@@ -4806,7 +4811,7 @@ _hostlist_path() {
 
 # Нормализация домена: обрезка пробелов, нижний регистр, снятие конечной точки.
 _hl_sanitize() {
-    printf '%s' "$1" | tr -d ' \t\r\n' | tr '[:upper:]' '[:lower:]' | sed 's/\.$//'
+    printf '%s' "$1" | tr -d ' \t\r\n' | tr 'A-Z' 'a-z' | sed 's/\.$//'
 }
 
 # Проверка домена. Поддерживает отменяющую запись с префиксом «^».

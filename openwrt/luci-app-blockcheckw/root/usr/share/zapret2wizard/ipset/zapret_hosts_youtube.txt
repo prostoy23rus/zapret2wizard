@@ -2,7 +2,6 @@ app-measurement.com
 clients4.google.com
 ggpht.com
 google-analytics.com
-youtubei.googleapis.com
 googleusercontent.com
 yt1.googleusercontent.com
 yt2.googleusercontent.com
@@ -41,3 +40,5 @@ signaler-pa.youtube.com
 manifest.googlevideo.com
 dl.google.com
 test.googlevideo.com
+m.youtube.com
+music.youtube.com
