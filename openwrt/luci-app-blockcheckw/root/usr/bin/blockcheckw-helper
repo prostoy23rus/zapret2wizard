@@ -3115,12 +3115,14 @@ cmd_autosetup() {
 # Эволюционный подбор: синтезирует новые комбинации примитивов zapret2,
 # проверяет их и запоминает результаты по провайдеру между запусками.
 cmd_evolve() {
-    local target="preset_youtube" count=16 verify_n=3
+    local target="preset_youtube" count=16 verify_n=3 tests=3 pause=2
     while [ "$#" -gt 0 ]; do
         case "$1" in
             --target) target="$2"; shift 2 ;;
             --count) count="$2"; shift 2 ;;
             --verify) verify_n="$2"; shift 2 ;;
+            --tests) tests="$2"; shift 2 ;;
+            --sleep) pause="$2"; shift 2 ;;
             *) shift ;;
         esac
     done
@@ -3150,7 +3152,7 @@ cmd_evolve() {
     echo "=== Эволюционный подбор ==="
     echo "  провайдер:  $provider"
     echo "  домен:      $domain"
-    echo "  кандидатов: $count, проверка до $verify_n"
+    echo "  кандидатов: $count, проверка до $verify_n, тестов на стабильность: $tests"
 
     if /etc/init.d/zapret2wizard running >/dev/null 2>&1; then
         /etc/init.d/zapret2wizard stop >/dev/null 2>&1
@@ -3177,25 +3179,54 @@ cmd_evolve() {
         [ -n "$id" ] || continue
         [ -n "$args" ] || continue
         printf '%s\n' "$args" > /tmp/bcw_ev_try.txt
-        local res ok=0 bytes=0
+        local res okruns=0 minbytes=0 t=0
         res=$(cmd_apply --target "$target" --file /tmp/bcw_ev_try.txt 2>/dev/null)
-        if printf '%s' "$res" | grep -q '"all_ok":true'; then ok=1; fi
-        bytes=$(printf '%s' "$res" | grep -o '"size_bytes":[0-9]*' | head -n 1 | cut -d: -f2)
-        [ -n "$bytes" ] || bytes=0
-        verified_lines="${verified_lines}${id}|${ok}|${bytes}
+        local b
+        b=$(printf '%s' "$res" | grep -o '"size_bytes":[0-9]*' | head -n 1 | cut -d: -f2)
+        [ -n "$b" ] && minbytes=$b
+
+        # серия замеров: стабильность важнее одного удачного ответа
+        while [ "$t" -lt "$tests" ]; do
+            t=$((t + 1))
+            local r s
+            r=$(cmd_test "$target" "" 2>/dev/null | tail -n 1)
+            s=$(printf '%s' "$r" | grep -o '"size_bytes":[0-9]*' | head -n 1 | cut -d: -f2)
+            if printf '%s' "$r" | grep -q '"all_ok":true'; then
+                okruns=$((okruns + 1))
+                if [ -n "$s" ] && { [ "$minbytes" -eq 0 ] || [ "$s" -lt "$minbytes" ]; }; then
+                    minbytes=$s
+                fi
+            fi
+            [ "$t" -lt "$tests" ] && sleep "$pause"
+        done
+
+        local stable=0
+        [ $((okruns * 2)) -ge "$tests" ] && stable=1
+        verified_lines="${verified_lines}${id}|${stable}|${minbytes}|${tests}|${okruns}
 "
-        if [ "$ok" = "1" ]; then
-            echo "  OK   $args"
-            applied=1
-            break
+        if [ "$stable" = "1" ]; then
+            echo "  OK   ${okruns}/${tests} · ${minbytes} Б · $args"
+            # запоминаем лучший стабильный, но продолжаем собирать данные
+            if [ "$applied" = "0" ] || [ "$minbytes" -gt "${best_bytes:-0}" ]; then
+                applied=1
+                best_bytes=$minbytes
+                best_args="$args"
+            fi
         else
-            echo "  --   $args"
+            echo "  --   ${okruns}/${tests} · ${minbytes} Б · $args"
         fi
     done <<EVOLIST
 $shortlist
 EVOLIST
     rm -f /tmp/bcw_ev_try.txt
     printf '%s' "$verified_lines" > "$verified"
+
+    # применяем лучший стабильный кандидат (если он не последний применённый)
+    if [ "$applied" = "1" ] && [ -n "$best_args" ]; then
+        printf '%s\n' "$best_args" > /tmp/bcw_ev_best.txt
+        cmd_apply --target "$target" --file /tmp/bcw_ev_best.txt >/dev/null 2>&1 || true
+        rm -f /tmp/bcw_ev_best.txt
+    fi
 
     local stats
     stats=$(lua "$evo" update "$genomes" "$provider" "$corpus.candidates" "$scan" "$verified" 2>/dev/null)

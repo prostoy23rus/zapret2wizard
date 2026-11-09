@@ -76,6 +76,57 @@ local FAKE_STYLES = {
 
 local HOSTS = { "vk.com", "gosuslugi.ru", "sber.ru", "yandex.ru", "ozon.ru", "mail.ru" }
 
+-- Разбор генома на гены: префикс wssize, fake, split, hostfake.
+local function parse_genome(args)
+    local g = {}
+    for tok in tostring(args):gmatch("%-%-lua%-desync=(%S+)") do
+        if tok:find("^wssize") then
+            g.prefix = tok
+        elseif tok:find("^fake:") then
+            g.fake = tok
+        elseif tok:find("^fakeddisorder") or tok:find("^multisplit") or tok:find("^multidisorder") then
+            g.split = tok
+        elseif tok:find("^hostfakesplit") then
+            g.hostfake = tok
+        elseif tok:find("^rst") or tok:find("^syndata") then
+            g.extra = tok
+        end
+    end
+    return g
+end
+
+local function compose_genome(g)
+    local parts = {}
+    if g.prefix then parts[#parts + 1] = "--lua-desync=" .. g.prefix end
+    if g.fake then parts[#parts + 1] = "--lua-desync=" .. g.fake end
+    if g.split then parts[#parts + 1] = "--lua-desync=" .. g.split end
+    if g.hostfake and not g.split then parts[#parts + 1] = "--lua-desync=" .. g.hostfake end
+    if g.extra then parts[#parts + 1] = "--lua-desync=" .. g.extra end
+    return "--payload=tls_client_hello " .. table.concat(parts, " ")
+end
+
+-- Кроссовер: берём фейк у одного родителя, нарезку у другого.
+local function crossover(a, b)
+    local ga, gb = parse_genome(a), parse_genome(b)
+    local child = {
+        prefix = (math.random(1, 2) == 1) and (ga.prefix or gb.prefix) or (gb.prefix or ga.prefix),
+        fake = (math.random(1, 2) == 1) and (ga.fake or gb.fake) or (gb.fake or ga.fake),
+        split = (math.random(1, 2) == 1) and (gb.split or ga.split) or (ga.split or gb.split),
+        hostfake = ga.hostfake or gb.hostfake,
+        extra = (math.random(1, 3) == 1) and (ga.extra or gb.extra) or nil,
+    }
+    -- мутация: иногда меняем позицию или добавляем seqovl
+    if child.split and math.random(1, 3) == 1 then
+        local kind, rest = child.split:match("^([^:]+):(.*)$")
+        if kind and rest then
+            local pos = random_of(POS)
+            child.split = kind .. ":pos=" .. pos .. ((math.random(1, 2) == 1) and ":seqovl=1" or "")
+        end
+    end
+    if child.split then child.hostfake = nil end
+    return compose_genome(child)
+end
+
 local function random_of(t)
     return t[math.random(#t)]
 end
@@ -143,7 +194,7 @@ local function mode_gen()
     local known = {}
     for id, g in pairs(prov.genomes) do
         if g.args and (g.ok or 0) > 0 then
-            known[#known + 1] = { id = id, args = g.args, score = (g.ok or 0) * 1000 + (g.best or 0) / 1024 }
+            known[#known + 1] = { id = id, args = g.args, score = (g.ok or 0) * 1000 + (g.stability or 0) * 2 + (g.best or 0) / 1024 }
         end
     end
     table.sort(known, function(a, b) return a.score > b.score end)
@@ -155,20 +206,27 @@ local function mode_gen()
         seen[known[i].args] = true
     end
 
-    -- исследование: мутации и новые комбинации
+    -- кроссовер: скрещиваем пары лучших геномов
+    local crossed = 0
+    if #known >= 2 then
+        local pairs_n = math.min(#known - 1, math.floor(count / 3))
+        for i = 1, pairs_n do
+            local parent_a = known[i].args
+            local parent_b = known[i + 1].args
+            local child = crossover(parent_a, parent_b)
+            if not seen[child] then
+                seen[child] = true
+                chosen[#chosen + 1] = child
+                crossed = crossed + 1
+            end
+        end
+    end
+
+    -- исследование: новые комбинации
     local guard = 0
     while #chosen < count and guard < count * 20 do
         guard = guard + 1
-        local rng = math.random()
-        local args
-
-        if #known > 0 and rng < 0.5 then
-            -- мутация известного: меняем позицию/фейк/порядок
-            args = build_genome(math.random())
-        else
-            args = build_genome(math.random())
-        end
-
+        local args = build_genome(math.random())
         if not seen[args] then
             seen[args] = true
             chosen[#chosen + 1] = args
@@ -188,7 +246,7 @@ local function mode_gen()
 
     -- кандидаты кладём рядом с корпусом: helper читает <corpus>.candidates
     write_json(corpus_path .. ".candidates", candidates)
-    print(json.stringify({ provider = provider, generated = #candidates, exploit = exploit }))
+    print(json.stringify({ provider = provider, generated = #candidates, exploit = exploit, crossed = crossed }))
 end
 
 -- ----------------------------------------------------------- режим update ----
@@ -214,9 +272,14 @@ local function mode_update()
         local vf = io.open(verified_path, "r")
         if vf then
             for line in vf:lines() do
-                local id, ok, bytes = line:match("^(%x+)|([01])|(%d+)$")
+                local id, ok, bytes, runs, okruns = line:match("^(%x+)|([01])|(%d+)|(%d+)|(%d+)$")
                 if id then
-                    verified_map[id] = { ok = (ok == "1"), bytes = tonumber(bytes) or 0 }
+                    verified_map[id] = {
+                        ok = (ok == "1"),
+                        bytes = tonumber(bytes) or 0,
+                        runs = tonumber(runs) or 1,
+                        okruns = tonumber(okruns) or ((ok == "1") and 1 or 0),
+                    }
                 end
             end
             vf:close()
@@ -244,6 +307,11 @@ local function mode_update()
             g.scan_ok = scan_ok[args] and true or false
             local v = verified_map[c.id]
             if v then
+                g.runs = (g.runs or 0) + (v.runs or 1)
+                g.okruns = (g.okruns or 0) + (v.okruns or 0)
+                if g.runs > 0 then
+                    g.stability = math.floor(g.okruns * 100 / g.runs)
+                end
                 if v.ok then
                     g.ok = (g.ok or 0) + 1
                     if (v.bytes or 0) > (g.best or 0) then g.best = v.bytes end
@@ -264,7 +332,7 @@ local function mode_update()
     if #ids > 200 then
         table.sort(ids, function(a, b)
             local ga, gb = prov.genomes[a], prov.genomes[b]
-            return ((ga.ok or 0) * 1000 + (ga.best or 0)) > ((gb.ok or 0) * 1000 + (gb.best or 0))
+            return ((ga.ok or 0) * 1000 + (ga.stability or 0) * 2 + (ga.best or 0) / 1024) > ((gb.ok or 0) * 1000 + (gb.stability or 0) * 2 + (gb.best or 0) / 1024)
         end)
         for i = 201, #ids do prov.genomes[ids[i]] = nil end
     end
