@@ -155,7 +155,29 @@ _svc_stop() {
     for p in $(pgrep -f "nfqws2" 2>/dev/null); do kill -9 "$p" 2>/dev/null; done
     nft delete table inet zapret2wizard 2>/dev/null || true
 }
-_svc_start_bg() { ( _svc_start_bg & ); }
+_svc_start_bg() {
+    local now=$(date +%s)
+    local last=$(cat /tmp/bcw_svc_start.last 2>/dev/null || echo 0)
+    if [ $((now - last)) -lt 20 ]; then
+        return 0
+    fi
+    echo "$now" > /tmp/bcw_svc_start.last
+    ( /etc/init.d/zapret2wizard start >/dev/null 2>&1 & )
+}
+
+# Самовосстановление: движки есть, а nft-таблицы нет — поднять заново.
+_svc_heal() {
+    _svc_running || return 0
+    nft list table inet zapret2wizard >/dev/null 2>&1 && return 0
+    # сначала пробуем восстановить из снимка — это быстро и без procd
+    if [ -s /etc/zapret2wizard/fw.nft ]; then
+        if nft -f /etc/zapret2wizard/fw.nft >/dev/null 2>&1; then
+            logger -t zapret2wizard "nft-таблица восстановлена из снимка"
+            return 0
+        fi
+    fi
+    _svc_start_bg
+}
 
 get_dpi_service_status() {
     # Не зовём init status: он ходит в ubus/procd и может подвиснуть.
@@ -3103,8 +3125,10 @@ _info_json_shell() {
         local hobj="{\"key\":\"$k\",\"name\":\"$k\",\"domains_count\":$c,\"uci_configured\":$cfg}"
         if [ "$first_h" = "1" ]; then hl_json="$hobj"; first_h=0; else hl_json="$hl_json,$hobj"; fi
     done
-    printf '{"zapret2_running":"%s","version":"%s","services":{%s},"all_strategies":[%s],"hostlists":[%s]}\n' \
-        "$running" "$ver" "$svc" "$strat" "$hl_json"
+    local nft_ok=false
+    nft list table inet zapret2wizard >/dev/null 2>&1 && nft_ok=true
+    printf '{"zapret2_running":"%s","nft_table":%s,"version":"%s","services":{%s},"all_strategies":[%s],"hostlists":[%s]}\n' \
+        "$running" "$nft_ok" "$ver" "$svc" "$strat" "$hl_json"
 }
 
 # ASN провайдера (для каталога геномов).
@@ -3545,6 +3569,7 @@ cmd_bypass_watch() {
         local t r
         t=$(bp_targets 2>/dev/null | wc -l)
         r=$(nft list ruleset 2>/dev/null | grep -c "bcw-bypass")
+        _svc_heal
         if [ "${t:-0}" -gt 0 ] && [ "${r:-0}" -lt "${t:-0}" ]; then
             echo "$(date '+%H:%M:%S') targets=$t rules=$r -> sync" >> /tmp/bcw_watch.log
             bp_sync >> /tmp/bcw_watch.log 2>&1 || true
@@ -3938,6 +3963,7 @@ cmd_info() {
 
         local res = {
             zapret2_running = "'"$zapret_running"'",
+            nft_table = ("'"$(nft list table inet zapret2wizard >/dev/null 2>&1 && echo true || echo false)"'" == "true"),
             services = {}
         }
 
@@ -4860,6 +4886,7 @@ case "$1" in
     bypass_watch) cmd_bypass_watch ;;
     ensure_hostlists_bg) cmd_ensure_hostlists_bg ;;
     service) shift; cmd_service "$@" ;;
+    svc_heal) _svc_heal ;;
     asn) cmd_asn ;;
     provider_save) cmd_provider_save ;;
     cron_install) cmd_cron_install ;;

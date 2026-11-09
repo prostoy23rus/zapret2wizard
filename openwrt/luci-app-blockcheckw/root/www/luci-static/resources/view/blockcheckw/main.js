@@ -1204,8 +1204,14 @@ return view.extend({
 			if (ch.id === 'domains' || ch.id === 'test_strategy') return null;
 			if (!svc) return { cls: 'mute', text: 'не настроен' };
 			if (svc.enabled) {
-				// «защищён» — только если служба реально работает
+				// «защищён» — только если служба работает И правила применены
 				if (!isServiceRunning) return { cls: 'warn', text: 'настроен · служба выкл.' };
+				var nftMissing = doctorInfo && (doctorInfo.checks || []).some(function(c) {
+					return c && c.name && c.name.indexOf('nft-') === 0 && !c.ok;
+				});
+				if ((statusData && statusData.nft_table === false) || nftMissing) {
+					return { cls: 'warn', text: 'настроен · нет правил' };
+				}
 				return { cls: 'ok', text: 'защищён' };
 			}
 			return { cls: 'warn', text: 'выключен' };
