@@ -611,6 +611,29 @@ local function mode_asn()
     print(asn)
 end
 
+local function mode_args()
+    local genomes_path = arg[2]
+    local provider = arg[3] or "default"
+    local id = arg[4]
+    local db = read_json(genomes_path) or { providers = {} }
+    local prov = (db.providers or {})[provider] or { genomes = {} }
+    local g = (prov.genomes or {})[id]
+    if not g or not g.args then
+        print(json.stringify({ ok = false, error = "геном не найден" }))
+        return
+    end
+    print(json.stringify({
+        ok = true,
+        id = id,
+        args = g.args,
+        ok_count = g.ok or 0,
+        fail = g.fail or 0,
+        best = g.best or 0,
+        stability = g.stability or 0,
+        last = g.last or 0,
+    }))
+end
+
 if mode == "gen" then
     mode_gen()
 elseif mode == "update" then
@@ -627,8 +650,10 @@ elseif mode == "export" then
     mode_export()
 elseif mode == "asn" then
     mode_asn()
+elseif mode == "args" then
+    mode_args()
 elseif mode == "import" then
     mode_import()
 else
-    print("usage: evolve.lua gen|update|provider|shortlist|history|status|export|import|asn ...")
+    print("usage: evolve.lua gen|update|provider|shortlist|history|status|export|import|asn|args ...")
 end

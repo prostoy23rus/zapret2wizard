@@ -2117,6 +2117,65 @@ return view.extend({
 				('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
 		}
 
+		function showGenomeModal(g) {
+			var ta = E('textarea', {
+				readonly: 'readonly',
+				style: 'width:100%;height:120px;font-family:monospace;font-size:11px;background:#14161a;color:#abb2bf;border:1px solid #383e4a;border-radius:6px;padding:8px;box-sizing:border-box;resize:vertical;'
+			}, g.args || '');
+
+			var targetSel = E('select', { class: 'cbi-input-select', style: 'height:32px;margin-top:8px;' }, [
+				E('option', { value: 'preset_youtube' }, 'YouTube'),
+				E('option', { value: 'preset_discord' }, 'Discord'),
+				E('option', { value: 'preset_x' }, 'X (Twitter)'),
+				E('option', { value: 'preset_instagram' }, 'Instagram'),
+				E('option', { value: 'preset_twitch' }, 'Twitch'),
+				E('option', { value: 'builtin' }, 'Свои домены')
+			]);
+
+			var stats = E('div', { style: 'font-size:12px;color:#abb2bf;margin-bottom:8px;' },
+				'OK ' + (g.ok || 0) + ' · стабильность ' + (g.stability || 0) + '% · лучший ' +
+				Math.round((g.best || 0) / 1024) + ' КБ · ' + fmtStamp(g.last));
+
+			bcwShowModal('🧬 Стратегия генома', [
+				stats,
+				ta,
+				E('div', { style: 'font-size:12px;color:#abb2bf;margin-top:10px;' }, 'Применить к сервису:'),
+				targetSel
+			], [
+				E('button', {
+					class: 'cbi-button cbi-button-action',
+					click: function() {
+						fs.exec(HELPER_BIN, ['genome_apply', g.id, targetSel.value]).then(function(res) {
+							var out = null;
+							try { out = JSON.parse(res.stdout); } catch (e) {}
+							if (out && (out.queued || out.applied)) {
+								ui.hideModal();
+								ui.addNotification(null, E('p', {}, out.queued ? '⏳ Применяю стратегию в фоне…' : '✓ Стратегия применена'), 'info');
+								setTimeout(function() { location.reload(); }, out.queued ? 12000 : 1200);
+							} else {
+								ui.addNotification(null, E('p', {}, '✗ Не удалось применить'), 'warning');
+							}
+						}).catch(function() {
+							ui.addNotification(null, E('p', {}, '✗ Ошибка применения'), 'danger');
+						});
+					}
+				}, 'Применить'),
+				E('button', {
+					class: 'cbi-button cbi-button-neutral',
+					click: function() {
+						ta.focus();
+						ta.select();
+						try { document.execCommand('copy'); ui.addNotification(null, E('p', {}, 'Скопировано'), 'info'); } catch (e) {}
+					}
+				}, 'Копировать'),
+				E('button', {
+					class: 'cbi-button cbi-button-neutral',
+					click: function() { ui.hideModal(); }
+				}, 'Закрыть')
+			]);
+			setTimeout(function() { ta.focus(); ta.select(); }, 150);
+		}
+
 		function shortArgs(a) {
 			if (!a) return '—';
 			return a.length > 92 ? a.slice(0, 92) + '…' : a;
@@ -2153,7 +2212,7 @@ return view.extend({
 						st.top.forEach(function(g, i) {
 							tbl.appendChild(E('tr', {}, [
 								E('td', {}, String(i + 1)),
-								E('td', { style: 'font-family:monospace;font-size:11px;' }, shortArgs(g.args)),
+								E('td', { style: 'font-family:monospace;font-size:11px;cursor:pointer;', title: 'Открыть полную стратегию', click: function() { showGenomeModal(g); } }, shortArgs(g.args) + ' ⋯'),
 								E('td', {}, g.ok + '/' + (g.ok + g.fail)),
 								E('td', {}, (g.stability || 0) + '%'),
 								E('td', {}, Math.round((g.best || 0) / 1024) + ' КБ'),
@@ -3196,8 +3255,13 @@ return view.extend({
 								showManualStrategiesFoundModal(stratsCount);
 							} else {
 								bcwShowModal('Результат поиска', [
-									E('p', { class: st.current_ok ? 'cbi-color-green' : 'cbi-color-yellow', style: 'font-weight: bold; font-size: 14px;' }, st.current_ok ? '✓ Новых стратегий не найдено — текущая работает' : '⚠️ Рабочих стратегий не найдено'),
-									E('p', { style: 'font-size: 13px; color: #abb2bf; margin-top: 8px;' }, st.current_ok ? 'Стратегия уже применена и проверена: сервис открывается. Новые варианты не нужны.' : 'Попробуйте запустить «Глубокий скан» для полного перебора или проверьте доступность интернета/домена.')
+									E('p', { class: st.current_ok ? 'cbi-color-green' : 'cbi-color-yellow', style: 'font-weight: bold; font-size: 14px;' }, st.current_ok ? '✓ Текущая стратегия работает' : '⚠️ Новых рабочих стратегий нет'),
+									E('div', { style: 'font-size: 13px; color: #abb2bf; margin-top: 8px;' }, [
+										E('div', {}, 'Проверено вариантов: ' + (st.tried || 0) + ' · найдено: ' + stratsCount),
+										E('div', {}, 'Тип блокировки: ' + (st.block_type || 'не определён')),
+										E('div', {}, st.scan_limited ? 'Скан остановлен по лимиту времени — стратегий могло не хватить.' : 'Перебор завершён полностью.'),
+										E('div', { style: 'margin-top:6px;' }, st.current_ok ? 'Сервис открывается с текущей стратегией — менять нечего.' : 'Проверьте доступность домена и повторите поиск; при повторе перебор идёт по расширенной матрице.')
+									])
 								], [
 									E('button', {
 										class: 'cbi-button cbi-button-neutral',

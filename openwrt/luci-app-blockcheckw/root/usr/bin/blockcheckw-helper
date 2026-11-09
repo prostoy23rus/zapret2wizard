@@ -168,6 +168,13 @@ _svc_start_bg() {
 # Самовосстановление: движки есть, а nft-таблицы нет — поднять заново.
 _svc_heal() {
     _svc_running || return 0
+    # дубли движков: должно быть ровно 3
+    local n=$(pgrep -f "nfqws2" 2>/dev/null | wc -l)
+    if [ "${n:-0}" -gt 4 ]; then
+        _svc_stop
+        _svc_start_bg
+        return 0
+    fi
     nft list table inet zapret2wizard >/dev/null 2>&1 && return 0
     # сначала пробуем восстановить из снимка — это быстро и без procd
     if [ -s /etc/zapret2wizard/fw.nft ]; then
@@ -185,6 +192,17 @@ get_dpi_service_status() {
         echo "running"
     else
         echo "inactive"
+    fi
+}
+
+# Реальный пакет конфигурации: автономный zapret2wizard или старый zapret2.
+_strategy_pkg() {
+    if uci -q get "zapret2wizard.BlockcheckW_YouTube" >/dev/null 2>&1; then
+        echo "zapret2wizard"
+    elif uci -q get "zapret2.BlockcheckW_YouTube" >/dev/null 2>&1; then
+        echo "zapret2"
+    else
+        echo "zapret2wizard"
     fi
 }
 
@@ -1085,7 +1103,7 @@ cmd_start() {
         generate_smart_probe_corpus "$target" "$domain" "$probe_corpus"
 
         # Phase 1: Fast diagnostic probe (3-6s)
-        /usr/bin/blockcheckw -w "$workers" scan -d "$domain" -p "$protocols" --dns auto --from-file "$probe_corpus" -o "$probe_output" --auto --timeout 30 >> "$LOG_FILE" 2>&1
+        /usr/bin/blockcheckw -w "$workers" scan -d "$domain" -p "$protocols" --dns auto --from-file "$probe_corpus" -o "$probe_output" --auto --timeout 120 >> "$LOG_FILE" 2>&1
 
         local probe_eval=$(lua - "$probe_output" << 'EOF' 2>/dev/null
 local json = require("luci.jsonc")
@@ -1212,7 +1230,7 @@ EOF
             local adapt_cnt=$(grep -c '^curl_test_' "$adaptive_corpus" 2>/dev/null || echo 0)
             echo "[blockcheckw-helper] [Smart Scan] Generated $adapt_cnt targeted permutations for DPI vector matrix." >> "$LOG_FILE"
 
-            /usr/bin/blockcheckw --profiles-per-instance 64 -w "$workers" scan -d "$domain" -p "$protocols" --dns auto --timeout 180 --from-file "$adaptive_corpus" -o "$adaptive_output" --auto --progress >> "$LOG_FILE" 2>&1 &
+            /usr/bin/blockcheckw --profiles-per-instance 64 -w "$workers" scan -d "$domain" -p "$protocols" --dns auto --timeout 600 --from-file "$adaptive_corpus" -o "$adaptive_output" --auto --progress >> "$LOG_FILE" 2>&1 &
             local bcw_child=$!
             echo "$bcw_child" > "$PID_FILE"
 
@@ -1793,11 +1811,12 @@ cmd_apply() {
 
     # Determine unique new section name without overwriting existing strategies
     local sec_name=""
-    if ! uci -q get "zapret2.$base_sec" >/dev/null; then
+    local pkg=$(_strategy_pkg)
+    if ! uci -q get "$pkg.$base_sec" >/dev/null; then
         sec_name="$base_sec"
     else
         local idx=2
-        while uci -q get "zapret2.${base_sec}_$idx" >/dev/null; do
+        while uci -q get "$pkg.${base_sec}_$idx" >/dev/null; do
             idx=$((idx + 1))
         done
         sec_name="${base_sec}_$idx"
@@ -1923,7 +1942,7 @@ cmd_activate() {
         return 1
     fi
 
-    if ! uci -q get "zapret2.$section" >/dev/null; then
+    if ! uci -q get "$pkg.$section" >/dev/null; then
         echo "{\"success\":false,\"error\":\"Strategy section '$section' not found in zapret2\"}"
         return 1
     fi
@@ -3630,6 +3649,48 @@ EOF
 # Совместимость со старым именем
 cmd_steer_sync() { cmd_bypass "$@"; }
 
+# Полные аргументы генома (для копирования).
+cmd_genome_args() {
+    local id="$1"
+    local evo="/usr/share/zapret2wizard/evolve.lua"
+    local genomes="/etc/zapret2wizard/genomes.json"
+    local provider=$(lua "$evo" provider /tmp/blockcheckw_status.json 2>/dev/null)
+    [ -n "$provider" ] || provider="default"
+    lua "$evo" args "$genomes" "$provider" "$id" 2>/dev/null
+}
+
+# Применить стратегию из генома к выбранному сервису.
+cmd_genome_apply() {
+    local id="$1"
+    local target="${2:-preset_youtube}"
+    local evo="/usr/share/zapret2wizard/evolve.lua"
+    local genomes="/etc/zapret2wizard/genomes.json"
+    local provider=$(lua "$evo" provider /tmp/blockcheckw_status.json 2>/dev/null)
+    [ -n "$provider" ] || provider="default"
+
+    local json=$(lua "$evo" args "$genomes" "$provider" "$id" 2>/dev/null)
+    local args=$(printf '%s' "$json" | sed -n 's/.*"args":"\(.*\)".*/\1/p')
+    [ -n "$args" ] || { echo '{"ok":false,"error":"геном не найден"}'; return 1; }
+
+    case "$target" in
+        preset_youtube|youtube) sec="BlockcheckW_YouTube" ;;
+        preset_discord|discord) sec="BlockcheckW_Discord" ;;
+        preset_x|x)             sec="BlockcheckW_X" ;;
+        preset_instagram|instagram) sec="BlockcheckW_Instagram" ;;
+        preset_twitch|twitch)   sec="BlockcheckW_Twitch" ;;
+        *)                      sec="BlockcheckW_General" ;;
+    esac
+
+    local pkg=$(_strategy_pkg)
+    uci -q set "$pkg.$sec.script=$args" || { echo '{"ok":false,"error":"нет секции"}'; return 1; }
+    uci -q commit "$pkg" || true
+
+    # перезапуск в фоне: не блокируем интерфейс
+    _svc_stop
+    _svc_start_bg
+    echo "{\"ok\":true,\"queued\":true,\"section\":\"$sec\",\"target\":\"$target\"}"
+}
+
 # Статус эволюции для LuCI: провайдер, история, топ геномов.
 cmd_evolve_status() {
     local evo="/usr/share/zapret2wizard/evolve.lua"
@@ -4887,6 +4948,8 @@ case "$1" in
     ensure_hostlists_bg) cmd_ensure_hostlists_bg ;;
     service) shift; cmd_service "$@" ;;
     svc_heal) _svc_heal ;;
+    genome_args) shift; cmd_genome_args "$@" ;;
+    genome_apply) shift; cmd_genome_apply "$@" ;;
     asn) cmd_asn ;;
     provider_save) cmd_provider_save ;;
     cron_install) cmd_cron_install ;;
