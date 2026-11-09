@@ -1,14 +1,11 @@
 {
-  "version": "0.18.75",
+  "version": "0.18.76",
   "release_date": "2026-11-09",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "Чистый роутер без kmod-nfnetlink-queue: понятная ошибка вместо «нет движка nfqws2 или nftables»",
-    "Doctor проверяет модули nfnetlink_queue и nft_queue и подсказывает, что установить",
-    "Новая команда blockcheckw-helper kmods_install; установщики вызывают её автоматически",
-    "Служба при старте делает modprobe nfnetlink_queue/nft_queue",
-    "UI: кнопка «Установить модули nfqueue» и подсказки в баннере готовности",
-    "Selftest: «служба работает» только при реально запущенных движках"
+    "Хотфикс к 0.18.75: postinst (.ipk/.apk) больше не вызывает менеджер пакетов под его же блокировкой",
+    "kmods_modprobe — только modprobe, для postinst; kmods_install — с установкой kmod, для кнопки/установщика",
+    "Как и раньше: doctor проверяет nfnetlink_queue и nft_queue, ошибка подбора точная"
   ]
 }
