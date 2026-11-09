@@ -2221,6 +2221,11 @@ return view.extend({
 				]),
 				E('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;' }, [targetSel, startBtn, histBtn, catalogBtn, exportBtn, importBtn])
 			]));
+			root.appendChild(E('div', { style: 'font-size:12px;color:var(--bcw-text-muted);line-height:1.5;margin-top:8px;' },
+				'Перебирает новые комбинации уже проверенных техник и запоминает, что держится у вашего провайдера. ' +
+				'Запускайте после обычного «Запустить поиск»: эволюция подсевает найденные стратегии и добавляет кроссоверы с мутациями. ' +
+				'Подбор останавливает обход на 1–3 минуты, затем служба поднимается сама и применяется лучший стабильный кандидат. ' +
+				'Ночное обучение — 04:23, один прогон в сутки; «Каталог по ASN» подтягивает геномы других пользователей.'));
 			root.appendChild(top);
 			root.appendChild(hist);
 			root.appendChild(logWrap);

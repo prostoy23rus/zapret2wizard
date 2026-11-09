@@ -97,3 +97,10 @@ nfqws2 --user=daemon --fwmark=0x40000000 \
 - Аргументы: `circular:fails=2:time=15:retrans=3:nld=2:reset`. `nld=2` — состояние на домен 2-го уровня (иначе каждый `*.googlevideo.com` начинает ротацию заново); `retrans=3` — чтобы одиночная потеря в Wi-Fi не считалась блокировкой; `reset` обрывает ожидание ретрансмиссий.
 - `--payload` указывать **после** `circular`: оркестратор видит все протоколы, фильтр действует только на стратегии.
 - Включать связку только по результату проверки стабильности (служба делает 3 прогона). Детали и Routerich-техники — skill `routerich-guides`.
+## 7. Эволюция стратегий
+
+- `evolve.lua` синтезирует новые комбинации примитивов (wssize / fake / split / hostfake) из памяти `/etc/zapret2wizard/genomes.json` по ключу «провайдер + тип блокировки» (`auto_sni_blocked`, `auto_ip_blocked`, ...).
+- Ручной прогон: `blockcheckw-helper evolve --target preset_youtube --count 12 --verify 3 --tests 3 --sleep 2`. Останавливает обход, подсевает стратегии последнего поиска, добавляет кроссоверы и мутации, проверяет `blockcheckw scan`, затем каждого кандидата — `apply` + N тестов.
+- «Стабильный» = успешно не менее половины прогонов; лучший по объёму ответа применяется, память обновляется (`learned`).
+- Ошибка «не удалось сгенерировать кандидатов» — падение `evolve.lua`. Смотреть `/tmp/bcw_evolve.log` и `/tmp/bcw_evolve_gen.err`; историческая причина — forward-reference `random_of` в `crossover`.
+- Ночное обучение: cron 04:23 (`evolve_nightly`), пропускается, если служба здорова (кроме воскресенья). «Каталог по ASN» — `catalog_fetch [ASN]`, импорт из `genomes/<ASN>.json`; обмен — `evolve_export` / `evolve_import`.

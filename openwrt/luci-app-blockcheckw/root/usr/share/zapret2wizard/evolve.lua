@@ -105,6 +105,13 @@ local function compose_genome(g)
     return "--payload=tls_client_hello " .. table.concat(parts, " ")
 end
 
+-- Случайный элемент набора. Объявлено ДО crossover: Lua резолвит имена
+-- при компиляции, и вызов из функции, объявленной выше, уходил в глобал nil
+-- (плавающая ошибка "attempt to call global 'random_of'").
+local function random_of(t)
+    return t[math.random(#t)]
+end
+
 -- Кроссовер: берём фейк у одного родителя, нарезку у другого.
 local function crossover(a, b)
     local ga, gb = parse_genome(a), parse_genome(b)
@@ -127,9 +134,6 @@ local function crossover(a, b)
     return compose_genome(child)
 end
 
-local function random_of(t)
-    return t[math.random(#t)]
-end
 
 -- Собрать геном: необязательный wssize-префикс, fake и нарезка в разном порядке.
 local function build_genome(rng)
@@ -213,8 +217,9 @@ local function mode_gen()
         for i = 1, pairs_n do
             local parent_a = known[i].args
             local parent_b = known[i + 1].args
-            local child = crossover(parent_a, parent_b)
-            if not seen[child] then
+            -- один кривой кроссовер не должен обнулять весь подбор
+            local okc, child = pcall(crossover, parent_a, parent_b)
+            if okc and child and not seen[child] then
                 seen[child] = true
                 chosen[#chosen + 1] = child
                 crossed = crossed + 1

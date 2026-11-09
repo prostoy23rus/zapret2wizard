@@ -4230,8 +4230,13 @@ cmd_evolve() {
     fi
     : > /tmp/bcw_scan_paused
 
-    local gen_out
-    gen_out=$(lua "$evo" gen "$genomes" "$provider" "$corpus" "$domain" "$count" 2>/dev/null)
+    local gen_out gen_err=/tmp/bcw_evolve_gen.err
+    gen_out=$(lua "$evo" gen "$genomes" "$provider" "$corpus" "$domain" "$count" 2>"$gen_err")
+    if [ ! -s "$corpus" ]; then
+        # один ретрай: генератор мог упасть на кривом геноме в памяти
+        sleep 1
+        gen_out=$(lua "$evo" gen "$genomes" "$provider" "$corpus" "$domain" "$count" 2>>"$gen_err")
+    fi
     local gen_count=$(printf '%s' "$gen_out" | grep -o '"generated":[0-9]*' | head -n 1 | cut -d: -f2)
     local gen_crossed=$(printf '%s' "$gen_out" | grep -o '"crossed":[0-9]*' | head -n 1 | cut -d: -f2)
     local gen_exploit=$(printf '%s' "$gen_out" | grep -o '"exploit":[0-9]*' | head -n 1 | cut -d: -f2)
@@ -4239,15 +4244,67 @@ cmd_evolve() {
     [ -n "$gen_crossed" ] || gen_crossed=0
     [ -n "$gen_exploit" ] || gen_exploit=0
     if [ ! -s "$corpus" ]; then
+        local gerr=$(tail -n 2 "$gen_err" 2>/dev/null | tr '\n' ' ' | tr -d '"')
         echo "  ОШИБКА: не удалось сгенерировать кандидатов"
+        [ -n "$gerr" ] && echo "  причина: $gerr"
+        echo "[evolve] gen failed: $gerr" >> /tmp/bcw_evolve.log
         _svc_start_bg
         rm -f /tmp/bcw_scan_paused
         return 1
     fi
 
-    echo "  проба (scan)..."
-    /usr/bin/blockcheckw -w 2 scan -d "$domain" -p tls12,tls13 --dns auto \
-        --from-file "$corpus" -o "$scan" >/dev/null 2>&1 || true
+    # Подсеваем проверенные стратегии из последнего поиска: эволюция не должна
+    # стартовать с нуля и обязана иметь заведомо рабочие кандидаты.
+    if [ -s "$OUTPUT_SCAN" ]; then
+        lua - "$OUTPUT_SCAN" "$corpus" "$corpus.candidates" "$domain" << 'EVOSEED' 2>/dev/null
+local json = require("luci.jsonc")
+local scan_path, corpus_path, cand_path, domain = arg[1], arg[2], arg[3], arg[4]
+local function hash(s)
+    local h = 5381
+    for i = 1, #s do h = (h * 31 + s:byte(i)) % 2147483647 end
+    return string.format("%08x", math.floor(h))
+end
+local cands = {}
+local cf = io.open(cand_path, "r")
+if cf then cands = json.parse(cf:read("*a")) or {}; cf:close() end
+if type(cands) ~= "table" then cands = {} end
+local seen = {}
+for _, c in ipairs(cands) do seen[c.args] = true end
+local sf = io.open(scan_path, "r")
+if not sf then return end
+local d = json.parse(sf:read("*a")) or {}
+sf:close()
+local out = io.open(corpus_path, "a")
+local added = 0
+for _, s in ipairs(d.strategies or {}) do
+    local a = (type(s) == "table" and s.args) or s
+    if a and a ~= "" and not seen[a] then
+        seen[a] = true
+        if out then out:write("curl_test_https_tls13 ipv4 ", domain, " : nfqws2 ", a, "\n") end
+        cands[#cands + 1] = { id = hash(a), args = a }
+        added = added + 1
+        if added >= 6 then break end
+    end
+end
+if out then out:close() end
+local wf = io.open(cand_path, "w")
+if wf then wf:write(json.stringify(cands)); wf:close() end
+EVOSEED
+    fi
+
+    local evo_qnum=$(pick_scan_qnum)
+    local evo_home=/tmp/bcw_evolve_home
+    mkdir -p "$evo_home" 2>/dev/null || true
+    echo "  проба (scan), очередь $evo_qnum..."
+    HOME="$evo_home" /usr/bin/blockcheckw --qnum "$evo_qnum" -w 2 scan -d "$domain" -p tls12,tls13 --dns auto \
+        --from-file "$corpus" -o "$scan" --auto --timeout 600 >/tmp/bcw_evolve_scan.log 2>&1 || true
+    # scan пишет либо JSON, либо текстовый список "--payload=..." — считаем оба
+    local scan_found=$(grep -c '^--' "$scan" 2>/dev/null)
+    [ "${scan_found:-0}" -eq 0 ] && scan_found=$(grep -o '"args"' "$scan" 2>/dev/null | wc -l)
+    echo "  стратегий прошло пробу: $scan_found"
+    if [ "$scan_found" -eq 0 ]; then
+        echo "  ВНИМАНИЕ: проба не нашла рабочих кандидатов — память не пополнится"
+    fi
 
     local shortlist
     shortlist=$(lua "$evo" shortlist "$corpus.candidates" "$scan" "$verify_n" 2>/dev/null)
