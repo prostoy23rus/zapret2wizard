@@ -53,11 +53,11 @@ echo "/etc/config/zapret2wizard" > "$PAYLOAD/lib/apk/packages/$PKGNAME.conffiles
 cat > "$WORK/post-install" <<'EOF'
 #!/bin/sh
 rm -rf /tmp/luci-indexcache* /tmp/luci-modulecache* 2>/dev/null || true
-/etc/init.d/rpcd restart >/dev/null 2>&1 || true
-/etc/init.d/uhttpd restart >/dev/null 2>&1 || true
+( /etc/init.d/rpcd restart >/dev/null 2>&1 </dev/null & )
+( /etc/init.d/uhttpd restart >/dev/null 2>&1 </dev/null & )
 /etc/init.d/zapret2wizard enable >/dev/null 2>&1 || true
 /usr/bin/blockcheckw-helper cron_install >/dev/null 2>&1 || true
-/etc/init.d/zapret2wizard restart >/dev/null 2>&1 || true
+( /etc/init.d/zapret2wizard restart >/dev/null 2>&1 </dev/null & )
 if [ "$(uci show zapret2wizard 2>/dev/null | grep -c '=strategy')" -eq 0 ]; then
     (/usr/bin/blockcheckw-helper autosetup >/tmp/bcw_autosetup.log 2>&1 &) || true
 fi

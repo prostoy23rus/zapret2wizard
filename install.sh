@@ -461,7 +461,7 @@ fi
 
 # Включение и запуск единой автономной службы
 /etc/init.d/zapret2wizard enable 2>/dev/null || true
-/etc/init.d/zapret2wizard restart 2>/dev/null || true
+( /etc/init.d/zapret2wizard restart >/dev/null 2>&1 </dev/null & )
 
 chmod 644 /www/luci-static/resources/view/blockcheckw/main.js
 chmod 644 /usr/share/blockcheckw/* /usr/share/luci/menu.d/luci-app-blockcheckw.json /usr/share/rpcd/acl.d/luci-app-blockcheckw.json 2>/dev/null || true
@@ -504,7 +504,7 @@ ubus call luci reload >/dev/null 2>&1 || true
 echo -e "${BLUE}ℹ${NC} Включение автозапуска и проверка конфликтов..."
 /etc/init.d/zapret2wizard enable >/dev/null 2>&1 || true
 /usr/bin/blockcheckw-helper cron_install >/dev/null 2>&1 || true
-/etc/init.d/zapret2wizard restart >/dev/null 2>&1 || true
+( /etc/init.d/zapret2wizard restart >/dev/null 2>&1 </dev/null & )
 sleep 2
 if [ -x /usr/bin/blockcheckw-helper ]; then
     CONFLICTS=$(/usr/bin/blockcheckw-helper conflicts 2>/dev/null)

@@ -366,9 +366,12 @@ start_service() {
 			kill "$(cat /var/run/bcw_bypass.watch.pid)" 2>/dev/null || true
 			rm -f /var/run/bcw_bypass.watch.pid
 		fi
-		start-stop-daemon -S -b -x /usr/bin/blockcheckw-helper -- bypass_watch >/dev/null 2>&1 || true
+		# start-stop-daemon и фоновый subshell наследуют fd-блокировку procd (1000).
+		# Сторож держал её всё время работы, и любой restart/enable/opkg install
+		# вставал на flock. Закрываем унаследованные дескрипторы у детей.
+		start-stop-daemon -S -b -x /usr/bin/blockcheckw-helper -- bypass_watch 1000>&- 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&- >/dev/null 2>&1 || true
 		# сам обход ставим в фон: он может ходить в сеть за диапазонами
-		( sleep 3; /usr/bin/blockcheckw-helper bypass_sync enable >/dev/null 2>&1 ) &
+		( exec 1000>&- 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&-; sleep 3; /usr/bin/blockcheckw-helper bypass_sync enable >/dev/null 2>&1 ) &
 	fi
 
 	# Start procd instances
