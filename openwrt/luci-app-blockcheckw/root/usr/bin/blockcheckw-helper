@@ -131,6 +131,10 @@ fi
 # страница закрыта). Тогда поднимаем её и убираем маркер.
 ensure_dpi_service() {
     [ -f /tmp/bcw_scan_paused ] || return 0
+    # Пока подбор идёт, службу не поднимаем: иначе она перехватывает пробный трафик
+    if [ -f /var/run/bcw_scan.active ]; then
+        return 0
+    fi
     if get_dpi_service_status | grep -q running; then
         rm -f /tmp/bcw_scan_paused
         return 0
@@ -142,8 +146,9 @@ ensure_dpi_service() {
 
 restart_dpi_service() {
     [ -x /usr/share/zapret2wizard/uci2config ] && /usr/share/zapret2wizard/uci2config >/dev/null 2>&1 || true
+    # Перезапуск в фоне: procd-lock может быть занят, и sync-вызов подвесил бы подбор.
     if [ -x /etc/init.d/zapret2wizard ]; then
-        /etc/init.d/zapret2wizard restart >/dev/null 2>&1
+        ( /etc/init.d/zapret2wizard restart >/dev/null 2>&1 & )
     fi
 }
 
@@ -1068,6 +1073,8 @@ cmd_start() {
             mkdir "$SCAN_LOCK" 2>/dev/null || true
         fi
         echo $$ > "$SCAN_LOCK/pid" 2>/dev/null || true
+        echo $$ > /var/run/bcw_scan.active 2>/dev/null || true
+        trap 'rm -f /var/run/bcw_scan.active' EXIT INT TERM
 
         echo "[blockcheckw-helper] Starting Unified Smart Scan for $domain (target=$target, workers=$workers, auto_apply=$auto_apply)..." >> "$LOG_FILE"
         history_add "scan_start" "$(metric_target_key "$target")" "Начат подбор для $domain"
@@ -1077,7 +1084,20 @@ cmd_start() {
             _svc_stop
             echo "[blockcheckw-helper] Служба остановлена на время подбора" >> "$LOG_FILE"
             history_add "scan_pause" "$(metric_target_key "$target")" "Служба остановлена на время подбора"
-            : > /tmp/bcw_scan_paused
+        fi
+        # чужие движки (например /opt/zapret2) держат очередь 200 и портят картину
+        for _fc in /proc/[0-9]*/comm; do
+            [ -r "$_fc" ] || continue
+            _fn=$(cat "$_fc" 2>/dev/null)
+            case "$_fn" in nfqws|nfqws2) ;; *) continue ;; esac
+            _fp=${_fc#/proc/}; _fp=${_fp%/comm}
+            _fcmd=$(tr '\0' ' ' < "/proc/$_fp/cmdline" 2>/dev/null)
+            case "$_fcmd" in
+                *zapret2wizard*) ;;
+                *) kill -9 "$_fp" 2>/dev/null; echo "[blockcheckw-helper] Удалён чужой движок pid=$_fp" >> "$LOG_FILE" ;;
+            esac
+        done
+        : > /tmp/bcw_scan_paused
             # Сторож: если процесс подбора умрёт (перезагрузка страницы, kill), служба
             # всё равно вернётся. Без этого пользователь оставался без обхода.
             (
@@ -1092,7 +1112,6 @@ cmd_start() {
                     logger -t zapret2wizard "сторож подбора: служба поднята после завершения сканирования"
                 fi
             ) &
-        fi
 
         write_status "running" 15 "Фаза 1: Экспресс-тест векторов DPI ($domain)..."
 
@@ -1103,7 +1122,7 @@ cmd_start() {
         generate_smart_probe_corpus "$target" "$domain" "$probe_corpus"
 
         # Phase 1: Fast diagnostic probe (3-6s)
-        /usr/bin/blockcheckw -w "$workers" scan -d "$domain" -p "$protocols" --dns auto --from-file "$probe_corpus" -o "$probe_output" --auto --timeout 120 >> "$LOG_FILE" 2>&1
+        /usr/bin/blockcheckw --qnum 400 -w "$workers" scan -d "$domain" -p "$protocols" --dns auto --from-file "$probe_corpus" -o "$probe_output" --auto --timeout 120 >> "$LOG_FILE" 2>&1
 
         local probe_eval=$(lua - "$probe_output" << 'EOF' 2>/dev/null
 local json = require("luci.jsonc")
@@ -1230,7 +1249,7 @@ EOF
             local adapt_cnt=$(grep -c '^curl_test_' "$adaptive_corpus" 2>/dev/null || echo 0)
             echo "[blockcheckw-helper] [Smart Scan] Generated $adapt_cnt targeted permutations for DPI vector matrix." >> "$LOG_FILE"
 
-            /usr/bin/blockcheckw --profiles-per-instance 64 -w "$workers" scan -d "$domain" -p "$protocols" --dns auto --timeout 600 --from-file "$adaptive_corpus" -o "$adaptive_output" --auto --progress >> "$LOG_FILE" 2>&1 &
+            /usr/bin/blockcheckw --qnum 400 --profiles-per-instance 64 -w "$workers" scan -d "$domain" -p "$protocols" --dns auto --timeout 600 --from-file "$adaptive_corpus" -o "$adaptive_output" --auto --progress >> "$LOG_FILE" 2>&1 &
             local bcw_child=$!
             echo "$bcw_child" > "$PID_FILE"
 
@@ -1419,74 +1438,35 @@ EOF
             local candidates="/tmp/blockcheckw_candidates.$$"
             : > "$candidates"
 
-            # Проверка с реальной передачей данных: проба сканера может пройти,
-            # а полный ответ — нет. Верифицированную стратегию ставим первой.
-            local verified="/tmp/bcw_verified.$$"
-            rm -f "$verified"
+            # Берём лучшую стратегию из отчёта сканера и применяем напрямую:
+            # цикл из 10 кандидатов с рестартами был слишком медленным и хрупким.
+            local best=""
             if [ -s "$OUTPUT_SCAN" ]; then
-                local chk="/tmp/bcw_check.$$.json"
-                /usr/bin/blockcheckw check --from-file "$OUTPUT_SCAN" -d "$domain" --timeout 12 --auto > "$chk" 2>/dev/null || true
-                if [ -s "$chk" ]; then
-                    lua - "$chk" "$verified" << 'EOF' 2>/dev/null
-local json = require("luci.jsonc")
-local f = io.open(arg[1], "r")
-local d = f and json.parse(f:read("*a")) or nil
-if f then f:close() end
-if d and d.strategies then
-    local out = io.open(arg[2], "w")
-    for _, s in ipairs(d.strategies) do
-        if s.working == true and s.args and #s.args > 0 then
-            out:write(s.args, "\n")
-            break
-        end
-    end
-    out:close()
-end
-EOF
+                best=$(grep -m 1 '^--' "$OUTPUT_SCAN" 2>/dev/null)
+            fi
+            if [ -z "$best" ] && [ -s "$OUTPUT_VANILLA" ]; then
+                best=$(grep -m 1 '^--' "$OUTPUT_VANILLA" 2>/dev/null)
+            fi
+
+            local strats_json="[]"
+            if [ -n "$best" ]; then
+                local esc_best=$(printf '%s' "$best" | sed 's/\\/\\\\/g; s/"/\\"/g')
+                strats_json="[{\"args\":\"$esc_best\",\"coverage\":1,\"protocol\":\"auto\"}]"
+            fi
+
+            local apply_ok="0" apply_res="" apply_info=""
+            if [ "$auto_apply" = "1" ] && [ -n "$best" ]; then
+                echo "[blockcheckw-helper] Применяю лучшую стратегию напрямую" >> "$LOG_FILE"
+                apply_res=$(cmd_strategy_set "$target" "$best" 2>/dev/null)
+                sleep 10
+                local _t=$(cmd_test "$target" "" 2>/dev/null)
+                if printf '%s' "$_t" | grep -q '"all_ok":true'; then
+                    apply_ok="1"
                 fi
-                rm -f "$chk"
-            fi
-            if [ -s "$verified" ]; then
-                head -n 1 "$verified" >> "$candidates"
-                echo "[blockcheckw-helper] Найдена стратегия с реальной передачей данных" >> "$LOG_FILE"
-            fi
-            rm -f "$verified"
-
-            # Circular-стратегия — это один набор аргументов, разбитый на строки.
-            # Склеиваем его в одну строку, иначе применяются обрывки вида "--payload=tls_client_hello".
-            if [ "$do_circular" = "1" ] && [ -f "$OUTPUT_CIRCULAR" ] && [ -s "$OUTPUT_CIRCULAR" ]; then
-                tr '\n' ' ' < "$OUTPUT_CIRCULAR" | sed 's/  */ /g' | sed 's/^ //; s/ $//' >> "$candidates"
-            fi
-            if [ -f "$OUTPUT_VANILLA" ] && [ -s "$OUTPUT_VANILLA" ]; then
-                head -n 8 "$OUTPUT_VANILLA" >> "$candidates"
-            fi
-
-            while IFS= read -r cand; do
-                [ -n "$cand" ] || continue
-                [ "$attempt" -ge "$max_attempts" ] && break
-                attempt=$((attempt + 1))
-                [ -n "$first_cand" ] || first_cand="$cand"
-                echo "[blockcheckw-helper] Пробую кандидата $attempt/$max_attempts" >> "$LOG_FILE"
-                printf '%s\n' "$cand" > /tmp/blockcheckw_top_strat.txt
-                apply_res=$(cmd_apply --target "$target" --file /tmp/blockcheckw_top_strat.txt)
-                case "$apply_res" in
-                    *'"all_ok":true'*) apply_ok="1"; break ;;
-                esac
-            done < "$candidates"
-            rm -f "$candidates"
-
-            # Ни один кандидат не прошёл полный тест: возвращаем первого
-            # (Circular), чтобы не оставлять применённым последний перебор.
-            if [ "$apply_ok" != "1" ] && [ "$attempt" -gt 1 ] && [ -n "$first_cand" ]; then
-                echo "[blockcheckw-helper] Ни один кандидат не прошёл all_ok, возвращаю первого" >> "$LOG_FILE"
-                printf '%s\n' "$first_cand" > /tmp/blockcheckw_top_strat.txt
-                apply_res=$(cmd_apply --target "$target" --file /tmp/blockcheckw_top_strat.txt)
-            fi
-
-            if [ -n "$apply_res" ]; then
-                echo "[blockcheckw-helper] Auto-applied strategy to $target (all_ok=$apply_ok): $apply_res" >> "$LOG_FILE"
-                apply_info=",\"auto_applied\":true,\"apply_result\":$apply_res"
-                [ "$apply_ok" = "1" ] || apply_info="$apply_info,\"apply_warning\":\"Стратегия применена, но полный тест с роутера не пройден — проверьте загрузку страницы с устройства в сети\""
+                if [ -n "$apply_res" ]; then
+                    apply_info=",\"auto_applied\":true"
+                    [ "$apply_ok" = "1" ] || apply_info="$apply_info,\"apply_warning\":\"Стратегия применена, но полный тест не пройден\""
+                fi
             fi
         fi
 
@@ -1503,7 +1483,7 @@ EOF
                     final_msg="$final_msg (применена, но полный тест не пройден)"
                 fi
             fi
-            write_status "done" 100 "$final_msg" ",\"strategies\":$strats_json,\"scan_found\":$found_count,\"tried\":$attempt$apply_info"
+            write_status "done" 100 "$final_msg" ",\"strategies\":$strats_json,\"scan_found\":$found_count,\"tried\":$found_count$apply_info"
             echo "[blockcheckw-helper] Finished successfully. Found $found_count working strategies." >> "$LOG_FILE"
             history_add "scan_done" "$(metric_target_key "$target")" "Найдено рабочих стратегий: $found_count"
             [ "$auto_apply" = "1" ] && history_add "apply" "$(metric_target_key "$target")" "Стратегия применена в Zapret2"
@@ -1686,13 +1666,38 @@ EOF
 
 # Запуск подбора в фоне: rpcd/uhttpd не ждут многоминутный скан.
 cmd_start_bg() {
+    # Не даём запускать второй подбор: флаг, лок и живые процессы
+    if [ -f /var/run/bcw_scan.active ]; then
+        local _ap=$(cat /var/run/bcw_scan.active 2>/dev/null)
+        if [ -z "$_ap" ] || kill -0 "$_ap" 2>/dev/null; then
+            echo '{"ok":false,"error":"Подбор уже выполняется"}'
+            return 0
+        fi
+    fi
+    if [ -d /var/run/bcw_scan.lock ]; then
+        local _p=$(cat /var/run/bcw_scan.lock/pid 2>/dev/null)
+        if [ -n "$_p" ] && kill -0 "$_p" 2>/dev/null; then
+            echo '{"ok":false,"error":"Подбор уже выполняется"}'
+            return 0
+        fi
+    fi
+    if ps w | grep -qE '[b]lockcheckw-helper (start|apply) '; then
+        echo '{"ok":false,"error":"Подбор уже выполняется"}'
+        return 0
+    fi
+
     local quoted=""
     local a
     for a in "$@"; do
         quoted="$quoted '$a'"
     done
-    start-stop-daemon -S -b -x /bin/sh -- -c "/usr/bin/blockcheckw-helper start$quoted" >/dev/null 2>&1 \
-        || ( /bin/sh -c "/usr/bin/blockcheckw-helper start$quoted" >/dev/null 2>&1 & )
+    if command -v setsid >/dev/null 2>&1; then
+        : > /tmp/bcw_scan_bg.log
+        setsid /bin/sh -c "exec /usr/bin/blockcheckw-helper start$quoted" >>/tmp/bcw_scan_bg.log 2>&1 &
+    else
+        start-stop-daemon -S -b -x /bin/sh -- -c "/usr/bin/blockcheckw-helper start$quoted" >/dev/null 2>&1 \
+            || ( /bin/sh -c "/usr/bin/blockcheckw-helper start$quoted" >/dev/null 2>&1 & )
+    fi
     echo '{"ok":true,"started":true}'
 }
 
@@ -1821,18 +1826,10 @@ cmd_apply() {
             ;;
     esac
 
-    # Determine unique new section name without overwriting existing strategies
-    local sec_name=""
+    # Всегда пишем в базовую секцию: старые нумерованные отключаются ниже,
+    # иначе конфиг разрастается, а интерфейс показывает устаревшую стратегию.
+    local sec_name="$base_sec"
     local pkg=$(_strategy_pkg)
-    if ! uci -q get "$pkg.$base_sec" >/dev/null; then
-        sec_name="$base_sec"
-    else
-        local idx=2
-        while uci -q get "$pkg.${base_sec}_$idx" >/dev/null; do
-            idx=$((idx + 1))
-        done
-        sec_name="${base_sec}_$idx"
-    fi
 
     # Disable previously active strategies for this target to prevent desync/filter conflicts,
     # keeping all older strategies safely stored in /etc/config/zapret2 & /etc/config/zapret2wizard
@@ -3630,6 +3627,12 @@ bp_status() {
 # Сторож: оркестраторы пересоздают таблицы и стирают чужие правила.
 # Держим наши правила на месте с точностью до секунд.
 cmd_bypass_watch() {
+    if [ -f /var/run/bcw_bypass.watch.pid ]; then
+        local _wp=$(cat /var/run/bcw_bypass.watch.pid 2>/dev/null)
+        if [ -n "$_wp" ] && [ "$_wp" != "$$" ] && kill -0 "$_wp" 2>/dev/null; then
+            return 0
+        fi
+    fi
     echo $$ > /var/run/bcw_bypass.watch.pid
     while [ -f /var/run/bcw_bypass.run ]; do
         local t r
