@@ -21,6 +21,8 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      # Только цели, для которых в stable есть готовый rust-std.
+      # mips/mipsel/mips64/riscv64 собираются через `cross` (Docker) — см. docs/PACKAGING.md.
       matrix:
         include:
           - target: aarch64-unknown-linux-musl
@@ -32,18 +34,6 @@ jobs:
           - target: x86_64-unknown-linux-musl
             openwrt_arch: x86_64
             engine: linux-x86_64
-          - target: mips-unknown-linux-musl
-            openwrt_arch: mips_24kc
-            engine: linux-mips
-          - target: mipsel-unknown-linux-musl
-            openwrt_arch: mipsel_24kc
-            engine: linux-mipsel
-          - target: mips64-unknown-linux-musl
-            openwrt_arch: mips64_octeonplus
-            engine: linux-mips64
-          - target: riscv64gc-unknown-linux-musl
-            openwrt_arch: riscv64_generic
-            engine: linux-riscv64
     steps:
       - uses: actions/checkout@v4
 
@@ -81,12 +71,6 @@ jobs:
             engine: linux-arm
           - openwrt_arch: x86_64
             engine: linux-x86_64
-          - openwrt_arch: mips_24kc
-            engine: linux-mips
-          - openwrt_arch: mipsel_24kc
-            engine: linux-mipsel
-          - openwrt_arch: riscv64_generic
-            engine: linux-riscv64
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
