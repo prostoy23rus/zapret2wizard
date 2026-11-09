@@ -1933,9 +1933,19 @@ return view.extend({
 			dashRow.appendChild(dashRight);
 			scanPanel.appendChild(dashRow);
 			dashRight.appendChild(buildSteerCard());
-			// остальные карточки (результаты) — на всю ширину под колонками
+			// «Что применяется сейчас» и результаты — внутрь того же блока целей,
+			// чтобы это был один раздел, а не отдельная карточка
 			for (var ci = 2; ci < cards.length; ci++) {
-				if (cards[ci]) scanPanel.appendChild(cards[ci]);
+				var extra = cards[ci];
+				if (!extra) continue;
+				extra.classList.remove('bcw-card');
+				extra.style.background = 'transparent';
+				extra.style.border = 'none';
+				extra.style.borderTop = '1px solid var(--bcw-border-divider)';
+				extra.style.borderRadius = '0';
+				extra.style.marginTop = '10px';
+				extra.style.padding = '16px 0 0';
+				(cards[0] || dashLeft).appendChild(extra);
 			}
 		}
 
