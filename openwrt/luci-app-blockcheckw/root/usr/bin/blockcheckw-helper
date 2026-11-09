@@ -3080,6 +3080,122 @@ _info_json_shell() {
         "$running" "$ver" "$svc" "$strat" "$hl_json"
 }
 
+# ASN провайдера (для каталога геномов).
+cmd_asn() {
+    if [ -f /etc/zapret2wizard/provider ]; then
+        local p=$(cat /etc/zapret2wizard/provider 2>/dev/null)
+        local a=$(printf '%s' "$p" | grep -o 'AS[0-9]*' | head -n 1)
+        [ -n "$a" ] && { echo "$a"; return 0; }
+    fi
+    local a=$(lua /usr/share/zapret2wizard/evolve.lua asn /tmp/blockcheckw_status.json 2>/dev/null)
+    [ -n "$a" ] || a="AS0"
+    echo "$a"
+}
+
+# Сохранить провайдера (с ASN), если он есть в отчёте сканера.
+cmd_provider_save() {
+    local isp=""
+    if [ -f /tmp/blockcheckw_status.json ]; then
+        isp=$(grep -o '"isp": *"[^"]*"' /tmp/blockcheckw_status.json 2>/dev/null | head -n 1 | cut -d'"' -f4)
+    fi
+    if [ -n "$isp" ]; then
+        mkdir -p /etc/zapret2wizard 2>/dev/null || true
+        printf '%s\n' "$isp" > /etc/zapret2wizard/provider
+        echo "{\"saved\":true,\"isp\":\"$isp\"}"
+    else
+        echo '{"saved":false}'
+    fi
+}
+
+# Забрать геномы из общего каталога по ASN и слить с локальной памятью.
+cmd_catalog_fetch() {
+    local asn="${1:-}"
+    local evo="/usr/share/zapret2wizard/evolve.lua"
+    local genomes="/etc/zapret2wizard/genomes.json"
+
+    [ -n "$asn" ] || asn=$(cmd_asn)
+    if [ -z "$asn" ] || [ "$asn" = "AS0" ]; then
+        echo '{"ok":false,"error":"не удалось определить ASN провайдера"}'
+        return 1
+    fi
+
+    local url="https://raw.githubusercontent.com/prostoy23rus/zapret2wizard/main/genomes/${asn}.json"
+    local tmp="/tmp/bcw_catalog.json"
+    curl -fsSL -k -m 30 "$url" -o "$tmp" 2>/dev/null || wget -q -O "$tmp" "$url" 2>/dev/null || true
+
+    if [ ! -s "$tmp" ]; then
+        echo "{\"ok\":false,\"error\":\"в каталоге пока нет геномов для ${asn}\",\"asn\":\"${asn}\"}"
+        rm -f "$tmp"
+        return 1
+    fi
+
+    local provider=$(lua "$evo" provider /tmp/blockcheckw_status.json 2>/dev/null)
+    [ -n "$provider" ] || provider="default"
+    local res
+    res=$(lua "$evo" import "$genomes" "$provider" "$tmp" 2>/dev/null)
+    rm -f "$tmp"
+    echo "$res"
+}
+
+# Экспорт для отправки в каталог: JSON + подсказка куда положить.
+cmd_catalog_export() {
+    local asn=$(cmd_asn)
+    [ -n "$asn" ] || asn="AS0"
+    local out="/tmp/bcw_catalog_export.json"
+    local evo="/usr/share/zapret2wizard/evolve.lua"
+    local genomes="/etc/zapret2wizard/genomes.json"
+    local provider=$(lua "$evo" provider /tmp/blockcheckw_status.json 2>/dev/null)
+    [ -n "$provider" ] || provider="default"
+
+    lua "$evo" export "$genomes" "$provider" 1 "$asn" > "$out" 2>/dev/null
+    local count=$(grep -o '"count":[0-9]*' "$out" | head -n 1 | cut -d: -f2)
+    echo "{\"ok\":true,\"asn\":\"$asn\",\"count\":${count:-0},\"file\":\"$out\",\"target\":\"genomes/${asn}.json\"}"
+}
+
+# Дневной триггер: если сервис деградировал два замера подряд — эволюция.
+cmd_health_tick() {
+    local counter="/etc/zapret2wizard/.health_fail"
+    local last="/etc/zapret2wizard/.health_last"
+    local now=$(date +%s)
+
+    # не чаще одного авто-прогона в 6 часов
+    if [ -f "$last" ]; then
+        local prev=$(cat "$last" 2>/dev/null)
+        if [ -n "$prev" ] && [ $((now - prev)) -lt 21600 ]; then
+            echo '{"skipped":true,"reason":"throttled"}'
+            return 0
+        fi
+    fi
+
+    if [ -f /tmp/bcw_scan_paused ] || [ -f /tmp/bcw_evolve.running ]; then
+        echo '{"skipped":true,"reason":"busy"}'
+        return 0
+    fi
+
+    local target="preset_youtube"
+    cmd_test "$target" "" > /tmp/bcw_health.json 2>/dev/null
+    if grep -q '"all_ok":true' /tmp/bcw_health.json; then
+        echo 0 > "$counter"
+        rm -f /tmp/bcw_health.json
+        echo '{"healthy":true}'
+        return 0
+    fi
+    rm -f /tmp/bcw_health.json
+
+    local n=$(cat "$counter" 2>/dev/null || echo 0)
+    n=$((n + 1))
+    echo "$n" > "$counter"
+    if [ "$n" -lt 2 ]; then
+        echo "{\"healthy\":false,\"fails\":$n}"
+        return 0
+    fi
+
+    echo 0 > "$counter"
+    echo "$now" > "$last"
+    echo "{\"healthy\":false,\"fails\":2,\"action\":\"evolve\",\"target\":\"$target\"}"
+    ( /usr/bin/blockcheckw-helper evolve --target "$target" --count 8 --verify 2 --tests 2 --sleep 2 >>/tmp/bcw_evolve.log 2>&1 & ) || true
+}
+
 # Экспорт рабочих геномов провайдера в JSON (для обмена).
 cmd_evolve_export() {
     local min_ok="${1:-1}"
@@ -3203,6 +3319,9 @@ cmd_cron_install() {
     touch "$cron_file" 2>/dev/null || true
     if ! grep -q 'bcw-evolve' "$cron_file" 2>/dev/null; then
         echo "$line" >> "$cron_file"
+    fi
+    if ! grep -q 'bcw-health' "$cron_file" 2>/dev/null; then
+        echo "*/30 * * * * /usr/bin/blockcheckw-helper health_tick >/dev/null 2>&1 # bcw-health" >> "$cron_file"
     fi
     /etc/init.d/cron enable >/dev/null 2>&1 || true
     /etc/init.d/cron restart >/dev/null 2>&1 || true
@@ -4318,6 +4437,11 @@ case "$1" in
     evolve_nightly) cmd_evolve_nightly ;;
     evolve_export) shift; cmd_evolve_export "$@" ;;
     evolve_import) shift; cmd_evolve_import "$@" ;;
+    catalog_fetch) shift; cmd_catalog_fetch "$@" ;;
+    catalog_export) cmd_catalog_export ;;
+    health_tick) cmd_health_tick ;;
+    asn) cmd_asn ;;
+    provider_save) cmd_provider_save ;;
     cron_install) cmd_cron_install ;;
     *)
         echo "Usage: $0 {start|status|stop|apply|activate|delete_strategy|test|speedtest|info|logs|check_update|update|uninstall|diag|ensure_hostlists|read_hostlist|add_hostlist_domain|remove_hostlist_domain|write_hostlist|metrics|toggle|conflicts|doctor}"

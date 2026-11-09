@@ -531,9 +531,11 @@ local function mode_export()
         return (a.ok * 1000 + a.stability * 2 + a.best / 1024) > (b.ok * 1000 + b.stability * 2 + b.best / 1024)
     end)
 
+    local asn = tostring(provider):match("(AS%d+)") or (arg[5] or "")
     print(json.stringify({
         schema = 1,
         generator = "zapret2wizard",
+        asn = asn,
         provider = provider,
         exported_at = now_ts(),
         count = #list,
@@ -597,6 +599,18 @@ local function mode_import()
     print(json.stringify({ ok = true, imported = imported, updated = updated, total = total }))
 end
 
+-- ASN из строки провайдера ("AS25490 OJSC ..." -> "AS25490")
+local function mode_asn()
+    local status_path = arg[2] or "/tmp/blockcheckw_status.json"
+    local st = read_json(status_path) or {}
+    local isp = tostring(st.isp or "")
+    local asn = isp:match("(AS%d+)")
+    if not asn then
+        asn = "AS0"
+    end
+    print(asn)
+end
+
 if mode == "gen" then
     mode_gen()
 elseif mode == "update" then
@@ -611,8 +625,10 @@ elseif mode == "status" then
     mode_status()
 elseif mode == "export" then
     mode_export()
+elseif mode == "asn" then
+    mode_asn()
 elseif mode == "import" then
     mode_import()
 else
-    print("usage: evolve.lua gen|update|provider|shortlist|history|status|export|import ...")
+    print("usage: evolve.lua gen|update|provider|shortlist|history|status|export|import|asn ...")
 end

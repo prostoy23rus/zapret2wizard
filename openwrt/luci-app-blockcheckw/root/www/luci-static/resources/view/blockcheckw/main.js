@@ -1869,6 +1869,46 @@ return view.extend({
 			var histBtn = E('button', { class: 'bcw-btn-secondary', style: 'height: 34px;' }, '🕓 Установить ночное обучение');
 			var exportBtn = E('button', { class: 'bcw-btn-secondary', style: 'height: 34px;' }, '⬇ Экспорт геномов');
 			var importBtn = E('button', { class: 'bcw-btn-secondary', style: 'height: 34px;' }, '⬆ Импорт');
+			var catalogBtn = E('button', { class: 'bcw-btn-secondary', style: 'height: 34px;' }, '🌐 Каталог по ASN');
+
+			catalogBtn.addEventListener('click', function() {
+				catalogBtn.disabled = true;
+				fs.exec(HELPER_BIN, ['catalog_fetch']).then(function(res) {
+					var out = null;
+					try { out = JSON.parse(res.stdout); } catch (e) {}
+					catalogBtn.disabled = false;
+					if (out && out.ok) {
+						ui.addNotification(null, E('p', {}, 'Из каталога добавлено: ' + out.imported + ', всего: ' + out.total), 'info');
+						refreshEvolution();
+					} else {
+						// ASN не определился — спросим вручную
+						var asnInput = E('input', { type: 'text', class: 'cbi-input-text', placeholder: 'AS25490', style: 'width:100%;' });
+						var st = E('div', { style: 'font-size:12px;color:#abb2bf;margin-top:8px;' }, (out && out.error) || '');
+						var okBtn = E('button', { class: 'cbi-button cbi-button-action' }, 'Загрузить');
+						okBtn.addEventListener('click', function() {
+							var v = (asnInput.value || '').trim();
+							if (!v) return;
+							st.textContent = '⏳ Загружаю...';
+							fs.exec(HELPER_BIN, ['catalog_fetch', v]).then(function(r2) {
+								var o2 = null;
+								try { o2 = JSON.parse(r2.stdout); } catch (e) {}
+								if (o2 && o2.ok) {
+									ui.hideModal();
+									ui.addNotification(null, E('p', {}, 'Из каталога добавлено: ' + o2.imported + ', всего: ' + o2.total), 'info');
+									refreshEvolution();
+								} else {
+									st.textContent = '✗ ' + ((o2 && o2.error) || 'не найдено');
+								}
+							}).catch(function() { st.textContent = '✗ ошибка'; });
+						});
+						bcwShowModal('🌐 Каталог геномов', [
+							E('p', { style: 'font-size:12px;color:#abb2bf;' }, 'Укажите ASN вашего провайдера (например, AS25490). Геномы скачиваются из общего каталога проекта.'),
+							asnInput, st
+						], [okBtn, E('button', { class: 'cbi-button cbi-button-neutral', click: function() { ui.hideModal(); } }, 'Закрыть')]);
+					}
+				}).catch(function() { catalogBtn.disabled = false; });
+			});
+
 
 			exportBtn.addEventListener('click', function() {
 				fs.exec(HELPER_BIN, ['evolve_export', '1']).then(function(res) {
@@ -1972,7 +2012,7 @@ return view.extend({
 					E('div', { style: 'font-weight: bold; font-size: 15px; color: var(--bcw-text-title);' }, '🧬 Эволюция стратегий'),
 					summary
 				]),
-				E('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;' }, [targetSel, startBtn, histBtn, exportBtn, importBtn])
+				E('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;' }, [targetSel, startBtn, histBtn, catalogBtn, exportBtn, importBtn])
 			]));
 			root.appendChild(top);
 			root.appendChild(hist);
