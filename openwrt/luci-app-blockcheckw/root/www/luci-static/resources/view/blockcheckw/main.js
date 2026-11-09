@@ -2004,8 +2004,12 @@ return view.extend({
 			var hist = E('div', { id: 'bcw-evo-hist', style: 'margin-top: 14px;' });
 			var logBox = E('pre', {
 				id: 'bcw-evo-log',
-				style: 'max-height: 200px; overflow: auto; margin: 12px 0 0; padding: 10px; background: #0c1016; border: 1px solid var(--bcw-border-divider); border-radius: 8px; font: 11px/1.45 ui-monospace, monospace; color: #cfe0ff; white-space: pre-wrap;'
+				style: 'max-height: 200px; overflow: auto; margin: 6px 0 0; padding: 10px; background: #0c1016; border: 1px solid var(--bcw-border-divider); border-radius: 8px; font: 11px/1.45 ui-monospace, monospace; color: #cfe0ff; white-space: pre-wrap;'
 			}, '');
+			var logWrap = E('div', { id: 'bcw-evo-logwrap', style: 'margin-top: 16px; display: none;' }, [
+				E('div', { style: 'font-weight: bold; font-size: 13px;' }, '📜 Журнал прогона'),
+				logBox
+			]);
 
 			root.appendChild(E('div', { style: 'display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center;' }, [
 				E('div', {}, [
@@ -2016,7 +2020,7 @@ return view.extend({
 			]));
 			root.appendChild(top);
 			root.appendChild(hist);
-			root.appendChild(logBox);
+			root.appendChild(logWrap);
 			return root;
 		}
 
@@ -2092,6 +2096,24 @@ return view.extend({
 						});
 					}
 				}
+
+				// журнал прогона: показываем только если он есть
+				fs.read('/tmp/bcw_evolve.log').then(function(txt) {
+					var wrap = document.getElementById('bcw-evo-logwrap');
+					var pre = document.getElementById('bcw-evo-log');
+					if (!wrap || !pre) return;
+					var body = (txt || '').trim();
+					if (body) {
+						var lines = body.split('\n');
+						pre.textContent = lines.slice(-40).join('\n');
+						wrap.style.display = '';
+					} else {
+						wrap.style.display = 'none';
+					}
+				}).catch(function() {
+					var wrap = document.getElementById('bcw-evo-logwrap');
+					if (wrap) wrap.style.display = 'none';
+				});
 
 				if (st.running) {
 					if (evoPollTimer) clearTimeout(evoPollTimer);
