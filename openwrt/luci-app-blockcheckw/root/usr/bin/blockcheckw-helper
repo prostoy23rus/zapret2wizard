@@ -3341,7 +3341,7 @@ steer_dns_conf() {
         return 0
     fi
     mv -f "$tmp" "$STEER_DNS_CONF"
-    /etc/init.d/dnsmasq restart >/dev/null 2>&1 || /etc/init.d/dnsmasq reload >/dev/null 2>&1 || true
+    ( /etc/init.d/dnsmasq restart >/dev/null 2>&1 || /etc/init.d/dnsmasq reload >/dev/null 2>&1 || true ) &
     logger -t zapret2wizard "steer: обновлён список исключений dnsmasq"
 }
 
@@ -3356,7 +3356,14 @@ steer_unsync() {
         done
     done
     rm -f "$STEER_DNS_CONF"
-    /etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
+    ( /etc/init.d/dnsmasq restart >/dev/null 2>&1 || true ) &
+}
+
+steer_warm_detached() {
+    if command -v start-stop-daemon >/dev/null 2>&1; then
+        start-stop-daemon -S -b -x /usr/bin/blockcheckw-helper -- steer_warm >/dev/null 2>&1 && return 0
+    fi
+    ( /usr/bin/blockcheckw-helper steer_warm >/dev/null 2>&1 & )
 }
 
 steer_sync() {
@@ -3371,7 +3378,7 @@ steer_sync() {
     members=$(nft list set inet "$STEER_TABLE" "$STEER_SET" 2>/dev/null \
         | sed -n '/elements = {/,/}/p' | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | wc -l)
     if [ "${members:-0}" -eq 0 ]; then
-        ( steer_warm_cache >/dev/null 2>&1 ) &
+        steer_warm_detached
     fi
 
     local chain
@@ -3390,13 +3397,35 @@ cmd_steer_sync() {
         enable|sync)
             steer_sync
             # dnsmasq/steer могут перезагрузиться следом — повторим установку правил
-            ( sleep 6; steer_sync >/dev/null 2>&1 ) &
+            start-stop-daemon -S -b -x /bin/sh -- -c 'sleep 6; /usr/bin/blockcheckw-helper steer_sync enable' >/dev/null 2>&1 || true
 
             echo "{\"steer\":\"active\",\"set\":\"$STEER_SET\",\"domains\":$(steer_collect_domains | wc -l)}"
             ;;
         disable|off)
             steer_unsync
             echo '{"steer":"disabled"}'
+            ;;
+        domains)
+            local list="" count=0 d esc
+            while IFS= read -r d; do
+                [ -n "$d" ] || continue
+                esc=$(printf '%s' "$d" | sed 's/"/\\"/g')
+                case "$list" in
+                    "") list="\"$esc\"" ;;
+                    *) list="$list,\"$esc\"" ;;
+                esac
+                count=$((count + 1))
+            done <<EOF
+$(steer_collect_domains)
+EOF
+            echo "{\"count\":$count,\"domains\":[$list]}"
+            ;;
+        rebuild)
+            nft flush set inet "$STEER_TABLE" "$STEER_SET" 2>/dev/null || true
+            rm -f /tmp/bcw_steer.warm
+            steer_sync
+            steer_warm_detached
+            echo '{"rebuilt":true}'
             ;;
         status)
             local rules=0 members=0 packets=0 bytes=0 table=0
@@ -4620,6 +4649,7 @@ case "$1" in
     catalog_export) cmd_catalog_export ;;
     health_tick) cmd_health_tick ;;
     steer_sync) shift; cmd_steer_sync "$@" ;;
+    steer_warm) steer_warm_cache ;;
     asn) cmd_asn ;;
     provider_save) cmd_provider_save ;;
     cron_install) cmd_cron_install ;;

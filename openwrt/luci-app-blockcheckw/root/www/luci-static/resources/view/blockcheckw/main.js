@@ -2237,13 +2237,57 @@ return view.extend({
 				}).catch(function() { toggle.disabled = false; status.textContent = '✗ ошибка'; });
 			});
 
+			var domainList = E('div', {
+				id: 'bcw-steer-domains',
+				style: 'display:none; margin-top:8px; max-height:180px; overflow:auto; font:11px/1.5 ui-monospace, monospace; color:#abb2bf; background:#0c1016; border:1px solid var(--bcw-border-divider); border-radius:6px; padding:8px;'
+			}, '');
+			var showBtn = E('button', {
+				class: 'bcw-btn-secondary',
+				id: 'bcw-steer-show',
+				style: 'margin-top:8px; font-size:12px; padding:4px 10px;'
+			}, 'Показать домены');
+			showBtn.addEventListener('click', function() {
+				if (domainList.style.display !== 'none') {
+					domainList.style.display = 'none';
+					showBtn.textContent = 'Показать домены';
+					return;
+				}
+				showBtn.textContent = '⏳ Загружаю...';
+				fs.exec(HELPER_BIN, ['steer_sync', 'domains']).then(function(res) {
+					var d = null;
+					try { d = JSON.parse(res.stdout); } catch (e) {}
+					if (!d || !d.domains) { showBtn.textContent = 'Показать домены'; return; }
+					domainList.textContent = d.domains.join('\n');
+					domainList.style.display = '';
+					showBtn.textContent = 'Скрыть домены (' + d.count + ')';
+				}).catch(function() { showBtn.textContent = 'Показать домены'; });
+			});
+
+			var rebuildBtn = E('button', {
+				class: 'bcw-btn-secondary',
+				id: 'bcw-steer-rebuild',
+				style: 'margin-top:8px; margin-left:6px; font-size:12px; padding:4px 10px;'
+			}, '↻ Пересобрать набор');
+			rebuildBtn.addEventListener('click', function() {
+				rebuildBtn.disabled = true;
+				status.textContent = '⏳ Пересобираю набор IP...';
+				fs.exec(HELPER_BIN, ['steer_sync', 'rebuild']).then(function() {
+					rebuildBtn.disabled = false;
+					setTimeout(refreshSteerCard, 1000);
+					setTimeout(refreshSteerCard, 5000);
+					ui.addNotification(null, E('p', {}, 'Набор IP пересобран'), 'info');
+				}).catch(function() { rebuildBtn.disabled = false; });
+			});
+
 			var card = E('div', { class: 'bcw-card', id: 'bcw-steer-card', style: 'padding: 14px; margin-top: 16px; display: none;' }, [
 				title,
 				E('label', { style: 'font-size: 12.5px; color: var(--bcw-text-title); display:flex; align-items:flex-start; gap:2px; cursor:pointer;' }, [
 					toggle,
 					E('span', {}, 'Не отправлять в туннель домены, которые обслуживает служба')
 				]),
-				status
+				status,
+				E('div', {}, [showBtn, rebuildBtn]),
+				domainList
 			]);
 			setTimeout(refreshSteerCard, 1200);
 			setInterval(refreshSteerCard, 15000);
