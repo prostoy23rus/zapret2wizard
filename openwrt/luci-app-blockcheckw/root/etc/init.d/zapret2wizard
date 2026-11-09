@@ -325,6 +325,11 @@ kill_foreign_engines() {
 }
 
 start_service() {
+	# nfqws2 не стартует без nfnetlink_queue (nfq_unbind_pf: Invalid argument),
+	# а правило nft queue — без nft_queue. На чистых роутерах модулей может не быть;
+	# modprobe подтянет их, если пакет kmod уже установлен.
+	modprobe nfnetlink_queue 2>/dev/null || true
+	modprobe nft_queue 2>/dev/null || true
 	kill_foreign_engines
 
 	local uci_pkg="zapret2wizard"

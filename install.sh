@@ -460,6 +460,7 @@ if [ -f /etc/init.d/zapret2 ]; then
 fi
 
 # Включение и запуск единой автономной службы
+/usr/bin/blockcheckw-helper kmods_install >/dev/null 2>&1 || true
 /etc/init.d/zapret2wizard enable 2>/dev/null || true
 ( /etc/init.d/zapret2wizard restart >/dev/null 2>&1 </dev/null & )
 

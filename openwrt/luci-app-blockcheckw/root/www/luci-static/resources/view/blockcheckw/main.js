@@ -1133,7 +1133,7 @@ return view.extend({
 				E('div', { style: 'font-weight: 600; color: ' + (onlyWarnings ? '#ffb74d' : '#e5605c') + '; font-size: 14px;' },
 					onlyWarnings ? '⚠ Обход работает, но есть замечания' : '⚠ Служба не готова к работе'),
 				E('div', { style: 'font-size: 12.5px; color: var(--bcw-text-muted); margin-top: 4px;' },
-					failed.map(function(c) { return c.name + ': ' + c.detail; }).join(' · '))
+					failed.map(function(c) { return c.name + ': ' + c.detail + (c.hint ? ' — ' + c.hint : ''); }).join(' · '))
 			];
 
 			// Частая путаница: при остановленной службе сайты могут открываться,
@@ -1167,6 +1167,24 @@ return view.extend({
 						});
 					}
 				}, '🛠 Установить движок nfqws2'));
+			}
+
+			var kmodFailed = failed.some(function(c) { return c.name === 'модуль nfnetlink_queue' || c.name === 'модуль nft_queue'; });
+			if (kmodFailed) {
+				nodes.push(E('button', {
+					class: 'bcw-btn-launch',
+					style: 'margin-top: 10px; padding: 8px 16px; font-size: 13px;',
+					click: function() {
+						var self = this;
+						self.disabled = true;
+						self.textContent = '⏳ Ставлю модули ядра...';
+						fs.exec(HELPER_BIN, ['kmods_install']).then(function(res) {
+							var out = null; try { out = JSON.parse(res.stdout); } catch (e) {}
+							if (out && out.ok) { self.textContent = '✓ Модули загружены, обновляю...'; setTimeout(function() { location.reload(); }, 1500); }
+							else { self.disabled = false; self.textContent = '✗ ' + ((out && out.error) || 'не удалось — поставьте kmod вручную'); }
+						}).catch(function() { self.disabled = false; self.textContent = '✗ Ошибка вызова helper'; });
+					}
+				}, '🛠 Установить модули nfqueue'));
 			}
 
 			if (bypassFailed && !engineFailed) {

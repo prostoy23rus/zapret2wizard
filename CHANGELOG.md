@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.18.75] (2026-11-10)
+
+### «Нет движка nfqws2 или nftables» на чистом роутере — это отсутствие модулей ядра
+
+С другого роутера (192.168.111.1) пришёл отчёт: подбор падает за 9 секунд, в логе `ERROR: nfqws2 exited immediately (code 1): nfq_unbind_pf(AF_INET): Invalid argument`, selftest показывает 0 движков и 0 nft-таблиц, YouTube `000`, при этом обычный сайт открывается.
+
+Причина: в ядре нет `nfnetlink_queue`. Наш `.ipk`/`.apk`/бандл **не содержит kmod-пакеты** (они привязаны к версии ядра), а на чистом роутере `kmod-nfnetlink-queue` и `kmod-nft-queue` не установлены. Воспроизведено на RouteRich удалением файла модуля: тот же `nfq_unbind_pf(AF_INET): Invalid argument`, и всё возвращается после `modprobe`.
+
+Что сделано:
+
+* `doctor` проверяет `nfnetlink_queue` (через `/proc/net/netfilter/nfnetlink_queue`) и `nft_queue` (пробным правилом `queue` в одноразовой таблице) с подсказками;
+* новая команда `blockcheckw-helper kmods_install` — `modprobe`, затем `opkg`/`apk` установка нужных kmod;
+* установщики (bundle, ipk postinst, apk post-install, install.sh) вызывают её до запуска службы;
+* `init.d` при старте делает `modprobe nfnetlink_queue` и `nft_queue`;
+* ошибка подбора теперь точная: «Нет модуля ядра nfnetlink_queue. Установите: opkg install kmod-nfnetlink-queue && modprobe nfnetlink_queue»;
+* в UI у критичных проверок показываются подсказки и кнопка «Установить модули nfqueue»;
+* `selftest` больше не пишет «служба: работает» при нуле движков (раньше `pgrep -f` ловил обёртки сканера).
+
+Проверено на RouteRich: при удалённом модуле doctor — `модуль nfnetlink_queue FAIL`, подбор — точная ошибка про kmod; после восстановления — `3` движка, YouTube 200, оба модуля OK.
+
 ## [0.18.74] (2026-11-09)
 
 ### Эволюция: почему падала и что теперь работает
