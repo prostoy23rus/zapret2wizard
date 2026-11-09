@@ -1110,6 +1110,13 @@ return view.extend({
 					failed.map(function(c) { return c.name + ': ' + c.detail; }).join(' · '))
 			];
 
+			// Частая путаница: при остановленной службе сайты могут открываться,
+			// если трафик заворачивает steer-туннель (zm_vpn/z m_vpn2) — он не зависит от zapret.
+			if (!isServiceRunning) {
+				nodes.push(E('div', { style: 'font-size: 12px; color: var(--bcw-text-muted); margin-top: 6px;' },
+					'Если сайты всё равно открываются — трафик может идти через steer-туннель (zm_vpn): он работает независимо от этой службы.'));
+			}
+
 			if (engineFailed) {
 				nodes.push(E('button', {
 					class: 'bcw-btn-launch',
