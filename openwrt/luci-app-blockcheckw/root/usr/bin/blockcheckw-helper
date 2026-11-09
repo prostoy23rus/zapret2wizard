@@ -1684,6 +1684,18 @@ print(json.stringify(st))
 EOF
 }
 
+# Запуск подбора в фоне: rpcd/uhttpd не ждут многоминутный скан.
+cmd_start_bg() {
+    local quoted=""
+    local a
+    for a in "$@"; do
+        quoted="$quoted '$a'"
+    done
+    start-stop-daemon -S -b -x /bin/sh -- -c "/usr/bin/blockcheckw-helper start$quoted" >/dev/null 2>&1 \
+        || ( /bin/sh -c "/usr/bin/blockcheckw-helper start$quoted" >/dev/null 2>&1 & )
+    echo '{"ok":true,"started":true}'
+}
+
 cmd_stop() {
     if [ -f "$PID_FILE" ]; then
         local pid=$(cat "$PID_FILE" 2>/dev/null)
@@ -4906,6 +4918,7 @@ EOF
 
 case "$1" in
     start) shift; cmd_start "$@" ;;
+    start_bg) shift; cmd_start_bg "$@" ;;
     status) cmd_status ;;
     stop) cmd_stop ;;
     apply) shift; cmd_apply "$@" ;;

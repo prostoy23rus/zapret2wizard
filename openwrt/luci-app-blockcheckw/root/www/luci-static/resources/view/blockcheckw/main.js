@@ -3145,7 +3145,7 @@ return view.extend({
 			progressTextEl.textContent = 'Инициализация подбора стратегий...';
 
 			var helperArgs = [
-				'start',
+				'start_bg',
 				'--target', currentTarget,
 				'--mode', currentMode,
 				'--circular', doCircular ? '1' : '0',
