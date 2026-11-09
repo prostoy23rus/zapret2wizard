@@ -93,3 +93,22 @@ curl/wget, apk/opkg и чужие движки DPI (свои не считают
 `.github/workflows/build.yml` собирает `blockcheckw` под 6 архитектур
 (aarch64, armv7, x86_64, mips, mipsel, riscv64), затем бандл и `.apk` для каждой,
 артефакты прикрепляются к релизу.
+
+## Сборка под mips / mipsel / mips64 / riscv64
+
+Для этих целей в Rust stable **нет готового `rust-std`** (`component 'rust-std' ... is unavailable`),
+поэтому обычный `cargo build --target` не работает. Варианты:
+
+```sh
+# 1. через cross (Docker)
+cargo install cross
+cross build --release --target mips-unknown-linux-musl
+cross build --release --target mipsel-unknown-linux-musl
+cross build --release --target riscv64gc-unknown-linux-musl
+
+# 2. через свой musl-toolchain (как в docs/BUILD-AARCH64.md)
+```
+
+Готовые бинарники для этих архитектур в CI не собираются автоматически: матрица
+workflow ограничена aarch64/armv7/x86_64, где `rust-std` доступен. Движки `nfqws2`
+для всех восьми архитектур лежат в `openwrt/engine/`.
