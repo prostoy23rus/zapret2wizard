@@ -1189,6 +1189,47 @@ return view.extend({
 			if (id === 'domains' || id === 'test_strategy') return null;
 			return String(id).replace(/^preset_/, '');
 		}
+		function openStrategyEditor(targetId, current, name) {
+			var ta = E('textarea', {
+				style: 'width:100%;height:110px;font-family:monospace;font-size:11px;background:#14161a;color:#abb2bf;border:1px solid #383e4a;border-radius:6px;padding:8px;box-sizing:border-box;resize:vertical;',
+				placeholder: '--payload=tls_client_hello --lua-desync=multisplit:pos=midsld'
+			}, current || '');
+
+			bcwShowModal('✎ Стратегия nfqws2 — ' + (name || targetId), [
+				E('div', { style: 'font-size:12px;color:#abb2bf;margin-bottom:8px;' },
+					'Аргументы для nfqws2. Должны содержать --lua-desync. После сохранения служба перезапустится.'),
+				ta
+			], [
+				E('button', {
+					class: 'cbi-button cbi-button-action',
+					click: function() {
+						var val = (ta.value || '').trim();
+						if (!val) { ui.addNotification(null, E('p', {}, 'Пустая стратегия'), 'warning'); return; }
+						fs.exec(HELPER_BIN, ['strategy_set', targetId, val]).then(function(res) {
+							var out = null;
+							try { out = JSON.parse(res.stdout); } catch(e) {}
+							if (out && out.ok) {
+								ui.hideModal();
+								ui.addNotification(null, E('p', {}, '⏳ Стратегия сохраняется, служба перезапускается…'), 'info');
+								setTimeout(function() { location.reload(); }, 12000);
+							} else {
+								ui.addNotification(null, E('p', {}, '✗ ' + ((out && out.error) || 'ошибка')), 'danger');
+							}
+						}).catch(function() { ui.addNotification(null, E('p', {}, '✗ Ошибка вызова'), 'danger'); });
+					}
+				}, 'Сохранить и применить'),
+				E('button', {
+					class: 'cbi-button cbi-button-neutral',
+					click: function() { ta.focus(); ta.select(); try { document.execCommand('copy'); } catch(e) {} }
+				}, 'Копировать'),
+				E('button', {
+					class: 'cbi-button cbi-button-neutral',
+					click: function() { ui.hideModal(); }
+				}, 'Закрыть')
+			]);
+			setTimeout(function() { ta.focus(); ta.select(); }, 150);
+		}
+
 		function rowMetaOf(ch) {
 			var key = rowHostlistKey(ch.id);
 			var parts = [];
@@ -1266,6 +1307,15 @@ return view.extend({
 				])
 			];
 			if (chip) children.push(E('span', { class: 'bcw-chip ' + chip.cls }, chip.text));
+			var svcForEdit = (zapretInfo && zapretInfo.services) ? zapretInfo.services[rowKeyOf(ch.id)] : null;
+			children.push(E('span', {
+				style: 'cursor:pointer;padding:2px 7px;border:1px solid var(--bcw-border-sub);border-radius:6px;font-size:12px;color:var(--bcw-text-muted);',
+				title: 'Изменить стратегию nfqws2',
+				click: function(e) {
+					e.stopPropagation();
+					openStrategyEditor(ch.id, svcForEdit ? svcForEdit.script : '', ch.name);
+				}
+			}, '✎'));
 			var sw = serviceSwitchFor(ch.id);
 			if (sw) children.push(sw);
 			var btn = E('div', {

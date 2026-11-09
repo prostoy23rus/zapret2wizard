@@ -3681,7 +3681,8 @@ cmd_genome_apply() {
     [ -n "$provider" ] || provider="default"
 
     local json=$(lua "$evo" args "$genomes" "$provider" "$id" 2>/dev/null)
-    local args=$(printf '%s' "$json" | sed -n 's/.*"args":"\(.*\)".*/\1/p')
+    # аргументы без кавычек — берём до первой закрывающей кавычки
+    local args=$(printf '%s' "$json" | sed -n 's/.*"args":"\([^"]*\)".*/\1/p')
     [ -n "$args" ] || { echo '{"ok":false,"error":"геном не найден"}'; return 1; }
 
     case "$target" in
@@ -3701,6 +3702,48 @@ cmd_genome_apply() {
     _svc_stop
     _svc_start_bg
     echo "{\"ok\":true,\"queued\":true,\"section\":\"$sec\",\"target\":\"$target\"}"
+}
+
+# Прочитать стратегию сервиса.
+_strategy_section() {
+    case "$1" in
+        preset_youtube|youtube) echo "BlockcheckW_YouTube" ;;
+        preset_discord|discord) echo "BlockcheckW_Discord" ;;
+        preset_twitch|twitch) echo "BlockcheckW_Twitch" ;;
+        preset_x|x) echo "BlockcheckW_X" ;;
+        preset_instagram|instagram) echo "BlockcheckW_Instagram" ;;
+        builtin|general|domains) echo "BlockcheckW_General" ;;
+        *) echo "" ;;
+    esac
+}
+
+cmd_strategy_get() {
+    local target="$1"
+    local sec=$(_strategy_section "$target")
+    [ -n "$sec" ] || { echo '{"ok":false}'; return 1; }
+    local pkg=$(_strategy_pkg)
+    local sc=$(uci -q get "$pkg.$sec.script" 2>/dev/null)
+    sc=$(printf '%s' "$sc" | sed 's/\\/\\\\/g; s/"/\\"/g')
+    echo "{\"ok\":true,\"section\":\"$sec\",\"script\":\"$sc\"}"
+}
+
+# Записать свою стратегию nfqws2 и применить.
+cmd_strategy_set() {
+    local target="$1"
+    shift
+    local text="$*"
+    local sec=$(_strategy_section "$target")
+    [ -n "$sec" ] || { echo '{"ok":false,"error":"неизвестный сервис"}'; return 1; }
+    if ! printf '%s' "$text" | grep -q -- '--lua-desync\|--new'; then
+        echo '{"ok":false,"error":"в стратегии нет --lua-desync"}'
+        return 1
+    fi
+    local pkg=$(_strategy_pkg)
+    uci -q set "$pkg.$sec.script=$text" || { echo '{"ok":false,"error":"не удалось записать"}'; return 1; }
+    uci -q commit "$pkg" || true
+    _svc_stop
+    _svc_start_bg
+    echo "{\"ok\":true,\"queued\":true,\"section\":\"$sec\"}"
 }
 
 # Статус эволюции для LuCI: провайдер, история, топ геномов.
@@ -4963,6 +5006,8 @@ case "$1" in
     svc_heal) _svc_heal ;;
     genome_args) shift; cmd_genome_args "$@" ;;
     genome_apply) shift; cmd_genome_apply "$@" ;;
+    strategy_get) shift; cmd_strategy_get "$@" ;;
+    strategy_set) shift; cmd_strategy_set "$@" ;;
     asn) cmd_asn ;;
     provider_save) cmd_provider_save ;;
     cron_install) cmd_cron_install ;;
