@@ -1836,10 +1836,11 @@ return view.extend({
 		// «найдено 44» был, а списка и кнопок «Применить» — нет.
 		if (resultsCard) {
 			if (resultsCard.parentNode) resultsCard.parentNode.removeChild(resultsCard);
-			monitorCard.appendChild(resultsCard);
-			resultsCard.style.marginTop = '14px';
-			resultsCard.style.borderTop = '1px solid rgba(255,255,255,0.08)';
-			resultsCard.style.background = 'transparent';
+			// Список стратегий — во всю ширину под блоком сканера: внутри узкой
+			// правой колонки (380px) карточки с аргументами нечитаемы.
+			resultsCard.style.marginTop = '4px';
+			resultsCard.style.width = '100%';
+			mainLayout.appendChild(resultsCard);
 		}
 
 		// Live Logs and Diagnostics Monitor Card
