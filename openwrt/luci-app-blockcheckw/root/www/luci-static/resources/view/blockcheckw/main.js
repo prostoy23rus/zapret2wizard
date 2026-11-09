@@ -1867,6 +1867,73 @@ return view.extend({
 			]);
 			var startBtn = E('button', { class: 'bcw-btn-launch', style: 'height: 34px;' }, '🧬 Запустить эволюцию');
 			var histBtn = E('button', { class: 'bcw-btn-secondary', style: 'height: 34px;' }, '🕓 Установить ночное обучение');
+			var exportBtn = E('button', { class: 'bcw-btn-secondary', style: 'height: 34px;' }, '⬇ Экспорт геномов');
+			var importBtn = E('button', { class: 'bcw-btn-secondary', style: 'height: 34px;' }, '⬆ Импорт');
+
+			exportBtn.addEventListener('click', function() {
+				fs.exec(HELPER_BIN, ['evolve_export', '1']).then(function(res) {
+					var text = (res && res.stdout) ? res.stdout : '';
+					var data = null;
+					try { data = JSON.parse(text); } catch (e) {}
+					if (!data || !data.genomes) {
+						ui.addNotification(null, E('p', {}, 'Нет геномов для экспорта — запустите эволюцию'), 'warning');
+						return;
+					}
+					var blob = new Blob([text], { type: 'application/json' });
+					var a = document.createElement('a');
+					a.href = URL.createObjectURL(blob);
+					a.download = 'bcw-genomes-' + (data.provider || 'provider') + '.json';
+					document.body.appendChild(a);
+					a.click();
+					setTimeout(function() { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+					ui.addNotification(null, E('p', {}, 'Экспортировано геномов: ' + data.count), 'info');
+				}).catch(function() {});
+			});
+
+			importBtn.addEventListener('click', function() {
+				var ta = E('textarea', {
+					style: 'width:100%;height:220px;font-family:monospace;font-size:11px;background:#14161a;color:#abb2bf;border:1px solid #383e4a;border-radius:6px;padding:8px;box-sizing:border-box;',
+					placeholder: 'Вставьте JSON, полученный от другого пользователя (или укажите URL ниже)'
+				});
+				var urlInput = E('input', {
+					type: 'text', class: 'cbi-input-text', placeholder: 'https://example.com/bcw-genomes.json',
+					style: 'width:100%;margin-top:8px;'
+				});
+				var status = E('div', { style: 'font-size:12px;color:#abb2bf;margin-top:8px;' }, '');
+				var btn = E('button', { class: 'cbi-button cbi-button-action' }, 'Импортировать');
+				btn.addEventListener('click', function() {
+					status.textContent = '⏳ Импортирую...';
+					var src = urlInput.value.trim();
+					if (src) {
+						fs.exec(HELPER_BIN, ['evolve_import', src]).then(function(res) {
+							var out = null;
+							try { out = JSON.parse(res.stdout); } catch (e) {}
+							status.textContent = out && out.ok
+								? '✓ Импортировано: ' + out.imported + ', обновлено: ' + out.updated + ', всего: ' + out.total
+								: '✗ ' + ((out && out.error) || 'ошибка импорта');
+							if (out && out.ok) { refreshEvolution(); setTimeout(function() { ui.hideModal(); }, 1200); }
+						}).catch(function() { status.textContent = '✗ ошибка вызова helper'; });
+						return;
+					}
+					var text = (ta.value || '').trim();
+					if (!text) { status.textContent = '✗ вставьте JSON или URL'; return; }
+					fs.write('/tmp/bcw_import.json', text).then(function() {
+						return fs.exec(HELPER_BIN, ['evolve_import', '/tmp/bcw_import.json']);
+					}).then(function(res) {
+						var out = null;
+						try { out = JSON.parse(res.stdout); } catch (e) {}
+						status.textContent = out && out.ok
+							? '✓ Импортировано: ' + out.imported + ', обновлено: ' + out.updated + ', всего: ' + out.total
+							: '✗ ' + ((out && out.error) || 'ошибка импорта');
+						if (out && out.ok) { refreshEvolution(); setTimeout(function() { ui.hideModal(); }, 1200); }
+					}).catch(function() { status.textContent = '✗ не удалось записать файл'; });
+				});
+				bcwShowModal('⬆ Импорт геномов', [
+					E('p', { style: 'font-size:12px;color:#abb2bf;' }, 'Геномы — это готовые рабочие комбинации для конкретного провайдера. Импорт добавляет их в память и не меняет текущую стратегию.'),
+					ta, urlInput, status
+				], [btn, E('button', { class: 'cbi-button cbi-button-neutral', click: function() { ui.hideModal(); } }, 'Закрыть')]);
+			});
+
 
 			startBtn.addEventListener('click', function() {
 				startBtn.disabled = true;
@@ -1905,7 +1972,7 @@ return view.extend({
 					E('div', { style: 'font-weight: bold; font-size: 15px; color: var(--bcw-text-title);' }, '🧬 Эволюция стратегий'),
 					summary
 				]),
-				E('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;' }, [targetSel, startBtn, histBtn])
+				E('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;' }, [targetSel, startBtn, histBtn, exportBtn, importBtn])
 			]));
 			root.appendChild(top);
 			root.appendChild(hist);

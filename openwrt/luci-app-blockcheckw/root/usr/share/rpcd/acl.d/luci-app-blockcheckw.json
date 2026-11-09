@@ -128,6 +128,10 @@
 				"/usr/share/blockcheckw/*": [
 					"read",
 					"list"
+				],
+				"/tmp/bcw_import.json": [
+					"write",
+					"read"
 				]
 			}
 		}

@@ -3080,6 +3080,49 @@ _info_json_shell() {
         "$running" "$ver" "$svc" "$strat" "$hl_json"
 }
 
+# Экспорт рабочих геномов провайдера в JSON (для обмена).
+cmd_evolve_export() {
+    local min_ok="${1:-1}"
+    local evo="/usr/share/zapret2wizard/evolve.lua"
+    local genomes="/etc/zapret2wizard/genomes.json"
+    local provider=$(lua "$evo" provider /tmp/blockcheckw_status.json 2>/dev/null)
+    [ -n "$provider" ] || provider="default"
+    lua "$evo" export "$genomes" "$provider" "$min_ok" 2>/dev/null
+}
+
+# Импорт геномов из файла или URL.
+cmd_evolve_import() {
+    local src="$1"
+    local evo="/usr/share/zapret2wizard/evolve.lua"
+    local genomes="/etc/zapret2wizard/genomes.json"
+    local tmp="/tmp/bcw_import.json"
+
+    if [ -z "$src" ]; then
+        echo '{"ok":false,"error":"укажите файл или URL"}'
+        return 1
+    fi
+
+    case "$src" in
+        http://*|https://*)
+            curl -fsSL -k -m 30 "$src" -o "$tmp" 2>/dev/null || wget -q -O "$tmp" "$src" 2>/dev/null || true
+            ;;
+        *)
+            cp -f "$src" "$tmp" 2>/dev/null || true
+            ;;
+    esac
+
+    if [ ! -s "$tmp" ]; then
+        echo '{"ok":false,"error":"не удалось получить файл геномов"}'
+        rm -f "$tmp"
+        return 1
+    fi
+
+    local provider=$(lua "$evo" provider /tmp/blockcheckw_status.json 2>/dev/null)
+    [ -n "$provider" ] || provider="default"
+    lua "$evo" import "$genomes" "$provider" "$tmp" 2>/dev/null
+    rm -f "$tmp"
+}
+
 # Статус эволюции для LuCI: провайдер, история, топ геномов.
 cmd_evolve_status() {
     local evo="/usr/share/zapret2wizard/evolve.lua"
@@ -3133,11 +3176,22 @@ cmd_evolve_nightly() {
         return 0
     fi
 
+    # Адаптивность: если сервис сейчас здоров — ночью не трогаем (кроме воскресенья).
+    cmd_test "$target" "" > /tmp/bcw_night_test.json 2>/dev/null
+    local healthy=0
+    grep -q '"all_ok":true' /tmp/bcw_night_test.json && healthy=1
+    rm -f /tmp/bcw_night_test.json
+    local dow=$(date +%u)
+    if [ "$healthy" = "1" ] && [ "$dow" != "7" ]; then
+        echo '{"skipped":true,"reason":"service healthy"}'
+        return 0
+    fi
+
     mkdir -p /etc/zapret2wizard 2>/dev/null || true
     echo "$today" > "$marker"
 
-    echo "{\"started\":true,\"target\":\"$target\",\"provider\":\"$provider\"}"
-    /usr/bin/blockcheckw-helper evolve --target "$target" --count 10 --verify 2 --tests 2 --sleep 2 >>/tmp/bcw_evolve.log 2>&1
+    echo "{\"started\":true,\"target\":\"$target\",\"provider\":\"$provider\",\"healthy\":$healthy}"
+    /usr/bin/blockcheckw-helper evolve --target "$target" --count 8 --verify 2 --tests 2 --sleep 2 >>/tmp/bcw_evolve.log 2>&1
 }
 
 # Установка cron-задачи ночного самообучения.
@@ -4262,6 +4316,8 @@ case "$1" in
     evolve_status) cmd_evolve_status ;;
     evolve_start) shift; cmd_evolve_start "$@" ;;
     evolve_nightly) cmd_evolve_nightly ;;
+    evolve_export) shift; cmd_evolve_export "$@" ;;
+    evolve_import) shift; cmd_evolve_import "$@" ;;
     cron_install) cmd_cron_install ;;
     *)
         echo "Usage: $0 {start|status|stop|apply|activate|delete_strategy|test|speedtest|info|logs|check_update|update|uninstall|diag|ensure_hostlists|read_hostlist|add_hostlist_domain|remove_hostlist_domain|write_hostlist|metrics|toggle|conflicts|doctor}"

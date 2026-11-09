@@ -506,6 +506,97 @@ local function mode_status()
     }))
 end
 
+-- ------------------------------------------- экспорт и импорт геномов --------
+
+local function mode_export()
+    local genomes_path = arg[2]
+    local provider = arg[3] or "default"
+    local min_ok = tonumber(arg[4] or "1") or 1
+
+    local db = read_json(genomes_path) or { providers = {} }
+    local prov = (db.providers or {})[provider] or { genomes = {} }
+
+    local list = {}
+    for _, g in pairs(prov.genomes or {}) do
+        if g.args and (g.ok or 0) >= min_ok then
+            list[#list + 1] = {
+                args = g.args,
+                ok = g.ok or 0,
+                best = g.best or 0,
+                stability = g.stability or 0,
+            }
+        end
+    end
+    table.sort(list, function(a, b)
+        return (a.ok * 1000 + a.stability * 2 + a.best / 1024) > (b.ok * 1000 + b.stability * 2 + b.best / 1024)
+    end)
+
+    print(json.stringify({
+        schema = 1,
+        generator = "zapret2wizard",
+        provider = provider,
+        exported_at = now_ts(),
+        count = #list,
+        genomes = list,
+    }))
+end
+
+local function mode_import()
+    local genomes_path = arg[2]
+    local provider = arg[3] or "default"
+    local src = arg[4]
+
+    local incoming = read_json(src)
+    if not incoming then
+        print(json.stringify({ ok = false, error = "не удалось прочитать файл" }))
+        return
+    end
+
+    local list = incoming.genomes or {}
+    if type(list) ~= "table" then
+        print(json.stringify({ ok = false, error = "нет поля genomes" }))
+        return
+    end
+
+    local db = read_json(genomes_path) or { providers = {} }
+    db.providers = db.providers or {}
+    local prov = db.providers[provider] or { genomes = {} }
+    db.providers[provider] = prov
+    prov.genomes = prov.genomes or {}
+
+    local imported, updated = 0, 0
+    for _, g in ipairs(list) do
+        local args = g.args
+        if type(args) == "string" and #args > 10 then
+            local id = hash(args)
+            local cur = prov.genomes[id]
+            if cur then
+                cur.ok = math.max(cur.ok or 0, tonumber(g.ok) or 0)
+                cur.best = math.max(cur.best or 0, tonumber(g.best) or 0)
+                cur.stability = math.max(cur.stability or 0, tonumber(g.stability) or 0)
+                cur.last = now_ts()
+                updated = updated + 1
+            else
+                prov.genomes[id] = {
+                    args = args,
+                    ok = tonumber(g.ok) or 1,
+                    fail = 0,
+                    best = tonumber(g.best) or 0,
+                    stability = tonumber(g.stability) or 0,
+                    last = now_ts(),
+                    imported_from = tostring(incoming.provider or "shared"),
+                }
+                imported = imported + 1
+            end
+        end
+    end
+
+    write_json(genomes_path, db)
+    local total = 0
+    for _ in pairs(prov.genomes) do total = total + 1 end
+    print(json.stringify({ ok = true, imported = imported, updated = updated, total = total }))
+end
+
 if mode == "gen" then
     mode_gen()
 elseif mode == "update" then
@@ -518,6 +609,10 @@ elseif mode == "history" then
     mode_history()
 elseif mode == "status" then
     mode_status()
+elseif mode == "export" then
+    mode_export()
+elseif mode == "import" then
+    mode_import()
 else
-    print("usage: evolve.lua gen|update|provider|shortlist|history|status ...")
+    print("usage: evolve.lua gen|update|provider|shortlist|history|status|export|import ...")
 end
