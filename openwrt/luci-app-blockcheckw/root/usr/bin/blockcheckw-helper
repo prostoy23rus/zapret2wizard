@@ -2777,6 +2777,17 @@ cmd_doctor() {
         add_check "наши движки" 0 "ни один экземпляр nfqws2 не запущен" "Перезапустите службу и проверьте лог: logread | grep -i nfqws | tail -20"
     fi
 
+    # Исключение наших доменов из steer-туннеля
+    if nft list table inet steer >/dev/null 2>&1; then
+        if nft -a list chain inet steer ingress_mark 2>/dev/null | grep -q "bcw-exclude"; then
+            add_check "steer-исключение" 1 "включено: наши домены идут мимо туннеля" ""
+        else
+            add_check "steer-исключение" 0 "не применяется" "Запустите: blockcheckw-helper steer_sync enable"
+        fi
+    else
+        add_check "steer-исключение" 1 "steer не используется" ""
+    fi
+
     local fo=$(uci -q get firewall.@defaults[0].flow_offloading)
     local fohw=$(uci -q get firewall.@defaults[0].flow_offloading_hw)
     if [ "$fo" = "1" ] || [ "$fohw" = "1" ]; then
@@ -3239,6 +3250,143 @@ cmd_evolve_import() {
     rm -f "$tmp"
 }
 
+# ---- Исключение из steer: то, что обрабатывает наша служба, не туннелируется ----
+#
+# Идея: домены включённых стратегий складываем в nft-набор inet steer bcw_zapret_ips
+# через dnsmasq (nftset), а в steer-цепочках ставим первыми правила
+# «iifname br-lan ip daddr @bcw_zapret_ips return» — трафик уходит напрямую,
+# попадает в нашу таблицу zapret2wizard и обрабатывается десинком.
+
+STEER_TABLE="steer"
+STEER_SET="bcw_zapret_ips"
+STEER_COMMENT="bcw-exclude"
+STEER_DNS_CONF="/tmp/dnsmasq.d/bcw-nftset.conf"
+
+steer_set_exists() {
+    nft list set inet "$STEER_TABLE" "$STEER_SET" >/dev/null 2>&1
+}
+
+steer_rules_present() {
+    nft -a list chain inet "$STEER_TABLE" ingress_mark 2>/dev/null | grep -q "$STEER_COMMENT"
+}
+
+# Собрать домены включённых стратегий (без исключений).
+steer_collect_domains() {
+    local out="/tmp/bcw_steer_domains.txt"
+    : > "$out"
+    local sec hl f
+    for sec in $(uci show zapret2wizard 2>/dev/null | sed -n 's/^zapret2wizard\.\([^=]*\)=strategy$/\1/p'); do
+        [ "$(uci -q get "zapret2wizard.$sec.enabled")" = "1" ] || continue
+        hl=$(uci -q get "zapret2wizard.$sec.hostlist")
+        case "$hl" in
+            list_hosts_*) ;;
+            *) continue ;;
+        esac
+        f="/etc/zapret2wizard/ipset/zapret_hosts_${hl#list_hosts_}.txt"
+        [ -f "$f" ] || continue
+        grep -v '^#' "$f" 2>/dev/null | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' \
+            | sed 's/^\^//' | grep -E '^[a-zA-Z0-9._-]+$' >> "$out"
+    done
+    sort -u "$out"
+}
+
+# Записать dnsmasq-конфиг, если он изменился.
+steer_dns_conf() {
+    local domains
+    domains=$(steer_collect_domains)
+    if [ -z "$domains" ]; then
+        rm -f "$STEER_DNS_CONF"
+        return 0
+    fi
+    mkdir -p /tmp/dnsmasq.d
+
+    local tmp="/tmp/bcw-nftset.conf"
+    : > "$tmp"
+    echo "# Zapret2Wizard: IP этих доменов не отправляются в steer-туннель" >> "$tmp"
+    # dnsmasq nftset: до 100 доменов в строке
+    echo "$domains" | tr '\n' ' ' | sed 's/ $//' | tr ' ' '\n' > /tmp/bcw_dom_list.txt
+    local batch="" count=0 line
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        if [ -z "$batch" ]; then
+            batch="/$line"
+        else
+            batch="$batch/$line"
+        fi
+        count=$((count + 1))
+        if [ "$count" -ge 100 ]; then
+            echo "nftset=$batch/4#inet#$STEER_TABLE#$STEER_SET" >> "$tmp"
+            batch=""
+            count=0
+        fi
+    done < /tmp/bcw_dom_list.txt
+    [ -n "$batch" ] && echo "nftset=$batch/4#inet#$STEER_TABLE#$STEER_SET" >> "$tmp"
+    rm -f /tmp/bcw_dom_list.txt
+
+    if [ -f "$STEER_DNS_CONF" ] && cmp -s "$tmp" "$STEER_DNS_CONF"; then
+        rm -f "$tmp"
+        return 0
+    fi
+    mv -f "$tmp" "$STEER_DNS_CONF"
+    /etc/init.d/dnsmasq restart >/dev/null 2>&1 || /etc/init.d/dnsmasq reload >/dev/null 2>&1 || true
+    logger -t zapret2wizard "steer: обновлён список исключений dnsmasq"
+}
+
+steer_unsync() {
+    [ -d /etc/config ] || return 0
+    local chain
+    for chain in ingress_mark prerouting_mark; do
+        local handles
+        handles=$(nft -a list chain inet "$STEER_TABLE" "$chain" 2>/dev/null | awk '/bcw-exclude/{print $NF}')
+        for h in $handles; do
+            nft delete rule inet "$STEER_TABLE" "$chain" handle "$h" 2>/dev/null || true
+        done
+    done
+    rm -f "$STEER_DNS_CONF"
+    /etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
+}
+
+steer_sync() {
+    nft list table inet "$STEER_TABLE" >/dev/null 2>&1 || return 0
+    steer_set_exists || nft add set inet "$STEER_TABLE" "$STEER_SET" '{ type ipv4_addr; }' 2>/dev/null || true
+    steer_set_exists || return 0
+
+    steer_dns_conf
+
+    local chain
+    for chain in ingress_mark prerouting_mark; do
+        nft list chain inet "$STEER_TABLE" "$chain" >/dev/null 2>&1 || continue
+        if ! nft -a list chain inet "$STEER_TABLE" "$chain" 2>/dev/null | grep -q "$STEER_COMMENT"; then
+            nft insert rule inet "$STEER_TABLE" "$chain" \
+                iifname "br-lan" ip daddr "@$STEER_SET" counter return comment "$STEER_COMMENT" 2>/dev/null || true
+        fi
+    done
+}
+
+cmd_steer_sync() {
+    local action="${1:-sync}"
+    case "$action" in
+        enable|sync)
+            steer_sync
+            # dnsmasq/steer могут перезагрузиться следом — повторим установку правил
+            ( sleep 6; steer_sync >/dev/null 2>&1 ) &
+
+            echo "{\"steer\":\"active\",\"set\":\"$STEER_SET\",\"domains\":$(steer_collect_domains | wc -l)}"
+            ;;
+        disable|off)
+            steer_unsync
+            echo '{"steer":"disabled"}'
+            ;;
+        status)
+            local rules=0 members=0
+            nft -a list chain inet "$STEER_TABLE" ingress_mark 2>/dev/null | grep -q "$STEER_COMMENT" && rules=1
+            members=$(nft list set inet "$STEER_TABLE" "$STEER_SET" 2>/dev/null | grep -o 'elements = ' | wc -l)
+            echo "{\"rules\":$rules,\"members\":$members,\"domains\":$(steer_collect_domains | wc -l)}"
+            ;;
+        *) echo '{"error":"usage: steer_sync enable|disable|status"}' ;;
+    esac
+}
+
 # Статус эволюции для LuCI: провайдер, история, топ геномов.
 cmd_evolve_status() {
     local evo="/usr/share/zapret2wizard/evolve.lua"
@@ -3322,6 +3470,9 @@ cmd_cron_install() {
     fi
     if ! grep -q 'bcw-health' "$cron_file" 2>/dev/null; then
         echo "*/30 * * * * /usr/bin/blockcheckw-helper health_tick >/dev/null 2>&1 # bcw-health" >> "$cron_file"
+    fi
+    if ! grep -q 'bcw-steer' "$cron_file" 2>/dev/null; then
+        echo "*/15 * * * * /usr/bin/blockcheckw-helper steer_sync enable >/dev/null 2>&1 # bcw-steer" >> "$cron_file"
     fi
     /etc/init.d/cron enable >/dev/null 2>&1 || true
     /etc/init.d/cron restart >/dev/null 2>&1 || true
@@ -4440,6 +4591,7 @@ case "$1" in
     catalog_fetch) shift; cmd_catalog_fetch "$@" ;;
     catalog_export) cmd_catalog_export ;;
     health_tick) cmd_health_tick ;;
+    steer_sync) shift; cmd_steer_sync "$@" ;;
     asn) cmd_asn ;;
     provider_save) cmd_provider_save ;;
     cron_install) cmd_cron_install ;;

@@ -337,6 +337,12 @@ start_service() {
 	# Apply firewall rules
 	apply_nft_firewall
 
+	# Исключаем из steer то, что обрабатывает наша служба:
+	# трафик должен идти напрямую и попадать в zapret2wizard, а не в туннель.
+	if [ -x /usr/bin/blockcheckw-helper ]; then
+		( sleep 6; /usr/bin/blockcheckw-helper steer_sync enable >/dev/null 2>&1 ) &
+	fi
+
 	# Start procd instances
 	local LUA_BASE="--lua-init=@$LUA_DIR/zapret-lib.lua --lua-init=@$LUA_DIR/zapret-antidpi.lua --lua-init=@$LUA_DIR/zapret-auto.lua"
 
@@ -399,6 +405,10 @@ start_service() {
 
 stop_service() {
 	logger -t zapret2wizard "Stopping Zapret2Wizard service and firewall..."
+	# возвращаем steer его трафик
+	if [ -x /usr/bin/blockcheckw-helper ]; then
+		/usr/bin/blockcheckw-helper steer_sync disable >/dev/null 2>&1 || true
+	fi
 	nft delete table inet zapret2wizard 2>/dev/null || true
 	rm -f "$PIDDIR/zapret2wizard_"*.pid
 }
