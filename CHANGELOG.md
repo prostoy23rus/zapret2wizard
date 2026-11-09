@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.18.78] (2026-11-10)
+
+### kmod ставятся автоматически даже если их нет в фиде провайдера
+
+До этого `kmods_install` умел только `apk add`/`opkg install` из настроенных фидов. На RouteRich 25.12.6 (kernel 6.12.112) в фиде не оказалось `kmod-nft-queue` — и установка честно упиралась в «not found».
+
+Теперь есть резервный путь: по данным `/etc/openwrt_release` (`DISTRIB_RELEASE`, `DISTRIB_TARGET`) и `uname -r` helper находит каталог `kmods/<vermagic>` официального фида OpenWrt, скачивает нужные `.apk`/`.ipk` и ставит их с `--allow-untrusted` / `--force-depends`, после чего делает `modprobe`.
+
+Диагностика: `blockcheckw-helper kmods_resolve 25.12.6 mediatek/filogic 6.12.112` — показывает каталог и имена пакетов без установки. Проверено на реальном фиде:
+
+```
+https://downloads.openwrt.org/releases/25.12.6/targets/mediatek/filogic/kmods/6.12.112-1-f0a7348f9cb959e1bf4d0447669b031e/
+kmod-nft-queue-6.12.112-r1.apk
+kmod-nfnetlink-queue-6.12.112-r1.apk
+```
+
+Ограничение остаётся одно: если вендор собрал ядро с другим vermagic, официальный модуль не загрузится — тогда в `/tmp/bcw_kmods.log` будет ошибка загрузки, и нужен kmod из фида вендора. Но теперь это видно, а не «not found» без вариантов.
+
 ## [0.18.77] (2026-11-10)
 
 ### «Служба активна, но правил нет» — устранено; установка kmod больше не вешает UI

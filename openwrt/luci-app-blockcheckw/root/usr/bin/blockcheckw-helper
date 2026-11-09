@@ -3057,11 +3057,65 @@ cmd_kill_foreign() {
 cmd_kmods_modprobe() {
     modprobe nfnetlink_queue 2>/dev/null || true
     modprobe nft_queue 2>/dev/null || true
-    if [ -e /proc/net/netfilter/nfnetlink_queue ]; then
+    local nfq=0 nftq=0
+    [ -e /proc/net/netfilter/nfnetlink_queue ] && nfq=1
+    _kmods_nftq_ok && nftq=1
+    if [ "$nfq" = "1" ] && [ "$nftq" = "1" ]; then
         echo '{"ok":true}'
     else
-        echo '{"ok":false,"error":"модуль nfnetlink_queue не установлен: opkg install kmod-nfnetlink-queue && modprobe nfnetlink_queue"}'
+        local pkg="opkg install"; command -v apk >/dev/null 2>&1 && pkg="apk add"
+        echo "{\"ok\":false,\"nfnetlink_queue\":$nfq,\"nft_queue\":$nftq,\"error\":\"нет модулей: $pkg kmod-nfnetlink-queue kmod-nft-queue && modprobe nfnetlink_queue nft_queue\"}"
     fi
+}
+
+# Проверка «правило queue реально работает» (модуль nft_queue жив).
+_kmods_nftq_ok() {
+    local ok=0
+    if nft add table inet bcw_probe_p 2>/dev/null; then
+        nft add chain inet bcw_probe_p c "{ type filter hook output priority 0; }" 2>/dev/null || true
+        nft add rule inet bcw_probe_p c queue num 65000 2>/dev/null && ok=1
+        nft delete table inet bcw_probe_p 2>/dev/null || true
+    fi
+    [ "$ok" = "1" ]
+}
+
+# Резервный путь, когда в фиде провайдера нет kmod: берём пакет из
+# официального фида OpenWrt под точную версию релиза/target/ядра.
+# [rel] [target] [kernel] [dry] — аргументы нужны для тестов резолвера.
+_kmods_fetch_official() {
+    local rel="${1:-}" tgt="${2:-}" kv="${3:-}" dry="${4:-}"
+    if [ -z "$rel" ] && [ -f /etc/openwrt_release ]; then
+        rel=$(sed -n "s/^DISTRIB_RELEASE='\(.*\)'/\1/p" /etc/openwrt_release | head -1)
+        tgt=$(sed -n "s/^DISTRIB_TARGET='\(.*\)'/\1/p" /etc/openwrt_release | head -1)
+    fi
+    [ -n "$kv" ] || kv=$(uname -r)
+    [ -n "$rel" ] && [ -n "$tgt" ] || return 1
+    local base="https://downloads.openwrt.org/releases/$rel/targets/$tgt/kmods"
+    local idx dir list pkg file
+    idx=$(curl -fsSL -m 20 "$base/" 2>/dev/null) || return 1
+    dir=$(printf '%s' "$idx" | grep -oE "href=\"$kv[^\"/]*/\"" | head -1 | sed 's/^href="//; s/"$//')
+    [ -n "$dir" ] || return 1
+    echo "[kmods] официальный фид: $base/$dir" >> /tmp/bcw_kmods.log
+    [ "$dry" = "dry" ] && echo "$base/$dir"
+    list=$(curl -fsSL -m 20 "$base/$dir" 2>/dev/null) || return 1
+    for pkg in kmod-nft-queue kmod-nfnetlink-queue; do
+        file=$(printf '%s' "$list" | grep -oE "${pkg}[-_][^\"]*\.(apk|ipk)" | head -1)
+        [ -n "$file" ] || continue
+        [ "$dry" = "dry" ] && echo "$file"
+        echo "[kmods] качаю $file" >> /tmp/bcw_kmods.log
+        curl -fsSL -m 60 "$base/$dir/$file" -o "/tmp/$file" 2>>/tmp/bcw_kmods.log || continue
+        if [ "$dry" != "dry" ]; then
+            if command -v apk >/dev/null 2>&1; then
+                apk add --allow-untrusted --force-overwrite "/tmp/$file" >>/tmp/bcw_kmods.log 2>&1 || true
+            elif command -v opkg >/dev/null 2>&1; then
+                opkg install --force-depends --force-overwrite "/tmp/$file" >>/tmp/bcw_kmods.log 2>&1 || true
+            fi
+        fi
+        rm -f "/tmp/$file"
+    done
+    [ "$dry" = "dry" ] && return 0
+    modprobe nfnetlink_queue 2>/dev/null || true
+    modprobe nft_queue 2>/dev/null || true
 }
 
 cmd_kmods_install() {
@@ -3086,7 +3140,7 @@ cmd_kmods_install() {
                     opkg update && opkg install kmod-nfnetlink-queue kmod-nft-queue
                 }
             fi
-        ) >/tmp/bcw_kmods.log 2>&1 &
+        ) >>/tmp/bcw_kmods.log 2>&1 &
         local ipid=$!
         ( sleep 90; kill -9 "$ipid" 2>/dev/null ) &
         local wpid=$!
@@ -3094,6 +3148,10 @@ cmd_kmods_install() {
         kill "$wpid" 2>/dev/null
         modprobe nfnetlink_queue 2>/dev/null || true
         modprobe nft_queue 2>/dev/null || true
+    fi
+    # Если в фиде провайдера пакета нет — пробуем официальный фид OpenWrt.
+    if [ ! -e /proc/net/netfilter/nfnetlink_queue ] || ! _kmods_nftq_ok; then
+        _kmods_fetch_official
     fi
     cmd_kmods_modprobe
 }
@@ -5422,6 +5480,7 @@ kmods_install) cmd_kmods_install ;;
 kmods_modprobe) cmd_kmods_modprobe ;;
 kmods_install_bg) cmd_kmods_install_bg ;;
 kmods_status) cmd_kmods_status ;;
+kmods_resolve) shift; _kmods_fetch_official "$@" dry ;;
     install_engine) cmd_install_engine ;;
     selftest) shift; cmd_selftest "$@" ;;
     class) shift; cmd_class "$@" ;;
