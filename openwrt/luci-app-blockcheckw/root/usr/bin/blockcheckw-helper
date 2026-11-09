@@ -646,6 +646,21 @@ curl_test_https_tls13 ipv4 $domain : nfqws2 --payload=tls_client_hello --lua-des
 curl_test_https_tls13 ipv4 $domain : nfqws2 --payload=tls_client_hello --lua-desync=fakeddisorder:pos=midsld:tcp_md5
 curl_test_https_tls13 ipv4 $domain : nfqws2 --payload=tls_client_hello --lua-desync=fake:blob=0x00000000:ip_autottl=-2,3-20:repeats=6
 curl_test_https_tls13 ipv4 $domain : nfqws2 --payload=tls_client_hello --lua-desync=rst:ip_autottl=-2,3-20
+
+# --- Family 8: seqovl с TLS-паттерном, маркеры позиций и ip_id (Routerich 2026) ---
+# Смысл: перекрытие заполняется началом TLS-записи (16 03 03 ..), поэтому
+# сборщик DPI видит валидный заголовок записи, а реальный ClientHello едет следом.
+curl_test_https_tls12 ipv4 $domain : nfqws2 --payload=tls_client_hello --lua-desync=multidisorder:pos=midsld:seqovl=2:seqovl_pattern=0x16030300
+curl_test_https_tls13 ipv4 $domain : nfqws2 --payload=tls_client_hello --lua-desync=multidisorder:pos=midsld:seqovl=2:seqovl_pattern=0x16030300
+curl_test_https_tls12 ipv4 $domain : nfqws2 --payload=tls_client_hello --lua-desync=multisplit:pos=midsld:seqovl=681:seqovl_pattern=fake_default_tls
+curl_test_https_tls13 ipv4 $domain : nfqws2 --payload=tls_client_hello --lua-desync=multisplit:pos=midsld:seqovl=sniext+1:seqovl_pattern=0x16030300
+curl_test_https_tls13 ipv4 $domain : nfqws2 --payload=tls_client_hello --lua-desync=multisplit:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1:seqovl=336:seqovl_pattern=fake_default_tls:ip_id=zero
+curl_test_https_tls13 ipv4 $domain : nfqws2 --payload=tls_client_hello --lua-desync=fake:blob=0x00000000:tcp_seq=-10000:repeats=3 --lua-desync=multisplit:pos=midsld
+curl_test_https_tls13 ipv4 $domain : nfqws2 --payload=tls_client_hello --lua-desync=tcpseg:pos=0,midsld:ip_id=rnd --lua-desync=multisplit:pos=sniext+1
+curl_test_https_tls12 ipv4 $domain : nfqws2 --payload=tls_client_hello --lua-desync=hostfakesplit:host=www.google.com:tcp_md5:midhost=midsld:disorder_after:ip_id=zero
+curl_test_https_tls13 ipv4 $domain : nfqws2 --payload=tls_client_hello --lua-desync=hostfakesplit:host=www.google.com:tcp_md5:midhost=midsld:disorder_after:ip_id=zero
+curl_test_https_tls13 ipv4 $domain : nfqws2 --payload=tls_client_hello --lua-desync=multidisorder:pos=midsld:seqovl=sniext+1:seqovl_pattern=0x16030300
+curl_test_https_tls13 ipv4 $domain : nfqws2 --payload=tls_client_hello --lua-desync=fakeddisorder:pos=midsld:ip_autottl=-2,3-20:ip_id=zero
 EOF
 
     # Family 7: Window Size Scaling (wssize) - STRICTLY for non-discord targets
@@ -1566,7 +1581,7 @@ EOF
 
             if [ "$need_circ" = "1" ]; then
                 write_status "running" 93 "Сборка Circular-связки: $circular_reason"
-                lua "$CIRCULAR_BUILDER" "$OUTPUT_SCAN" 2 15 3 loop tls_client_hello "$target" > "$OUTPUT_CIRCULAR" 2>> "$LOG_FILE"
+                lua "$CIRCULAR_BUILDER" "$OUTPUT_SCAN" 2 15 4 loop tls_client_hello "$target" > "$OUTPUT_CIRCULAR" 2>> "$LOG_FILE"
                 local circ_text=$(tr '\n' ' ' < "$OUTPUT_CIRCULAR" 2>/dev/null)
                 circular_members=$(printf '%s' "$circ_text" | grep -o 'strategy=[0-9]*' | sort -u | wc -l)
                 circular_members=$(printf '%s' "$circular_members" | tr -d ' ')

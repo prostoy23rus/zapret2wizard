@@ -146,12 +146,16 @@ local function build_circular(strategies, fails, maxtime, is_final, payload)
     local lines = {
         -- Отсекаем хвост потока: детектор успеха живёт до s32768 + 1 пакет.
         "--out-range=-s34228",
-        "--payload=" .. payload,
         -- Входящие нужны только самому circular (RST/редирект и inseq).
-        -- time=15 и retrans=2 — ротация за пару секунд, а не за минуту;
-        -- reset обрывает ожидание ретрансмиссий, чтобы сбой DPI не подвешивал страницу.
-        string.format("--in-range=-s5556 --lua-desync=circular:fails=%d:time=%d:retrans=2:reset", fails, maxtime),
-        "--in-range=x"
+        -- retrans=3 — порог штатного детектора, а не 2: одиночная потеря в Wi-Fi
+        -- не должна считаться блокировкой. reset обрывает ожидание ретрансмиссий.
+        -- nld=2 — состояние на домен 2-го уровня: у YouTube десятки хостов
+        -- *.googlevideo.com, и без этого каждый начинал бы ротацию с нуля.
+        string.format("--in-range=-s5556 --lua-desync=circular:fails=%d:time=%d:retrans=3:nld=2:reset", fails, maxtime),
+        "--in-range=x",
+        -- --payload ПОСЛЕ circular: сам оркестратор видит все протоколы и
+        -- общее состояние хоста, а фильтр пейлоада действует только на стратегии.
+        "--payload=" .. payload
     }
 
     for i, strat in ipairs(strategies) do

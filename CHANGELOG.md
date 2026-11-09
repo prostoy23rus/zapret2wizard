@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.18.71] (2026-11-09)
+
+### Гайды RouteRich: новый skill и техники из эталонной связки
+
+Изучены три документа RouteRich (`zapret2-finder`, ZeroBlock v0.8.5-r105, Soft Matrix Guide). Добавлен skill **`routerich-guides`**: режимы и опции finder, уровни сканирования, чтение `fixed/broken`, рецепты для 256 МБ; архитектура ZeroBlock, файлы и UCI; совместимость с zapret2 по метке `0x40000000` и `desync_bypass`; полный контракт soft-матриц routing/decision с шаблонами и правилами валидации. Skill `zapret2-desync` дополнен разделом про circular.
+
+Из эталонной 9-стратегийной связки Routerich перенесено то, что реально работает:
+
+* **`nld=2`** — состояние circular ключуется доменом 2-го уровня: у YouTube десятки `*.googlevideo.com`, и без этого каждый хост начинал ротацию заново;
+* **`retrans=3`** вместо 2 — одиночная потеря в Wi-Fi больше не считается блокировкой DPI;
+* **`--payload` после circular** — оркестратор видит все протоколы и общее состояние хоста, фильтр пейлоада действует только на стратегии;
+* до **4 техник** в связке (было 3) с сохранением правила «одна техника на семейство»;
+* в корпус подбора добавлено семейство 8: `seqovl_pattern=0x16030300` (перекрытие под валидный TLS-заголовок), `seqovl_pattern=fake_default_tls`, маркеры `seqovl=sniext+1`, `ip_id=rnd|zero`, `hostfakesplit:host=...:tcp_md5:midhost=midsld:disorder_after`, `tcpseg:pos=0,midsld`, `fakeddisorder+ip_autottl`.
+
+На RouteRich расширенный корпус дал **53 стратегии вместо 46** (в отчёте появились 8 строк с `seqovl_pattern`); одиночная 3/3 → circular не включён. Проверено отдельно: `circular:nld=2` и `multidisorder:pos=midsld:seqovl=sniext+1:seqovl_pattern=0x16030300` применяются, `all_ok`, YouTube 200.
+
 ## [0.18.70] (2026-11-09)
 
 ### Circular: разобрана логика, связка наконец применяется, решение принимает служба
