@@ -845,6 +845,45 @@ return view.extend({
 			document.createTextNode(' Проверка обновлений (v' + curVer + ')...')
 		]);
 
+		// Явное управление службой: запуск, остановка, перезапуск.
+		function svcAction(action) {
+			return fs.exec('/etc/init.d/zapret2wizard', [action]).then(function() {
+				var label = { start: 'запущена', stop: 'остановлена', restart: 'перезапущена' }[action] || 'изменена';
+				ui.addNotification(null, E('p', {}, 'Служба ' + label), 'info');
+				setTimeout(function() { location.reload(); }, 1500);
+			}).catch(function() {
+				ui.addNotification(null, E('p', {}, 'Не удалось выполнить действие'), 'danger');
+			});
+		}
+
+		function confirmStopService() {
+			bcwShowModal('Остановить службу?', [
+				E('p', { style: 'font-size:13px;color:#abb2bf;' }, 'Обход DPI перестанет работать для всех устройств в сети до следующего запуска. Стратегии и списки доменов сохранятся.')
+			], [
+				E('button', { class: 'cbi-button cbi-button-negative', click: function() { ui.hideModal(); svcAction('stop'); } }, 'Остановить'),
+				E('button', { class: 'cbi-button cbi-button-neutral', click: function() { ui.hideModal(); } }, 'Отмена')
+			]);
+		}
+
+		var btnSvcStart = E('button', {
+			class: 'bcw-header-item bcw-header-btn',
+			title: 'Запустить службу Zapret2Wizard',
+			click: function() { svcAction('start'); }
+		}, [E('span', {}, '▶'), ' Запустить']);
+
+		var btnSvcStop = E('button', {
+			class: 'bcw-header-item bcw-header-btn',
+			style: 'color:#e06c75;',
+			title: 'Полностью остановить службу',
+			click: function() { confirmStopService(); }
+		}, [E('span', {}, '⏻'), ' Остановить']);
+
+		var btnSvcRestart = E('button', {
+			class: 'bcw-header-item bcw-header-btn',
+			title: 'Перезапустить службу',
+			click: function() { svcAction('restart'); }
+		}, [E('span', {}, '⟳'), ' Перезапустить']);
+
 		var btnDiagnostics = E('button', {
 			class: 'bcw-header-item bcw-header-btn',
 			title: 'Проверить состояние службы и bypass: служба, движок, nft, живая проверка',
@@ -890,6 +929,9 @@ return view.extend({
 			zapretBadgeEl,
 			themeSelectEl,
 			btnHostlists,
+			btnSvcStart,
+			btnSvcStop,
+			btnSvcRestart,
 			btnDiagnostics,
 			btnCheckUpdate,
 			btnFeedback,

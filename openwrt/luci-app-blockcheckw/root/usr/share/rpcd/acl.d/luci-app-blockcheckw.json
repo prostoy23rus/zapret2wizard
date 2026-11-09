@@ -76,6 +76,9 @@
 				],
 				"/tmp/bcw_evolve.running": [
 					"read"
+				],
+				"/etc/init.d/zapret2wizard": [
+					"exec"
 				]
 			}
 		},
@@ -132,6 +135,9 @@
 				"/tmp/bcw_import.json": [
 					"write",
 					"read"
+				],
+				"/etc/init.d/zapret2wizard": [
+					"exec"
 				]
 			}
 		}
