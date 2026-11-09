@@ -1895,8 +1895,7 @@ return view.extend({
 		rebuildHistory();
 
 		var mainTabDefs = [
-			{ id: 'scan', label: '🔍 Сканер', nodes: [targetSectionCard, unifiedScanCard] },
-			{ id: 'results', label: '📊 Результаты', nodes: [activeStratCard, resultsCard] },
+			{ id: 'scan', label: '🔍 Сканер', nodes: [targetSectionCard, unifiedScanCard, activeStratCard, resultsCard] },
 			{ id: 'history', label: '🕘 История', nodes: [historyCard] },
 			{ id: 'evolve', label: '🧬 Эволюция', nodes: [buildEvolutionPanel()] },
 			{ id: 'logs', label: '📜 Логи', nodes: [logCard] }
@@ -1926,17 +1925,18 @@ return view.extend({
 			var dashRow = E('div', { class: 'bcw-dash-row' });
 			var dashLeft = E('div', {});
 			var dashRight = E('div', { style: 'display:flex;flex-direction:column;gap:16px;' });
-			var moved = 0;
-			while (scanPanel.firstChild) {
-				var node = scanPanel.firstChild;
-				scanPanel.removeChild(node);
-				(moved === 0 ? dashLeft : dashRight).appendChild(node);
-				moved++;
-			}
+			var cards = Array.prototype.slice.call(scanPanel.children);
+			while (scanPanel.firstChild) scanPanel.removeChild(scanPanel.firstChild);
+			if (cards[0]) dashLeft.appendChild(cards[0]);
+			if (cards[1]) dashRight.appendChild(cards[1]);
 			dashRow.appendChild(dashLeft);
 			dashRow.appendChild(dashRight);
 			scanPanel.appendChild(dashRow);
 			dashRight.appendChild(buildSteerCard());
+			// остальные карточки (результаты) — на всю ширину под колонками
+			for (var ci = 2; ci < cards.length; ci++) {
+				if (cards[ci]) scanPanel.appendChild(cards[ci]);
+			}
 		}
 
 // -------- Вкладка «Эволюция»: запуск, история поколений, топ геномов --------
