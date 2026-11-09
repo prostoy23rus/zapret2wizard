@@ -96,6 +96,9 @@ jobs:
         env:
           LD_LIBRARY_PATH: /tmp/apk-tools/src
         run: |
+          # dist/ хранится в репозитории, и пакеты прошлых версий уезжали
+          # в релиз следующей (в v0.18.65 лежали файлы 0.18.64).
+          rm -rf dist && mkdir -p dist
           python3 packaging/build.py \
             --repo . \
             --arch "${{ matrix.openwrt_arch }}" \
@@ -106,6 +109,15 @@ jobs:
             sh packaging/build-apk.sh \
             --bundle "dist/zapret2wizard-$(python3 -c 'import json;print(json.load(open("openwrt/version.json"))["version"])')-${{ matrix.openwrt_arch }}-bundle.tar.gz" \
             --out dist
+
+      - name: Build ipk (opkg)
+        run: |
+          # .ipk собирается штатным GNU ar: пакет нужен роутерам на opkg.
+          bash packaging/build-ipk.sh \
+            "${{ matrix.openwrt_arch }}" \
+            "openwrt/engine/nfqws2-${{ matrix.engine }}" \
+            "out/blockcheckw-${{ matrix.openwrt_arch }}" \
+            dist
 
       - uses: actions/upload-artifact@v4
         with:
