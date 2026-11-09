@@ -2777,15 +2777,17 @@ cmd_doctor() {
         add_check "наши движки" 0 "ни один экземпляр nfqws2 не запущен" "Перезапустите службу и проверьте лог: logread | grep -i nfqws | tail -20"
     fi
 
-    # Исключение наших доменов из steer-туннеля
-    if nft list table inet steer >/dev/null 2>&1; then
-        if nft -a list chain inet steer ingress_mark 2>/dev/null | grep -q "bcw-exclude"; then
-            add_check "steer-исключение" 1 "включено: наши домены идут мимо туннеля" ""
+    # Исключение наших доменов из любых туннелей/policy-routing
+    local bp_targets=$(bp_targets 2>/dev/null | wc -l)
+    local bp_rules=$(nft list ruleset 2>/dev/null | grep -c "bcw-bypass")
+    if [ "${bp_targets:-0}" -gt 0 ]; then
+        if [ "${bp_rules:-0}" -gt 0 ]; then
+            add_check "обход туннелей" 1 "включено: цепочек найдено $bp_targets" ""
         else
-            add_check "steer-исключение" 0 "не применяется" "Запустите: blockcheckw-helper steer_sync enable"
+            add_check "обход туннелей" 0 "правила не применяются" "Запустите: blockcheckw-helper bypass enable"
         fi
     else
-        add_check "steer-исключение" 1 "steer не используется" ""
+        add_check "обход туннелей" 1 "туннели не обнаружены" ""
     fi
 
     local fo=$(uci -q get firewall.@defaults[0].flow_offloading)
@@ -3250,42 +3252,25 @@ cmd_evolve_import() {
     rm -f "$tmp"
 }
 
-# ---- Исключение из steer: то, что обрабатывает наша служба, не туннелируется ----
+# ---- Обход policy-routing и туннелей (универсально) -------------------------
 #
-# Идея: домены включённых стратегий складываем в nft-набор inet steer bcw_zapret_ips
-# через dnsmasq (nftset), а в steer-цепочках ставим первыми правила
-# «iifname br-lan ip daddr @bcw_zapret_ips return» — трафик уходит напрямую,
-# попадает в нашу таблицу zapret2wizard и обрабатывается десинком.
+# Любой оркестратор (steer, mihomo, sing-box, v2rayA, кастомные nft-скрипты)
+# помечает трафик по адресатам в своих цепочках prerouting/ingress или через
+# iptables/ipset. Мы не привязываемся к именам: находим такие цепочки сами,
+# создаём в них свой набор IP и вставляем первым правило-исключение.
+#
+# Домены включённых стратегий резолвим через локальный dnsmasq и складываем
+# IP в свой кэш — это работает без nftset и без знаний о конкретном менеджере.
 
-STEER_TABLE="steer"
-STEER_SET="bcw_zapret_ips"
-STEER_COMMENT="bcw-exclude"
-STEER_DNS_CONF="/tmp/dnsmasq.d/bcw-nftset.conf"
+BP_COMMENT="bcw-bypass"
+BP_SET="bcw_bypass4"
+BP_STATE="/etc/zapret2wizard/bypass_state.txt"
+BP_CACHE="/etc/zapret2wizard/bypass_ips.txt"
+BP_WARM_MARK="/tmp/bcw_bypass.warm"
+BP_CACHE_TTL=21600
 
-steer_set_exists() {
-    nft list set inet "$STEER_TABLE" "$STEER_SET" >/dev/null 2>&1
-}
-
-steer_rules_present() {
-    nft -a list chain inet "$STEER_TABLE" ingress_mark 2>/dev/null | grep -q "$STEER_COMMENT"
-}
-
-# Прогрев: после пересоздания набора резолвим домены через dnsmasq,
-# чтобы nftset сразу наполнился, не дожидаясь запросов клиентов.
-steer_warm_cache() {
-    [ -f /tmp/bcw_steer.warm ] && return 0
-    : > /tmp/bcw_steer.warm
-    local d
-    steer_collect_domains | head -n 200 | while IFS= read -r d; do
-        [ -n "$d" ] || continue
-        nslookup "$d" 127.0.0.1 >/dev/null 2>&1
-    done
-    rm -f /tmp/bcw_steer.warm
-}
-
-# Собрать домены включённых стратегий (без исключений).
-steer_collect_domains() {
-    local out="/tmp/bcw_steer_domains.txt"
+bp_collect_domains() {
+    local out="/tmp/bcw_bp_domains.txt"
     : > "$out"
     local sec hl f
     for sec in $(uci show zapret2wizard 2>/dev/null | sed -n 's/^zapret2wizard\.\([^=]*\)=strategy$/\1/p'); do
@@ -3303,107 +3288,189 @@ steer_collect_domains() {
     sort -u "$out"
 }
 
-# Записать dnsmasq-конфиг, если он изменился.
-steer_dns_conf() {
-    local domains
-    domains=$(steer_collect_domains)
-    if [ -z "$domains" ]; then
-        rm -f "$STEER_DNS_CONF"
-        return 0
-    fi
-    mkdir -p /tmp/dnsmasq.d
-
-    local tmp="/tmp/bcw-nftset.conf"
-    : > "$tmp"
-    echo "# Zapret2Wizard: IP этих доменов не отправляются в steer-туннель" >> "$tmp"
-    # dnsmasq nftset: до 100 доменов в строке
-    echo "$domains" | tr '\n' ' ' | sed 's/ $//' | tr ' ' '\n' > /tmp/bcw_dom_list.txt
-    local batch="" count=0 line
-    while IFS= read -r line; do
-        [ -n "$line" ] || continue
-        if [ -z "$batch" ]; then
-            batch="/$line"
-        else
-            batch="$batch/$line"
-        fi
-        count=$((count + 1))
-        if [ "$count" -ge 100 ]; then
-            echo "nftset=$batch/4#inet#$STEER_TABLE#$STEER_SET" >> "$tmp"
-            batch=""
-            count=0
-        fi
-    done < /tmp/bcw_dom_list.txt
-    [ -n "$batch" ] && echo "nftset=$batch/4#inet#$STEER_TABLE#$STEER_SET" >> "$tmp"
-    rm -f /tmp/bcw_dom_list.txt
-
-    if [ -f "$STEER_DNS_CONF" ] && cmp -s "$tmp" "$STEER_DNS_CONF"; then
-        rm -f "$tmp"
-        return 0
-    fi
-    mv -f "$tmp" "$STEER_DNS_CONF"
-    ( /etc/init.d/dnsmasq restart >/dev/null 2>&1 || /etc/init.d/dnsmasq reload >/dev/null 2>&1 || true ) &
-    logger -t zapret2wizard "steer: обновлён список исключений dnsmasq"
+# Найти цепочки, которые помечают трафик по адресату (prerouting/ingress).
+bp_targets() {
+    local fam tbl ch body
+    nft list tables 2>/dev/null | awk '{print $2" "$3}' | while read -r fam tbl; do
+        nft list table "$fam" "$tbl" 2>/dev/null | sed -n 's/^[[:space:]]*chain \([^ {]*\).*/\1/p' | while read -r ch; do
+            body=$(nft list chain "$fam" "$tbl" "$ch" 2>/dev/null)
+            echo "$body" | grep -qE 'hook (prerouting|ingress)' || continue
+            echo "$body" | grep -q 'mark set' || continue
+            echo "$body" | grep -q 'daddr @' || continue
+            echo "$fam $tbl $ch"
+        done
+    done | sort -u
 }
 
-steer_unsync() {
-    [ -d /etc/config ] || return 0
-    local chain
-    for chain in ingress_mark prerouting_mark; do
-        local handles
-        handles=$(nft -a list chain inet "$STEER_TABLE" "$chain" 2>/dev/null | awk '/bcw-exclude/{print $NF}')
-        for h in $handles; do
-            nft delete rule inet "$STEER_TABLE" "$chain" handle "$h" 2>/dev/null || true
+bp_set_exists() { nft list set "$1" "$2" "$BP_SET" >/dev/null 2>&1; }
+
+bp_rule_line() { nft -a list chain "$1" "$2" "$3" 2>/dev/null | grep "$BP_COMMENT"; }
+
+# Заполнить кэш IP через локальный резолвер.
+bp_resolve_ips() {
+    [ -f "$BP_WARM_MARK" ] && return 0
+    : > "$BP_WARM_MARK"
+    mkdir -p /etc/zapret2wizard
+    local tmp="/tmp/bcw_bp_ips.new"
+    : > "$tmp"
+    bp_collect_domains | head -n 200 | while IFS= read -r d; do
+        [ -n "$d" ] || continue
+        nslookup "$d" 127.0.0.1 2>/dev/null | awk '/^Address: /{print $2}'
+    done | sort -u > "$tmp"
+    [ -s "$tmp" ] && mv -f "$tmp" "$BP_CACHE"
+    rm -f "$BP_WARM_MARK"
+}
+
+# Залить IP из кэша во все наборы-исключения.
+bp_apply_ips() {
+    [ -s "$BP_CACHE" ] || return 0
+    local fam tbl ch batch n ip
+    [ -f "$BP_STATE" ] || return 0
+    while read -r fam tbl ch; do
+        [ -n "$fam" ] || continue
+        bp_set_exists "$fam" "$tbl" || continue
+        batch=""
+        n=0
+        while IFS= read -r ip; do
+            [ -n "$ip" ] || continue
+            case "$batch" in
+                "") batch="$ip" ;;
+                *) batch="$batch, $ip" ;;
+            esac
+            n=$((n + 1))
+            if [ "$n" -ge 150 ]; then
+                nft add element "$fam" "$tbl" "$BP_SET" "{ $batch }" 2>/dev/null || true
+                batch=""
+                n=0
+            fi
+        done < "$BP_CACHE"
+        [ -n "$batch" ] && nft add element "$fam" "$tbl" "$BP_SET" "{ $batch }" 2>/dev/null || true
+    done < "$BP_STATE"
+
+    # iptables/ipset-сценарий (fw3, старые менеджеры) — только если там есть маркировка
+    if command -v ipset >/dev/null 2>&1 && iptables -t mangle -S PREROUTING >/dev/null 2>&1 \
+        && iptables -t mangle -S PREROUTING 2>/dev/null | grep -qE 'MARK|--match-set'; then
+        ipset create "$BP_SET" hash:ip -exist 2>/dev/null || true
+        while IFS= read -r ip; do
+            [ -n "$ip" ] && ipset add "$BP_SET" "$ip" -exist 2>/dev/null
+        done < "$BP_CACHE"
+    fi
+}
+
+bp_sync() {
+    local targets fam tbl ch
+    targets=$(bp_targets)
+    : > "$BP_STATE.new"
+    if [ -n "$targets" ]; then
+        echo "$targets" | while read -r fam tbl ch; do
+            [ -n "$fam" ] || continue
+            bp_set_exists "$fam" "$tbl" || nft add set "$fam" "$tbl" "$BP_SET" '{ type ipv4_addr; }' 2>/dev/null || true
+            bp_set_exists "$fam" "$tbl" || continue
+            if ! bp_rule_line "$fam" "$tbl" "$ch" | grep -q "$BP_COMMENT"; then
+                nft insert rule "$fam" "$tbl" "$ch" \
+                    iifname "br-lan" ip daddr "@$BP_SET" counter return comment "$BP_COMMENT" 2>/dev/null || true
+            fi
+            echo "$fam $tbl $ch" >> "$BP_STATE.new"
+        done
+    fi
+    mv -f "$BP_STATE.new" "$BP_STATE" 2>/dev/null || true
+
+    # iptables-путь: правило возврата до маркировки
+    if command -v ipset >/dev/null 2>&1 && iptables -t mangle -S PREROUTING >/dev/null 2>&1 \
+        && iptables -t mangle -S PREROUTING 2>/dev/null | grep -qE 'MARK|--match-set'; then
+        ipset create "$BP_SET" hash:ip -exist 2>/dev/null || true
+        if ! iptables -t mangle -C PREROUTING -i br-lan -m set --match-set "$BP_SET" dst -j RETURN >/dev/null 2>&1; then
+            iptables -t mangle -I PREROUTING 1 -i br-lan -m set --match-set "$BP_SET" dst -j RETURN 2>/dev/null || true
+        fi
+        echo "iptables mangle PREROUTING" >> "$BP_STATE"
+    fi
+
+    if [ ! -s "$BP_CACHE" ] || [ -n "$(find "$BP_CACHE" -mmin +$((BP_CACHE_TTL / 60)) 2>/dev/null)" ]; then
+        bp_warm_detached
+    fi
+    bp_apply_ips
+}
+
+bp_warm_detached() {
+    if command -v start-stop-daemon >/dev/null 2>&1; then
+        start-stop-daemon -S -b -x /usr/bin/blockcheckw-helper -- bypass_warm >/dev/null 2>&1 && return 0
+    fi
+    ( /usr/bin/blockcheckw-helper bypass_warm >/dev/null 2>&1 & )
+}
+
+bp_unsync() {
+    local fam tbl ch handles h
+    if [ -f "$BP_STATE" ]; then
+        while read -r fam tbl ch; do
+            case "$fam" in
+                iptables) continue ;;
+            esac
+            [ -n "$ch" ] || continue
+            handles=$(nft -a list chain "$fam" "$tbl" "$ch" 2>/dev/null | awk "/$BP_COMMENT/{print \$NF}")
+            for h in $handles; do
+                nft delete rule "$fam" "$tbl" "$ch" handle "$h" 2>/dev/null || true
+            done
+            nft flush set "$fam" "$tbl" "$BP_SET" 2>/dev/null || true
+            nft delete set "$fam" "$tbl" "$BP_SET" 2>/dev/null || true
+        done < "$BP_STATE"
+        rm -f "$BP_STATE"
+    fi
+    if command -v ipset >/dev/null 2>&1; then
+        iptables -t mangle -D PREROUTING -i br-lan -m set --match-set "$BP_SET" dst -j RETURN 2>/dev/null || true
+        ipset destroy "$BP_SET" 2>/dev/null || true
+    fi
+    # уборка правил старого формата (bcw-exclude)
+    local fam tbl ch h
+    nft list tables 2>/dev/null | awk '{print $2" "$3}' | while read -r fam tbl; do
+        nft list table "$fam" "$tbl" 2>/dev/null | sed -n 's/^[[:space:]]*chain \([^ {]*\).*/\1/p' | while read -r ch; do
+            for h in $(nft -a list chain "$fam" "$tbl" "$ch" 2>/dev/null | awk '/bcw-exclude/{print $NF}'); do
+                nft delete rule "$fam" "$tbl" "$ch" handle "$h" 2>/dev/null || true
+            done
         done
     done
-    rm -f "$STEER_DNS_CONF"
-    ( /etc/init.d/dnsmasq restart >/dev/null 2>&1 || true ) &
 }
 
-steer_warm_detached() {
-    if command -v start-stop-daemon >/dev/null 2>&1; then
-        start-stop-daemon -S -b -x /usr/bin/blockcheckw-helper -- steer_warm >/dev/null 2>&1 && return 0
+bp_status() {
+    local targets rules=0 members=0 packets=0 bytes=0 line
+    # оркестраторы перезагружают таблицы и теряют чужие правила —
+    # перед отчётом восстанавливаем свои (идемпотентно и дёшево)
+    bp_sync >/dev/null 2>&1 || true
+    targets=$(bp_targets | wc -l)
+    if [ -f "$BP_STATE" ]; then
+        while read -r fam tbl ch; do
+            case "$fam" in
+                iptables) rules=$((rules + 1)); continue ;;
+            esac
+            [ -n "$ch" ] || continue
+            line=$(bp_rule_line "$fam" "$tbl" "$ch" | head -n 1)
+            if [ -n "$line" ]; then
+                rules=$((rules + 1))
+                packets=$((packets + $(printf '%s' "$line" | sed -n 's/.*counter packets \([0-9]*\).*/\1/p' | head -n 1)))
+                bytes=$((bytes + $(printf '%s' "$line" | sed -n 's/.*bytes \([0-9]*\) return.*/\1/p' | head -n 1)))
+            fi
+            members=$((members + $(nft list set "$fam" "$tbl" "$BP_SET" 2>/dev/null \
+                | sed -n '/elements = {/,/}/p' | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | wc -l)))
+        done < "$BP_STATE"
     fi
-    ( /usr/bin/blockcheckw-helper steer_warm >/dev/null 2>&1 & )
-}
-
-steer_sync() {
-    nft list table inet "$STEER_TABLE" >/dev/null 2>&1 || return 0
-    steer_set_exists || nft add set inet "$STEER_TABLE" "$STEER_SET" '{ type ipv4_addr; }' 2>/dev/null || true
-    steer_set_exists || return 0
-
-    steer_dns_conf
-
-    # набор пуст (steer пересоздал таблицу) — прогреваем в фоне
-    local members
-    members=$(nft list set inet "$STEER_TABLE" "$STEER_SET" 2>/dev/null \
-        | sed -n '/elements = {/,/}/p' | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | wc -l)
-    if [ "${members:-0}" -eq 0 ]; then
-        steer_warm_detached
+    if command -v ipset >/dev/null 2>&1 && ipset list "$BP_SET" >/dev/null 2>&1; then
+        members=$((members + $(ipset list "$BP_SET" 2>/dev/null | grep -cE '^[0-9]+\.')))
     fi
-
-    local chain
-    for chain in ingress_mark prerouting_mark; do
-        nft list chain inet "$STEER_TABLE" "$chain" >/dev/null 2>&1 || continue
-        if ! nft -a list chain inet "$STEER_TABLE" "$chain" 2>/dev/null | grep -q "$STEER_COMMENT"; then
-            nft insert rule inet "$STEER_TABLE" "$chain" \
-                iifname "br-lan" ip daddr "@$STEER_SET" counter return comment "$STEER_COMMENT" 2>/dev/null || true
-        fi
-    done
+    echo "{\"targets\":${targets:-0},\"rules\":$rules,\"members\":${members:-0},\"packets\":${packets:-0},\"bytes\":${bytes:-0},\"domains\":$(bp_collect_domains | wc -l)}"
 }
 
-cmd_steer_sync() {
-    local action="${1:-sync}"
-    case "$action" in
+cmd_bypass() {
+    case "${1:-sync}" in
         enable|sync)
-            steer_sync
-            # dnsmasq/steer могут перезагрузиться следом — повторим установку правил
-            start-stop-daemon -S -b -x /bin/sh -- -c 'sleep 6; /usr/bin/blockcheckw-helper steer_sync enable' >/dev/null 2>&1 || true
-
-            echo "{\"steer\":\"active\",\"set\":\"$STEER_SET\",\"domains\":$(steer_collect_domains | wc -l)}"
+            bp_sync
+            echo "{\"bypass\":\"active\",\"targets\":$(bp_targets | wc -l)}"
+            start-stop-daemon -S -b -x /bin/sh -- -c 'sleep 6; /usr/bin/blockcheckw-helper bypass_sync enable' >/dev/null 2>&1 || true
             ;;
         disable|off)
-            steer_unsync
-            echo '{"steer":"disabled"}'
+            bp_unsync
+            echo '{"bypass":"disabled"}'
+            ;;
+        status)
+            bp_status
             ;;
         domains)
             local list="" count=0 d esc
@@ -3416,33 +3483,30 @@ cmd_steer_sync() {
                 esac
                 count=$((count + 1))
             done <<EOF
-$(steer_collect_domains)
+$(bp_collect_domains)
 EOF
             echo "{\"count\":$count,\"domains\":[$list]}"
             ;;
         rebuild)
-            nft flush set inet "$STEER_TABLE" "$STEER_SET" 2>/dev/null || true
-            rm -f /tmp/bcw_steer.warm
-            steer_sync
-            steer_warm_detached
+            if [ -f "$BP_STATE" ]; then
+                while read -r fam tbl ch; do
+                    case "$fam" in iptables) continue ;; esac
+                    [ -n "$ch" ] && nft flush set "$fam" "$tbl" "$BP_SET" 2>/dev/null || true
+                done < "$BP_STATE"
+            fi
+            rm -f "$BP_CACHE" "$BP_WARM_MARK"
+            bp_sync
+            bp_warm_detached
             echo '{"rebuilt":true}'
             ;;
-        status)
-            local rules=0 members=0 packets=0 bytes=0 table=0
-            nft list table inet "$STEER_TABLE" >/dev/null 2>&1 && table=1
-            local line
-            line=$(nft -a list chain inet "$STEER_TABLE" ingress_mark 2>/dev/null | grep "$STEER_COMMENT" | head -n 1)
-            [ -n "$line" ] && rules=1
-            packets=$(printf '%s' "$line" | sed -n 's/.*counter packets \([0-9]*\) bytes \([0-9]*\).*/\1/p')
-            bytes=$(printf '%s' "$line" | sed -n 's/.*counter packets \([0-9]*\) bytes \([0-9]*\).*/\2/p')
-            members=$(nft list set inet "$STEER_TABLE" "$STEER_SET" 2>/dev/null \
-                | sed -n '/elements = {/,/}/p' \
-                | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | wc -l)
-            echo "{\"table\":$table,\"rules\":$rules,\"members\":${members:-0},\"packets\":${packets:-0},\"bytes\":${bytes:-0},\"domains\":$(steer_collect_domains | wc -l)}"
+        *)
+            echo '{"error":"usage: bypass enable|disable|status|domains|rebuild"}'
             ;;
-        *) echo '{"error":"usage: steer_sync enable|disable|status"}' ;;
     esac
 }
+
+# Совместимость со старым именем
+cmd_steer_sync() { cmd_bypass "$@"; }
 
 # Статус эволюции для LuCI: провайдер, история, топ геномов.
 cmd_evolve_status() {
@@ -3528,8 +3592,8 @@ cmd_cron_install() {
     if ! grep -q 'bcw-health' "$cron_file" 2>/dev/null; then
         echo "*/30 * * * * /usr/bin/blockcheckw-helper health_tick >/dev/null 2>&1 # bcw-health" >> "$cron_file"
     fi
-    if ! grep -q 'bcw-steer' "$cron_file" 2>/dev/null; then
-        echo "*/2 * * * * /usr/bin/blockcheckw-helper steer_sync enable >/dev/null 2>&1 # bcw-steer" >> "$cron_file"
+    if ! grep -q 'bcw-bypass' "$cron_file" 2>/dev/null; then
+        echo "*/2 * * * * /usr/bin/blockcheckw-helper bypass_sync enable >/dev/null 2>&1 # bcw-bypass" >> "$cron_file"
     fi
     /etc/init.d/cron enable >/dev/null 2>&1 || true
     /etc/init.d/cron restart >/dev/null 2>&1 || true
@@ -4648,8 +4712,9 @@ case "$1" in
     catalog_fetch) shift; cmd_catalog_fetch "$@" ;;
     catalog_export) cmd_catalog_export ;;
     health_tick) cmd_health_tick ;;
-    steer_sync) shift; cmd_steer_sync "$@" ;;
-    steer_warm) steer_warm_cache ;;
+    steer_sync|bypass_sync) shift; cmd_bypass "$@" ;;
+    bypass) shift; cmd_bypass "$@" ;;
+    bypass_warm) bp_resolve_ips ;;
     asn) cmd_asn ;;
     provider_save) cmd_provider_save ;;
     cron_install) cmd_cron_install ;;

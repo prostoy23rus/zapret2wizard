@@ -2196,23 +2196,23 @@ return view.extend({
 
 		// -------- Steer: переключатель исключения и счётчик --------
 		function refreshSteerCard() {
-			fs.exec(HELPER_BIN, ['steer_sync', 'status']).then(function(res) {
+			fs.exec(HELPER_BIN, ['bypass', 'status']).then(function(res) {
 				var st = null;
 				try { st = JSON.parse(res.stdout); } catch (e) {}
 				var card = document.getElementById('bcw-steer-card');
 				var toggle = document.getElementById('bcw-steer-toggle');
 				var status = document.getElementById('bcw-steer-status');
 				if (!card || !st) return;
-				if (!st.table) { card.style.display = 'none'; return; }
+				if (!st.targets) { card.style.display = 'none'; return; }
 				card.style.display = '';
 				if (toggle) toggle.checked = !!st.rules;
 				if (status) {
 					if (st.rules) {
-						status.textContent = 'Исключено из туннеля: ' + (st.packets || 0) + ' пакетов · доменов ' +
+						status.textContent = 'Исключено из туннелей: ' + (st.packets || 0) + ' пакетов · доменов ' +
 							(st.domains || 0) + ' · IP ' + (st.members || 0);
 						status.style.color = '#98c379';
 					} else {
-						status.textContent = 'Выключено: домены службы уходят в steer-туннель';
+						status.textContent = 'Выключено: домены службы уходят в туннель';
 						status.style.color = '#abb2bf';
 					}
 				}
@@ -2222,18 +2222,18 @@ return view.extend({
 		function buildSteerCard() {
 			var toggle = E('input', { type: 'checkbox', id: 'bcw-steer-toggle', style: 'margin: 0 8px 0 0; vertical-align: middle;' });
 			var status = E('div', { id: 'bcw-steer-status', style: 'font-size: 12px; color: #abb2bf; margin-top: 8px;' }, 'Загрузка...');
-			var title = E('div', { style: 'font-weight:bold;font-size:13px;margin-bottom:6px;' }, '🛰 Steer-туннель');
+			var title = E('div', { style: 'font-weight:bold;font-size:13px;margin-bottom:6px;' }, '🔀 Обход туннелей');
 
 			toggle.addEventListener('change', function() {
 				var want = toggle.checked;
 				toggle.disabled = true;
 				status.textContent = want ? '⏳ Включаю исключение...' : '⏳ Снимаю исключение...';
-				fs.exec(HELPER_BIN, ['steer_sync', want ? 'enable' : 'disable']).then(function() {
+				fs.exec(HELPER_BIN, ['bypass', want ? 'enable' : 'disable']).then(function() {
 					toggle.disabled = false;
 					setTimeout(refreshSteerCard, 1000);
 					setTimeout(refreshSteerCard, 3500);
 					setTimeout(refreshSteerCard, 7000);
-					ui.addNotification(null, E('p', {}, want ? 'Домены службы исключены из steer' : 'Steer снова туннелирует домены службы'), 'info');
+					ui.addNotification(null, E('p', {}, want ? 'Домены службы исключены из туннелей' : 'Туннели снова забирают домены службы'), 'info');
 				}).catch(function() { toggle.disabled = false; status.textContent = '✗ ошибка'; });
 			});
 
@@ -2253,7 +2253,7 @@ return view.extend({
 					return;
 				}
 				showBtn.textContent = '⏳ Загружаю...';
-				fs.exec(HELPER_BIN, ['steer_sync', 'domains']).then(function(res) {
+				fs.exec(HELPER_BIN, ['bypass', 'domains']).then(function(res) {
 					var d = null;
 					try { d = JSON.parse(res.stdout); } catch (e) {}
 					if (!d || !d.domains) { showBtn.textContent = 'Показать домены'; return; }
@@ -2271,7 +2271,7 @@ return view.extend({
 			rebuildBtn.addEventListener('click', function() {
 				rebuildBtn.disabled = true;
 				status.textContent = '⏳ Пересобираю набор IP...';
-				fs.exec(HELPER_BIN, ['steer_sync', 'rebuild']).then(function() {
+				fs.exec(HELPER_BIN, ['bypass', 'rebuild']).then(function() {
 					rebuildBtn.disabled = false;
 					setTimeout(refreshSteerCard, 1000);
 					setTimeout(refreshSteerCard, 5000);
