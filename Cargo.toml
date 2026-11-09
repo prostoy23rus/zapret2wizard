@@ -1,6 +1,6 @@
 [package]
 name = "blockcheckw"
-version = "0.18.53"
+version = "0.19.0"
 edition = "2021"
 description = "blockcheck.sh wrapper for better scanning speed"
 
