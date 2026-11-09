@@ -1,12 +1,12 @@
 {
-  "version": "0.18.78",
+  "version": "0.18.79",
   "release_date": "2026-11-09",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "Автоустановка kmod: если в фиде провайдера пакета нет, берём его из официального фида OpenWrt под точный релиз/target/ядро",
-    "Новая диагностика blockcheckw-helper kmods_resolve <release> <target> <kernel> — показывает, что именно будет скачано",
-    "Проверено для 25.12.6 / mediatek/filogic / 6.12.112: находит kmod-nft-queue и kmod-nfnetlink-queue",
-    "Лог установки модулей больше не перезаписывается"
+    "kmods_install: --force-reinstall для opkg — восстанавливает отсутствующие .ko, даже если пакет числится установленным",
+    "apk: fallback apk fix и прямое извлечение tar, если пакет уже «установлен», а файла модуля нет",
+    "Проверено: удалённые nfnetlink_queue.ko/nft_queue.ko восстановлены из фида RouteRich, служба поднялась, YouTube 200",
+    "Резервный официальный фид OpenWrt (0.18.78) остаётся для случая, когда в фиде провайдера пакета нет"
   ]
 }
