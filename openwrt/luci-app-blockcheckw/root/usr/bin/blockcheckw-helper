@@ -3270,6 +3270,19 @@ steer_rules_present() {
     nft -a list chain inet "$STEER_TABLE" ingress_mark 2>/dev/null | grep -q "$STEER_COMMENT"
 }
 
+# Прогрев: после пересоздания набора резолвим домены через dnsmasq,
+# чтобы nftset сразу наполнился, не дожидаясь запросов клиентов.
+steer_warm_cache() {
+    [ -f /tmp/bcw_steer.warm ] && return 0
+    : > /tmp/bcw_steer.warm
+    local d
+    steer_collect_domains | head -n 200 | while IFS= read -r d; do
+        [ -n "$d" ] || continue
+        nslookup "$d" 127.0.0.1 >/dev/null 2>&1
+    done
+    rm -f /tmp/bcw_steer.warm
+}
+
 # Собрать домены включённых стратегий (без исключений).
 steer_collect_domains() {
     local out="/tmp/bcw_steer_domains.txt"
@@ -3353,6 +3366,14 @@ steer_sync() {
 
     steer_dns_conf
 
+    # набор пуст (steer пересоздал таблицу) — прогреваем в фоне
+    local members
+    members=$(nft list set inet "$STEER_TABLE" "$STEER_SET" 2>/dev/null \
+        | sed -n '/elements = {/,/}/p' | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | wc -l)
+    if [ "${members:-0}" -eq 0 ]; then
+        ( steer_warm_cache >/dev/null 2>&1 ) &
+    fi
+
     local chain
     for chain in ingress_mark prerouting_mark; do
         nft list chain inet "$STEER_TABLE" "$chain" >/dev/null 2>&1 || continue
@@ -3378,10 +3399,17 @@ cmd_steer_sync() {
             echo '{"steer":"disabled"}'
             ;;
         status)
-            local rules=0 members=0
-            nft -a list chain inet "$STEER_TABLE" ingress_mark 2>/dev/null | grep -q "$STEER_COMMENT" && rules=1
-            members=$(nft list set inet "$STEER_TABLE" "$STEER_SET" 2>/dev/null | grep -o 'elements = ' | wc -l)
-            echo "{\"rules\":$rules,\"members\":$members,\"domains\":$(steer_collect_domains | wc -l)}"
+            local rules=0 members=0 packets=0 bytes=0 table=0
+            nft list table inet "$STEER_TABLE" >/dev/null 2>&1 && table=1
+            local line
+            line=$(nft -a list chain inet "$STEER_TABLE" ingress_mark 2>/dev/null | grep "$STEER_COMMENT" | head -n 1)
+            [ -n "$line" ] && rules=1
+            packets=$(printf '%s' "$line" | sed -n 's/.*counter packets \([0-9]*\) bytes \([0-9]*\).*/\1/p')
+            bytes=$(printf '%s' "$line" | sed -n 's/.*counter packets \([0-9]*\) bytes \([0-9]*\).*/\2/p')
+            members=$(nft list set inet "$STEER_TABLE" "$STEER_SET" 2>/dev/null \
+                | sed -n '/elements = {/,/}/p' \
+                | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | wc -l)
+            echo "{\"table\":$table,\"rules\":$rules,\"members\":${members:-0},\"packets\":${packets:-0},\"bytes\":${bytes:-0},\"domains\":$(steer_collect_domains | wc -l)}"
             ;;
         *) echo '{"error":"usage: steer_sync enable|disable|status"}' ;;
     esac
@@ -3472,7 +3500,7 @@ cmd_cron_install() {
         echo "*/30 * * * * /usr/bin/blockcheckw-helper health_tick >/dev/null 2>&1 # bcw-health" >> "$cron_file"
     fi
     if ! grep -q 'bcw-steer' "$cron_file" 2>/dev/null; then
-        echo "*/15 * * * * /usr/bin/blockcheckw-helper steer_sync enable >/dev/null 2>&1 # bcw-steer" >> "$cron_file"
+        echo "*/2 * * * * /usr/bin/blockcheckw-helper steer_sync enable >/dev/null 2>&1 # bcw-steer" >> "$cron_file"
     fi
     /etc/init.d/cron enable >/dev/null 2>&1 || true
     /etc/init.d/cron restart >/dev/null 2>&1 || true

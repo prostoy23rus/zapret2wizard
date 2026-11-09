@@ -1922,6 +1922,7 @@ return view.extend({
 			dashRow.appendChild(dashLeft);
 			dashRow.appendChild(dashRight);
 			scanPanel.appendChild(dashRow);
+			dashRight.appendChild(buildSteerCard());
 		}
 
 // -------- Вкладка «Эволюция»: запуск, история поколений, топ геномов --------
@@ -2191,6 +2192,62 @@ return view.extend({
 					evoPollTimer = setTimeout(refreshEvolution, 4000);
 				}
 			}).catch(function() {});
+		}
+
+		// -------- Steer: переключатель исключения и счётчик --------
+		function refreshSteerCard() {
+			fs.exec(HELPER_BIN, ['steer_sync', 'status']).then(function(res) {
+				var st = null;
+				try { st = JSON.parse(res.stdout); } catch (e) {}
+				var card = document.getElementById('bcw-steer-card');
+				var toggle = document.getElementById('bcw-steer-toggle');
+				var status = document.getElementById('bcw-steer-status');
+				if (!card || !st) return;
+				if (!st.table) { card.style.display = 'none'; return; }
+				card.style.display = '';
+				if (toggle) toggle.checked = !!st.rules;
+				if (status) {
+					if (st.rules) {
+						status.textContent = 'Исключено из туннеля: ' + (st.packets || 0) + ' пакетов · доменов ' +
+							(st.domains || 0) + ' · IP ' + (st.members || 0);
+						status.style.color = '#98c379';
+					} else {
+						status.textContent = 'Выключено: домены службы уходят в steer-туннель';
+						status.style.color = '#abb2bf';
+					}
+				}
+			}).catch(function() {});
+		}
+
+		function buildSteerCard() {
+			var toggle = E('input', { type: 'checkbox', id: 'bcw-steer-toggle', style: 'margin: 0 8px 0 0; vertical-align: middle;' });
+			var status = E('div', { id: 'bcw-steer-status', style: 'font-size: 12px; color: #abb2bf; margin-top: 8px;' }, 'Загрузка...');
+			var title = E('div', { style: 'font-weight:bold;font-size:13px;margin-bottom:6px;' }, '🛰 Steer-туннель');
+
+			toggle.addEventListener('change', function() {
+				var want = toggle.checked;
+				toggle.disabled = true;
+				status.textContent = want ? '⏳ Включаю исключение...' : '⏳ Снимаю исключение...';
+				fs.exec(HELPER_BIN, ['steer_sync', want ? 'enable' : 'disable']).then(function() {
+					toggle.disabled = false;
+					setTimeout(refreshSteerCard, 1000);
+					setTimeout(refreshSteerCard, 3500);
+					setTimeout(refreshSteerCard, 7000);
+					ui.addNotification(null, E('p', {}, want ? 'Домены службы исключены из steer' : 'Steer снова туннелирует домены службы'), 'info');
+				}).catch(function() { toggle.disabled = false; status.textContent = '✗ ошибка'; });
+			});
+
+			var card = E('div', { class: 'bcw-card', id: 'bcw-steer-card', style: 'padding: 14px; margin-top: 16px; display: none;' }, [
+				title,
+				E('label', { style: 'font-size: 12.5px; color: var(--bcw-text-title); display:flex; align-items:flex-start; gap:2px; cursor:pointer;' }, [
+					toggle,
+					E('span', {}, 'Не отправлять в туннель домены, которые обслуживает служба')
+				]),
+				status
+			]);
+			setTimeout(refreshSteerCard, 1200);
+			setInterval(refreshSteerCard, 15000);
+			return card;
 		}
 
 		function switchMainTab(id) {
