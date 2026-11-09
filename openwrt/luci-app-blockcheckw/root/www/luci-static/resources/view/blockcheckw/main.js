@@ -1119,9 +1119,19 @@ return view.extend({
 			var failed = (doctorInfo.checks || []).filter(function(c) { return c && !c.ok; });
 			if (!failed.length) { repairCard.style.display = 'none'; return; }
 
+			// Не все проверки одинаково критичны: «обход туннелей» — это замечание
+			// (трафик может идти через steer), а не «служба не готова».
+			var CRITICAL_CHECKS = ['nftables', 'наши движки', 'движок nfqws2', 'служба', 'nft-таблица', 'конфигурация', 'автозапуск'];
+			var criticalFailed = failed.filter(function(c) { return CRITICAL_CHECKS.indexOf(c.name) >= 0; });
+			var onlyWarnings = criticalFailed.length === 0;
+			var bypassFailed = failed.some(function(c) { return c.name === 'обход туннелей'; });
+			repairCard.style.background = onlyWarnings ? 'rgba(255, 183, 77, 0.10)' : 'rgba(229, 96, 92, 0.10)';
+			repairCard.style.borderColor = onlyWarnings ? '#ffb74d' : '#e5605c';
+
 			var engineFailed = failed.some(function(c) { return c.name === 'движок nfqws2'; });
 			var nodes = [
-				E('div', { style: 'font-weight: 600; color: #e5605c; font-size: 14px;' }, '⚠ Служба не готова к работе'),
+				E('div', { style: 'font-weight: 600; color: ' + (onlyWarnings ? '#ffb74d' : '#e5605c') + '; font-size: 14px;' },
+					onlyWarnings ? '⚠ Обход работает, но есть замечания' : '⚠ Служба не готова к работе'),
 				E('div', { style: 'font-size: 12.5px; color: var(--bcw-text-muted); margin-top: 4px;' },
 					failed.map(function(c) { return c.name + ': ' + c.detail; }).join(' · '))
 			];
@@ -1157,6 +1167,25 @@ return view.extend({
 						});
 					}
 				}, '🛠 Установить движок nfqws2'));
+			}
+
+			if (bypassFailed && !engineFailed) {
+				nodes.push(E('button', {
+					class: 'bcw-btn-launch',
+					style: 'margin-top: 10px; padding: 8px 16px; font-size: 13px;',
+					click: function() {
+						var self = this;
+						self.disabled = true;
+						self.textContent = '⏳ Переприменяю обход туннелей...';
+						fs.exec(HELPER_BIN, ['bypass', 'enable']).then(function() {
+							self.textContent = '✓ Готово, обновляю...';
+							setTimeout(function() { location.reload(); }, 1500);
+						}).catch(function() {
+							self.disabled = false;
+							self.textContent = '✗ Не удалось, смотрите /tmp/bcw_bypass.log';
+						});
+					}
+				}, '🔁 Переприменить обход туннелей'));
 			}
 
 			repairCard.innerHTML = '';

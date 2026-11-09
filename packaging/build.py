@@ -38,7 +38,8 @@ def collect_files(repo: str, engine: str, scanner: str):
         for name in files:
             src = os.path.join(base, name)
             rel = os.path.relpath(src, root).replace("\\", "/")
-            mode = 0o755 if name in ("blockcheckw-helper", "zapret2wizard", "uci2config") else 0o644
+            hotplug = "/etc/hotplug.d/" in rel
+            mode = 0o755 if (name in ("blockcheckw-helper", "zapret2wizard", "uci2config", "circular-builder.lua") or hotplug) else 0o644
             items.append((rel, src, mode, None))
 
     if engine:

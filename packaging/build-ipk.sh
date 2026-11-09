@@ -24,6 +24,7 @@ cp -f "$ENGINE" "$DATA/usr/bin/nfqws2"
 chmod 755 "$DATA/usr/bin/blockcheckw-helper" "$DATA/usr/bin/circular-builder.lua" \
           "$DATA/etc/init.d/zapret2wizard" "$DATA/usr/share/zapret2wizard/uci2config" \
           "$DATA/usr/bin/nfqws2"
+[ -f "$DATA/etc/hotplug.d/firewall/90-zapret2wizard-bypass" ] && chmod 755 "$DATA/etc/hotplug.d/firewall/90-zapret2wizard-bypass"
 [ -f "$DATA/usr/bin/blockcheckw" ] && chmod 755 "$DATA/usr/bin/blockcheckw"
 chmod 644 "$DATA/www/luci-static/resources/view/blockcheckw/main.js"
 

@@ -3088,12 +3088,29 @@ cmd_doctor() {
 
     # Исключение наших доменов из любых туннелей/policy-routing
     local bp_targets=$(bp_targets 2>/dev/null | wc -l)
-    local bp_rules=$(nft list ruleset 2>/dev/null | grep -c "bcw-bypass")
-    if [ "${bp_targets:-0}" -gt 0 ]; then
-        if [ "${bp_rules:-0}" -gt 0 ]; then
-            add_check "обход туннелей" 1 "включено: цепочек найдено $bp_targets" ""
+    local bp_covered=0
+    if [ "$bp_targets" -gt 0 ]; then
+        # Правила могли снести reload'ом firewall/туннеля — починим здесь же,
+        # быстрым режимом (без скачивания диапазонов и прогрева кэша).
+        BCW_BP_FAST=1 bp_sync >/dev/null 2>&1
+        if [ -f "$BP_STATE" ]; then
+            while read -r _bf _bt _bc; do
+                case "$_bf" in iptables|"") continue ;; esac
+                [ -n "$_bc" ] || continue
+                nft -a list chain "$_bf" "$_bt" "$_bc" 2>/dev/null | grep -q "bcw-bypass" && bp_covered=$((bp_covered + 1))
+            done < "$BP_STATE"
+        fi
+        local bperr=$(tail -n 1 "$BP_LOG" 2>/dev/null | tr -d '"' | tr '\n' ' ')
+        if [ "$bp_covered" -ge "$bp_targets" ]; then
+            add_check "обход туннелей" 1 "включено: цепочек $bp_covered из $bp_targets" ""
+        elif [ "$bp_covered" -gt 0 ]; then
+            local bpd="правила на $bp_covered из $bp_targets цепочек"
+            [ -n "$bperr" ] && bpd="$bpd: $bperr"
+            add_check "обход туннелей" 0 "$bpd" "Перепримените: blockcheckw-helper bypass enable"
         else
-            add_check "обход туннелей" 0 "правила не применяются" "Запустите: blockcheckw-helper bypass enable"
+            local bpd="правила не применяются"
+            [ -n "$bperr" ] && bpd="$bpd: $bperr"
+            add_check "обход туннелей" 0 "$bpd" "Запустите: blockcheckw-helper bypass enable"
         fi
     else
         add_check "обход туннелей" 1 "туннели не обнаружены" ""
@@ -3728,12 +3745,16 @@ bp_sync() {
             if ! bp_rule_line "$fam" "$tbl" "$ch" | grep -q "$BP_COMMENT"; then
                 # iifname ненадёжен: на ingress это физический порт, на prerouting
                 # имя может отличаться от br-lan. Матчим только по адресату.
-                nft insert rule "$fam" "$tbl" "$ch" \
-                    ip daddr "@$BP_SET" counter return comment "$BP_COMMENT" 2>/dev/null || true
+                if ! nft insert rule "$fam" "$tbl" "$ch" \
+                    ip daddr "@$BP_SET" counter return comment "$BP_COMMENT" 2>>"$BP_LOG"; then
+                    echo "$(date) insert failed: $fam $tbl $ch (ip daddr)" >> "$BP_LOG"
+                fi
             fi
             if ! nft -a list chain "$fam" "$tbl" "$ch" 2>/dev/null | grep -q "$BP_COMMENT-r"; then
-                nft insert rule "$fam" "$tbl" "$ch" \
-                    ip daddr "@$BP_SET_R" counter return comment "$BP_COMMENT-r" 2>/dev/null || true
+                if ! nft insert rule "$fam" "$tbl" "$ch" \
+                    ip daddr "@$BP_SET_R" counter return comment "$BP_COMMENT-r" 2>>"$BP_LOG"; then
+                    echo "$(date) insert failed: $fam $tbl $ch (ranges)" >> "$BP_LOG"
+                fi
             fi
             echo "$fam $tbl $ch" >> "$BP_STATE.new"
         done
@@ -3750,20 +3771,24 @@ bp_sync() {
         echo "iptables mangle PREROUTING" >> "$BP_STATE"
     fi
 
-    if [ ! -s "$BP_CACHE" ] || [ -n "$(find "$BP_CACHE" -mmin +$((BP_CACHE_TTL / 60)) 2>/dev/null)" ]; then
-        bp_warm_detached
-    fi
-    if [ ! -s "$BP_RANGES" ] || [ -n "$(find "$BP_RANGES" -mmin +1440 2>/dev/null)" ]; then
-        # не пытаемся качать чаще раза в час, даже если сеть лежит
-        local now=$(date +%s)
-        local last=$(cat /tmp/bcw_ranges_try 2>/dev/null || echo 0)
-        if [ $((now - last)) -gt 3600 ]; then
-            echo "$now" > /tmp/bcw_ranges_try
-            bp_load_ranges
+    # BCW_BP_FAST=1 — только правила, без сети: этим пользуется doctor,
+    # чтобы самовосстановиться и не подвиснуть на скачивании диапазонов.
+    if [ "$BCW_BP_FAST" != "1" ]; then
+        if [ ! -s "$BP_CACHE" ] || [ -n "$(find "$BP_CACHE" -mmin +$((BP_CACHE_TTL / 60)) 2>/dev/null)" ]; then
+            bp_warm_detached
         fi
+        if [ ! -s "$BP_RANGES" ] || [ -n "$(find "$BP_RANGES" -mmin +1440 2>/dev/null)" ]; then
+            # не пытаемся качать чаще раза в час, даже если сеть лежит
+            local now=$(date +%s)
+            local last=$(cat /tmp/bcw_ranges_try 2>/dev/null || echo 0)
+            if [ $((now - last)) -gt 3600 ]; then
+                echo "$now" > /tmp/bcw_ranges_try
+                bp_load_ranges
+            fi
+        fi
+        bp_apply_ips
+        bp_apply_ranges
     fi
-    bp_apply_ips
-    bp_apply_ranges
 }
 
 bp_warm_detached() {
@@ -3863,6 +3888,10 @@ cmd_bypass() {
         enable|sync)
             bp_sync
             echo "{\"bypass\":\"active\",\"targets\":$(bp_targets | wc -l)}"
+            # Сторож мог умереть (reboot, kill): без него правила не вернутся
+            # после reload firewall/туннеля. Поднимаем, если не запущен.
+            [ -f /var/run/bcw_bypass.run ] || touch /var/run/bcw_bypass.run 2>/dev/null
+            ( /usr/bin/blockcheckw-helper bypass_watch >/dev/null 2>&1 & )
             start-stop-daemon -S -b -x /bin/sh -- -c 'sleep 6; /usr/bin/blockcheckw-helper bypass_sync enable' >/dev/null 2>&1 || true
             ;;
         disable|off)

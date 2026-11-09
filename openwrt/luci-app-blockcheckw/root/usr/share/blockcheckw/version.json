@@ -1,12 +1,12 @@
 {
-  "version": "0.18.71",
+  "version": "0.18.72",
   "release_date": "2026-11-09",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "Circular: nld=2 (состояние на домен 2-го уровня), retrans=3, payload после оркестратора, до 4 техник",
-    "Корпус подбора: seqovl_pattern (TLS-заголовок/fake_default_tls), маркеры позиций, ip_id, hostfake+tcp_md5+disorder_after",
-    "На RouteRich расширенный корпус дал 53 стратегии вместо 46",
-    "Skills: routerich-guides (zapret2-finder, ZeroBlock, soft-матрицы, совместимость по меткам), zapret2-desync дополнен circular"
+    "Баннер: «Служба не готова» только по критичным проверкам, обход туннелей — жёлтое замечание с кнопкой переприменения",
+    "Doctor сам восстанавливает правила исключения доменов из туннелей и показывает покрытие «цепочек N из M»",
+    "Правила обхода туннелей переприменяются после reload firewall (hotplug) и при каждом bypass enable",
+    "Сбой вставки nft-правила больше не глотается: причина пишется в /tmp/bcw_bypass.log"
   ]
 }
