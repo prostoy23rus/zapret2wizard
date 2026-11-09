@@ -1492,13 +1492,12 @@ return view.extend({
 		mainLayout.appendChild(targetSectionCard);
 
 		// Circular Checkbox Setting
+		var CIRC_HINT_ON = '🔄 Разрешено: служба сама проверит стабильность (3 прогона). Связку соберёт только если одиночная стратегия сбоит.';
+		var CIRC_HINT_OFF = '⚡ Выключено: применяется одна лучшая стратегия, без резервной ротации.';
 		var paramCircularHintEl = E('div', {
 			class: 'bcw-param-hint',
 			style: 'margin-top: 4px; font-size: 12px; color: #abb2bf;'
-		}, doCircular
-			? '🔄 Circular: объединяет 2-3 независимые техники (Fake, Multisplit, Multidisorder) в ротацию. При сбое роутер на лету переключится на резервную.'
-			: '⚡ Одиночная: применяется только одна лучшая техника обхода без резервной ротации.'
-		);
+		}, doCircular ? CIRC_HINT_ON : CIRC_HINT_OFF);
 
 		var chkCircular = E('input', {
 			type: 'checkbox',
@@ -1508,9 +1507,7 @@ return view.extend({
 			change: function(e) {
 				doCircular = e.target.checked;
 				if (paramCircularHintEl) {
-					paramCircularHintEl.textContent = doCircular
-						? '🔄 Circular: объединяет 2-3 независимые техники (Fake, Multisplit, Multidisorder) в ротацию. При сбое роутер на лету переключится на резервную.'
-						: '⚡ Одиночная: применяется только одна лучшая техника обхода без резервной ротации.';
+					paramCircularHintEl.textContent = doCircular ? CIRC_HINT_ON : CIRC_HINT_OFF;
 				}
 			}
 		});
@@ -1525,7 +1522,7 @@ return view.extend({
 			}, [
 				chkCircular,
 				E('span', { class: 'bcw-chk-box' }),
-				E('span', { style: 'font-weight: 600; font-size: 13.5px; color: var(--bcw-text-title);' }, 'Собрать отказоустойчивую Circular-связку (авто-ротация при сбое DPI)')
+				E('span', { style: 'font-weight: 600; font-size: 13.5px; color: var(--bcw-text-title);' }, 'Разрешить Circular-связку (служба решит, нужна ли)')
 			]),
 			paramCircularHintEl
 		]);
@@ -3082,6 +3079,10 @@ return view.extend({
 			}
 
 			var httpCode = (opts.applyResult && opts.applyResult.http_code) || opts.httpCode || null;
+			var circUsed = opts.circularUsed === true;
+			var modeText = circUsed
+				? '🔄 Circular, ' + (opts.circularMembers || 0) + ' техн. / ' + (opts.stabilityCircular || '')
+				: '⚡ Одиночная' + (opts.stabilitySingle ? ' / ' + opts.stabilitySingle : '');
 			var codeNum = parseInt(httpCode || '0', 10) || 0;
 			// «000» — ответа нет: успехом это считать нельзя.
 			var netOk = codeNum > 0;
@@ -3115,6 +3116,10 @@ return view.extend({
 					E('div', { style: 'display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px;' }, [
 						E('span', { style: 'color: #abb2bf;' }, '⚙️ Статус службы:'),
 						E('span', { style: 'color: #98c379; font-weight: bold;' }, '✓ Zapret2 перезапущен и активен')
+					]),
+					E('div', { style: 'display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px;' }, [
+						E('span', { style: 'color: #abb2bf;' }, '🧩 Режим:'),
+						E('span', { style: 'color: #61afef; font-weight: bold;' }, modeText)
 					]),
 					netOk ? E('div', { style: 'display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px;' }, [
 						E('span', { style: 'color: #abb2bf;' }, '🌐 Проверка сети:'),
@@ -3359,7 +3364,11 @@ return view.extend({
 									section: (st.apply_result && st.apply_result.section) || null,
 									applyResult: st.apply_result,
 									connected: st.apply_result ? st.apply_result.connected : true,
-									httpCode: st.apply_result ? st.apply_result.http_code : null
+									httpCode: st.apply_result ? st.apply_result.http_code : null,
+									circularUsed: st.circular_used === true || st.circular_used === 1,
+									circularMembers: st.circular_members,
+									stabilitySingle: st.stability_single,
+									stabilityCircular: st.stability_circular
 								});
 							} else if (hasStrategies) {
 								showManualStrategiesFoundModal(stratsCount, {

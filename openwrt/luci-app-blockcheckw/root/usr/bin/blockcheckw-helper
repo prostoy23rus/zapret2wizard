@@ -1467,23 +1467,22 @@ EOF
 )
         fi
 
-        # Build circular strategy if requested
-        if [ "$do_circular" = "1" ] && [ "$found_count" -gt 0 ]; then
-            write_status "running" 88 "Сборка ортогональной Circular-стратегии..."
-            lua "$CIRCULAR_BUILDER" "$OUTPUT_SCAN" 3 20 4 loop tls_client_hello "$target" > "$OUTPUT_CIRCULAR" 2>> "$LOG_FILE"
-        fi
-
+        # Circular — не галочка ради галочки. Связку собираем и применяем
+        # только тогда, когда служба доказала серией проверок, что одиночная
+        # стратегия не держит нагрузку. Решение принимается здесь, в службе.
         local apply_info=""
         local apply_ok="0"
         local apply_res=""
         local apply_restored="0"
+        local circular_used="0"
+        local circular_members="0"
+        local circular_reason="circular выключен"
+        local stab_single=""
+        local stab_circ=""
+        local single_ok=0 single_total=0
 
-        # Авто-применение. Кандидатов берём из JSON-отчёта (поле "args").
-        # Раньше здесь стоял grep '^--' по файлу, но в JSON строки начинаются
-        # с "args": "...", поэтому список кандидатов ВСЕГДА был пуст: сканер
-        # находил десятки стратегий, а в интерфейс уходило «ничего не найдено».
         if [ "$auto_apply" = "1" ] && [ "$found_count" -gt 0 ]; then
-            write_status "running" 95 "Автоматическое применение стратегии в Zapret2..."
+            write_status "running" 90 "Применяю лучшую стратегию..."
 
             local candidates="/tmp/blockcheckw_candidates.$$"
             lua - "$OUTPUT_SCAN" "$OUTPUT_VANILLA" > "$candidates" << 'EOF' 2>/dev/null
@@ -1493,8 +1492,6 @@ local function add(a)
     if type(a) ~= "string" or a == "" then return false end
     a = a:gsub("^%s+", ""):gsub("%s+$", "")
     if a:sub(1, 2) ~= "--" or seen[a] then return false end
-    -- Три варианта одного приёма не добавят шансов, а проверка одного
-    -- кандидата стоит около минуты: берём разные семейства техник.
     local fam = a:match("lua%-desync=([%w_]+)") or "other"
     if fams[fam] then return false end
     fams[fam] = true
@@ -1523,7 +1520,7 @@ if #out < 3 then
 end
 for _, a in ipairs(out) do print(a) end
 EOF
-            local cand tried=0
+            local cand tried=0 best_single=""
             local cfg_pkg=$(_strategy_pkg)
             local cfg_backup="/tmp/bcw_cfg_before_apply.$$"
             cp -f "/etc/config/$cfg_pkg" "$cfg_backup" 2>/dev/null || true
@@ -1531,6 +1528,7 @@ EOF
             while [ "$tried" -lt 3 ] && IFS= read -r cand; do
                 [ -n "$cand" ] || continue
                 tried=$((tried + 1))
+                [ -z "$best_single" ] && best_single="$cand"
                 echo "[blockcheckw-helper] Авто-применение: кандидат $tried — $cand" >> "$LOG_FILE"
                 apply_res=$(cmd_apply --target "$target" --script "$cand" 2>/dev/null)
                 if printf '%s' "$apply_res" | grep -q '"all_ok":true'; then
@@ -1540,12 +1538,81 @@ EOF
             done < "$candidates"
             rm -f "$candidates"
 
+            # Серия независимых проверок: один удачный запрос — ещё не стабильность.
             if [ "$apply_ok" = "1" ]; then
-                apply_info=",\"auto_applied\":true,\"tried_candidates\":$tried"
+                local _s=$(cmd_stability "$target" 3 2>/dev/null)
+                single_ok=$(printf '%s' "$_s" | grep -o '"ok":[0-9]*' | cut -d: -f2)
+                single_total=$(printf '%s' "$_s" | grep -o '"total":[0-9]*' | cut -d: -f2)
+                [ -n "$single_ok" ] || single_ok=0
+                [ -n "$single_total" ] || single_total=3
+                stab_single="$single_ok/$single_total"
+            fi
+
+            # Решение службы: когда Circular реально нужен, а когда это лишний риск.
+            local need_circ="0"
+            case "$do_circular" in
+                0) circular_reason="circular выключен" ;;
+                force) need_circ=1; circular_reason="включён принудительно" ;;
+                *)
+                    if [ "$apply_ok" != "1" ]; then
+                        need_circ=1; circular_reason="одиночная не прошла проверку"
+                    elif [ "$single_ok" -lt "$single_total" ]; then
+                        need_circ=1; circular_reason="одиночная нестабильна ($stab_single)"
+                    else
+                        circular_reason="одиночная стабильна ($stab_single) — связка не нужна"
+                    fi
+                    ;;
+            esac
+
+            if [ "$need_circ" = "1" ]; then
+                write_status "running" 93 "Сборка Circular-связки: $circular_reason"
+                lua "$CIRCULAR_BUILDER" "$OUTPUT_SCAN" 2 15 3 loop tls_client_hello "$target" > "$OUTPUT_CIRCULAR" 2>> "$LOG_FILE"
+                local circ_text=$(tr '\n' ' ' < "$OUTPUT_CIRCULAR" 2>/dev/null)
+                circular_members=$(printf '%s' "$circ_text" | grep -o 'strategy=[0-9]*' | sort -u | wc -l)
+                circular_members=$(printf '%s' "$circular_members" | tr -d ' ')
+                [ -n "$circular_members" ] || circular_members=0
+                if [ "$circular_members" -ge 2 ]; then
+                    echo "[blockcheckw-helper] Circular: $circular_members техники ($circular_reason)" >> "$LOG_FILE"
+                    local circ_res=$(cmd_apply --target "$target" --script "$circ_text" 2>/dev/null)
+                    if printf '%s' "$circ_res" | grep -q '"all_ok":true'; then
+                        local _c=$(cmd_stability "$target" 3 2>/dev/null)
+                        local circ_ok=$(printf '%s' "$_c" | grep -o '"ok":[0-9]*' | cut -d: -f2)
+                        local circ_total=$(printf '%s' "$_c" | grep -o '"total":[0-9]*' | cut -d: -f2)
+                        [ -n "$circ_ok" ] || circ_ok=0
+                        [ -n "$circ_total" ] || circ_total=3
+                        stab_circ="$circ_ok/$circ_total"
+                        if [ "$circ_ok" -ge "$single_ok" ]; then
+                            circular_used="1"
+                            apply_ok="1"
+                            apply_res="$circ_res"
+                            circular_reason="связка $circular_members техник: $stab_circ (одиночная $stab_single)"
+                        else
+                            circular_reason="связка хуже ($stab_circ), оставлена одиночная ($stab_single)"
+                        fi
+                    else
+                        circular_reason="связка не прошла проверку"
+                    fi
+                else
+                    circular_reason="меньше двух независимых техник — связка невозможна"
+                fi
+            fi
+
+            # Попытка связки затирает конфиг: если связку не оставили,
+            # возвращаем проверенную одиночную стратегию.
+            if [ "$need_circ" = "1" ] && [ "$circular_used" != "1" ] && [ -n "$best_single" ]; then
+                local back=$(cmd_apply --target "$target" --script "$best_single" 2>/dev/null)
+                if printf '%s' "$back" | grep -q '"all_ok":true'; then
+                    apply_ok="1"
+                    apply_res="$back"
+                fi
+            fi
+
+            if [ "$apply_ok" = "1" ]; then
+                apply_info=",\"auto_applied\":true,\"tried_candidates\":$tried,\"circular_used\":$circular_used,\"circular_members\":$circular_members"
+                [ -n "$stab_single" ] && apply_info="$apply_info,\"stability_single\":\"$stab_single\""
+                [ -n "$stab_circ" ] && apply_info="$apply_info,\"stability_circular\":\"$stab_circ\""
+                apply_info="$apply_info,\"circular_reason\":\"$circular_reason\""
             elif [ "$tried" -gt 0 ]; then
-                # Ни один кандидат не подтвердил трафик. Возвращаем конфиг,
-                # который был до подбора: непроверенная стратегия хуже прежней,
-                # возможно рабочей.
                 if [ -s "$cfg_backup" ]; then
                     cp -f "$cfg_backup" "/etc/config/$cfg_pkg"
                     rm -f /tmp/blockcheckw_apply_result.json
@@ -1626,13 +1693,24 @@ cmd_status() {
     if is_scanner_running; then
         is_running=true
     fi
+    # Живой лок подбора важнее эвристики «процесс не найден»: в фазе
+    # применения сканер — это shell, а не бинарь blockcheckw, и сторож
+    # успевал объявить «done 100%», пока подбор ещё работал.
+    local lock_alive=0
+    if [ -d /var/run/bcw_scan.lock ]; then
+        local _lp=$(cat /var/run/bcw_scan.lock/pid 2>/dev/null)
+        if [ -n "$_lp" ] && kill -0 "$_lp" 2>/dev/null; then
+            lock_alive=1
+        fi
+    fi
 
-    lua - "$STATUS_FILE" "$LOG_FILE" "$OUTPUT_SCAN" "$is_running" << 'EOF'
+    lua - "$STATUS_FILE" "$LOG_FILE" "$OUTPUT_SCAN" "$is_running" "$lock_alive" << 'EOF'
 local json = require("luci.jsonc")
 local status_file = arg[1]
 local log_file = arg[2]
 local scan_file = arg[3]
 local is_running = (arg[4] == "true")
+local lock_alive = (arg[5] == "1")
 
 local st = {}
 local sf = io.open(status_file, "r")
@@ -1649,7 +1727,7 @@ if not st.status then
 end
 
 -- Process death watchdog: only trigger if really not running and status is stuck in running
-if not is_running and st.status == "running" then
+if not is_running and not lock_alive and st.status == "running" then
     if (st.strategies and #st.strategies > 0) or st.auto_applied then
         st.status = "done"
         st.percent = 100
@@ -2472,6 +2550,25 @@ cmd_test() {
     out=$(cmd_test_impl "$@")
     printf '%s\n' "$out"
     record_test_metrics "$out" "${1:-preset_youtube}"
+}
+
+# Серия независимых проверок одного и того же канала. Один удачный curl ещё
+# не значит «стабильно»: DPI может пропускать через раз. Именно по этой
+# серии служба решает, нужна ли Circular-связка.
+# Возвращает {"ok":N,"total":M}.
+cmd_stability() {
+    local target="${1:-preset_youtube}"
+    local rounds="${2:-3}"
+    local i=1 ok=0 total=0
+    while [ "$i" -le "$rounds" ]; do
+        local one=$(cmd_test "$target" "" 2>/dev/null | tail -n 1)
+        total=$((total + 1))
+        if printf '%s' "$one" | grep -q '"all_ok":true'; then
+            ok=$((ok + 1))
+        fi
+        i=$((i + 1))
+    done
+    printf '{"ok":%d,"total":%d,"target":"%s"}\n' "$ok" "$total" "$target"
 }
 
 # Отдаёт метрики последних проверок и журнал событий одним JSON.

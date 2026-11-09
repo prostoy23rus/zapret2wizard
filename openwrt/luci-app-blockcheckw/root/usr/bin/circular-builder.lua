@@ -104,105 +104,53 @@ local function parse_strategies(file_path)
 end
 
 local function select_orthogonal(strategies, max_count, target)
-    max_count = max_count or 4
+    max_count = max_count or 3
     local is_discord = (target and target:lower():find("discord") ~= nil)
-
-    local filtered = {}
-    for _, s in ipairs(strategies) do
-        -- Strictly exclude wssize for Discord targets to prevent voice/websocket stalling
-        if not (is_discord and s:lower():find("wssize")) then
-            table.insert(filtered, s)
-        end
-    end
-
-    local buckets = {}
-    for _, s in ipairs(filtered) do
-        local fam = classify(s)
-        buckets[fam] = buckets[fam] or {}
-        table.insert(buckets[fam], s)
-    end
-
     local selected = {}
-    local seen_strats = {}
     local used_fams = {}
 
-    local function try_add(fams_to_try)
-        for _, fam in ipairs(fams_to_try) do
-            local b = buckets[fam]
-            if b then
-                for _, cand in ipairs(b) do
-                    if not seen_strats[cand] then
-                        seen_strats[cand] = true
-                        used_fams[fam] = true
-                        table.insert(selected, cand)
-                        return true
-                    end
-                end
-            end
+    -- Порядок берём из отчёта сканера: он уже отранжирован по успеху.
+    -- По одной технике на семейство — три варианта одного приёма не
+    -- добавят шансов, когда DPI меняет правило.
+    for _, s in ipairs(strategies) do
+        local low = s:lower()
+        local usable = true
+        if not is_discord and (low:find("udplen") or low:find("stun") or low:find("discord")) then
+            usable = false
         end
-        return false
-    end
-
-    -- Slot 1: Hostfake / Whitelist vector (gosuslugi, t2, vk, google)
-    try_add({ "hostfake" })
-
-    -- Slot 2: TCB Desync / Geneva 8+4 / Seqovl vector
-    try_add({ "geneva", "seqovl" })
-
-    -- Slot 3: Packet Disordering vector
-    try_add({ "multidisorder" })
-
-    -- Slot 4: Routerich TCP MD5 / Auto-TTL / Fake / OOB / Syndata / Clean Split vector
-    local slot4_fams = { "tcp_md5", "autottl", "fake", "oob", "syndata", "multisplit" }
-    if not is_discord then table.insert(slot4_fams, "wssize") end
-    try_add(slot4_fams)
-
-    -- Fallback pass: Pick from unused families
-    local all_fams = { "tcp_md5", "autottl", "hostfake", "geneva", "seqovl", "multidisorder", "fake", "oob", "syndata", "multisplit" }
-    if not is_discord then table.insert(all_fams, "wssize") end
-    table.insert(all_fams, "other")
-
-    while #selected < max_count do
-        local added = false
-        for _, fam in ipairs(all_fams) do
-            if not used_fams[fam] and buckets[fam] then
-                for _, cand in ipairs(buckets[fam]) do
-                    if not seen_strats[cand] then
-                        seen_strats[cand] = true
-                        used_fams[fam] = true
-                        table.insert(selected, cand)
-                        added = true
-                        if #selected >= max_count then break end
-                    end
-                end
-            end
-            if #selected >= max_count then break end
+        if is_discord and low:find("wssize") then
+            usable = false
         end
-        if not added then break end
-    end
-
-    -- Second fallback pass: Fill with any remaining unique strategies
-    if #selected < max_count then
-        for _, cand in ipairs(filtered) do
-            if not seen_strats[cand] then
-                seen_strats[cand] = true
-                table.insert(selected, cand)
+        if usable then
+            local fam = classify(s)
+            if not used_fams[fam] then
+                used_fams[fam] = true
+                table.insert(selected, s)
                 if #selected >= max_count then break end
             end
         end
     end
-
     return selected
 end
 
+local function strip_tags(token)
+    token = token:gsub(":strategy=[0-9]+", "")
+    token = token:gsub(":final", "")
+    return token
+end
+
 local function build_circular(strategies, fails, maxtime, is_final, payload)
-    fails = fails or 3
-    maxtime = maxtime or 20
+    fails = fails or 2
+    maxtime = maxtime or 15
     payload = payload or "tls_client_hello"
     local lines = {
+        -- Отсекаем хвост потока: детектор успеха живёт до s32768 + 1 пакет.
         "--out-range=-s34228",
         "--payload=" .. payload,
-        string.format("--in-range=-s5556 --lua-desync=circular:fails=%d:maxtime=%d", fails, maxtime),
+        -- Входящие нужны только самому circular (RST/редирект и inseq).
+        -- time=15 и retrans=2 — ротация за пару секунд, а не за минуту;
+        -- reset обрывает ожидание ретрансмиссий, чтобы сбой DPI не подвешивал страницу.
+        string.format("--in-range=-s5556 --lua-desync=circular:fails=%d:time=%d:retrans=2:reset", fails, maxtime),
         "--in-range=x"
     }
 
@@ -212,13 +160,13 @@ local function build_circular(strategies, fails, maxtime, is_final, payload)
             tag = tag .. ":final"
         end
 
-        -- Handle multiple desync actions in one strategy
+        -- Одна стратегия может состоять из нескольких desync-действий.
         if strat:find("%-%-lua%-desync=") then
             for token in strat:gmatch("%-%-lua%-desync=([^%s]+)") do
-                table.insert(lines, "--lua-desync=" .. token .. tag)
+                table.insert(lines, "--lua-desync=" .. strip_tags(token) .. tag)
             end
         else
-            table.insert(lines, "--lua-desync=" .. strat .. tag)
+            table.insert(lines, "--lua-desync=" .. strip_tags(strat) .. tag)
         end
     end
 
@@ -227,9 +175,9 @@ end
 
 -- CLI Runner
 local input_file = arg[1]
-local fails = tonumber(arg[2]) or 3
-local maxtime = tonumber(arg[3]) or 20
-local max_count = tonumber(arg[4]) or 4
+local fails = tonumber(arg[2]) or 2
+local maxtime = tonumber(arg[3]) or 15
+local max_count = tonumber(arg[4]) or 3
 local is_final = (arg[5] == "final")
 local payload = arg[6] or "tls_client_hello"
 local target = arg[7] or ""
