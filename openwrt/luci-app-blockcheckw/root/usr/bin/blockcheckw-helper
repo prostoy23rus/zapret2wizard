@@ -1503,7 +1503,7 @@ EOF
                     final_msg="$final_msg (применена, но полный тест не пройден)"
                 fi
             fi
-            write_status "done" 100 "$final_msg" ",\"strategies\":$strats_json$apply_info"
+            write_status "done" 100 "$final_msg" ",\"strategies\":$strats_json,\"scan_found\":$found_count,\"tried\":$attempt$apply_info"
             echo "[blockcheckw-helper] Finished successfully. Found $found_count working strategies." >> "$LOG_FILE"
             history_add "scan_done" "$(metric_target_key "$target")" "Найдено рабочих стратегий: $found_count"
             [ "$auto_apply" = "1" ] && history_add "apply" "$(metric_target_key "$target")" "Стратегия применена в Zapret2"
@@ -1899,14 +1899,32 @@ cmd_apply() {
 
     # Restart DPI service
     restart_dpi_service
-    sleep 1
+
+    # Ждём, пока служба реально поднимется: иначе тест всегда падает
+    local _w=0
+    while [ "$_w" -lt 25 ]; do
+        if _svc_running && nft list table inet zapret2wizard >/dev/null 2>&1; then
+            break
+        fi
+        sleep 1
+        _w=$((_w + 1))
+    done
+    sleep 2
     local zapret_running=$(get_dpi_service_status)
 
     # Test connectivity with curl (Multi-Domain and Data Flow validation)
     local curl_status=0
     local http_code="200"
     local all_ok_val=false
-    local multi_res=$(cmd_test "$target" "$test_url" 2>/dev/null)
+    local multi_res=""
+    local _try
+    for _try in 1 2 3; do
+        multi_res=$(cmd_test "$target" "$test_url" 2>/dev/null)
+        if echo "$multi_res" | grep -q '"all_ok":true'; then
+            break
+        fi
+        sleep 3
+    done
     if [ -n "$multi_res" ]; then
         if echo "$multi_res" | grep -q '"accessible":true'; then
             curl_status=1
