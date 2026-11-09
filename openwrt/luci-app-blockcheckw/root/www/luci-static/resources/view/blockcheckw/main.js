@@ -1177,11 +1177,29 @@ return view.extend({
 					click: function() {
 						var self = this;
 						self.disabled = true;
-						self.textContent = '⏳ Ставлю модули ядра...';
-						fs.exec(HELPER_BIN, ['kmods_install']).then(function(res) {
-							var out = null; try { out = JSON.parse(res.stdout); } catch (e) {}
-							if (out && out.ok) { self.textContent = '✓ Модули загружены, обновляю...'; setTimeout(function() { location.reload(); }, 1500); }
-							else { self.disabled = false; self.textContent = '✗ ' + ((out && out.error) || 'не удалось — поставьте kmod вручную'); }
+						self.textContent = '⏳ Ставлю модули ядра... (до 2 минут)';
+						fs.exec(HELPER_BIN, ['kmods_install_bg']).then(function() {
+							var tries = 0;
+							function poll() {
+								tries++;
+								fs.exec(HELPER_BIN, ['kmods_status']).then(function(r) {
+									var st = null; try { st = JSON.parse(r.stdout); } catch (e) {}
+									if (st && !st.running) {
+										if (st.nfnetlink_queue && st.nft_queue) {
+											self.textContent = '✓ Модули загружены, обновляю...';
+											setTimeout(function() { location.reload(); }, 1200);
+										} else {
+											self.disabled = false;
+											self.textContent = '✗ ' + (st.nft_queue ? 'nfnetlink_queue' : 'nft_queue') + ' не установлен — см. /tmp/bcw_kmods.log';
+										}
+										return;
+									}
+									if (tries > 40) { self.disabled = false; self.textContent = '✗ Долго — проверьте /tmp/bcw_kmods.log'; return; }
+									self.textContent = '⏳ Ставлю модули ядра... (' + (tries * 3) + ' с)';
+									setTimeout(poll, 3000);
+								}).catch(function() { setTimeout(poll, 3000); });
+							}
+							setTimeout(poll, 2000);
 						}).catch(function() { self.disabled = false; self.textContent = '✗ Ошибка вызова helper'; });
 					}
 				}, '🛠 Установить модули nfqueue'));

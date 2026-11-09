@@ -64,7 +64,7 @@ apply_nft_firewall() {
 	# Atomically replace or clean old table
 	nft delete table inet zapret2wizard 2>/dev/null || true
 
-	nft -f - <<EOF
+	nft -f - 2>/tmp/bcw_nft_apply.log <<EOF
 table inet zapret2wizard {
 	set zapret {
 		type ipv4_addr
@@ -159,6 +159,11 @@ table inet zapret2wizard {
 	}
 }
 EOF
+	local nft_rc=$?
+	if [ "$nft_rc" -ne 0 ] || ! nft list table inet zapret2wizard >/dev/null 2>&1; then
+		logger -t zapret2wizard "nft: правила не применены: $(tail -n 2 /tmp/bcw_nft_apply.log 2>/dev/null | tr '\n' ' ')"
+		return 1
+	fi
 
 	# OpenWrt Flow Offloading exemptions
 	local fo=$(uci -q get firewall.@defaults[0].flow_offloading)
@@ -367,8 +372,12 @@ start_service() {
 		. "$cfg"
 	fi
 
-	# Apply firewall rules
-	apply_nft_firewall
+	# Apply firewall rules. Если таблица не создалась (чаще всего нет модуля
+	# nft_queue) — движки не поднимаем: «работает, но правил нет» хуже отказа.
+	if ! apply_nft_firewall; then
+		logger -t zapret2wizard "служба не запущена: nft-таблица не создана (проверьте модуль nft_queue и /tmp/bcw_nft_apply.log)"
+		return 1
+	fi
 	# Снимок таблицы: по нему восстанавливаем правила, не поднимая procd
 	nft list table inet zapret2wizard > /etc/zapret2wizard/fw.nft 2>/dev/null || true
 

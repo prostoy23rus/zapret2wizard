@@ -1,11 +1,13 @@
 {
-  "version": "0.18.76",
+  "version": "0.18.77",
   "release_date": "2026-11-09",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "Хотфикс к 0.18.75: postinst (.ipk/.apk) больше не вызывает менеджер пакетов под его же блокировкой",
-    "kmods_modprobe — только modprobe, для postinst; kmods_install — с установкой kmod, для кнопки/установщика",
-    "Как и раньше: doctor проверяет nfnetlink_queue и nft_queue, ошибка подбора точная"
+    "Служба не запускается «вхолостую»: если nft-таблица не создалась, движки не поднимаются, причина в логе",
+    "Ошибка nft при старте теперь видна: /tmp/bcw_nft_apply.log + запись в syslog",
+    "Установка kmod не блокирует интерфейс: kmods_install_bg + kmods_status, прогресс и таймаут",
+    "Подсказки модулей учитывают apk (25.12) или opkg",
+    "apk: повтор установки после update, если первый add не удался"
   ]
 }
