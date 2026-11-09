@@ -1193,6 +1193,12 @@ return view.extend({
 			var key = rowHostlistKey(ch.id);
 			var parts = [];
 			if (key && hlCounts[key] !== undefined) parts.push(hlCounts[key] + ' доменов');
+			var svc = (zapretInfo && zapretInfo.services) ? zapretInfo.services[rowKeyOf(ch.id)] : null;
+			if (svc && svc.script && String(svc.script).trim()) {
+				var sc = String(svc.script).replace(/\s+/g, ' ').trim();
+				if (sc.length > 46) sc = sc.slice(0, 46) + '…';
+				parts.push(sc);
+			}
 			if (ch.id === 'domains') parts.push('свой домен или список');
 			if (ch.id === 'test_strategy') parts.push('ручная проверка строки десинка');
 			if (!parts.length) parts.push('—');
@@ -1248,6 +1254,8 @@ return view.extend({
 			}, [E('span', { class: 'bcw-switch-dot' })]);
 		}
 
+		function renderTargetTiles() {
+			tilesGridEl.innerHTML = '';
 		quickChipsList.forEach(function(ch) {
 			var chip = rowChipOf(ch);
 			var children = [
@@ -1267,6 +1275,8 @@ return view.extend({
 			chipButtonsMap[ch.id] = btn;
 			tilesGridEl.appendChild(btn);
 		});
+		}
+		renderTargetTiles();
 
 		var customDomainInput = E('input', {
 			type: 'text',
@@ -1413,7 +1423,9 @@ return view.extend({
 			modeHintGridEl
 		]);
 
+		var compactSummaryEl = E('div', { id: 'bcw-compact-summary', style: 'font-size: 12px; color: var(--bcw-text-muted); padding: 0 0 10px;' }, 'Загрузка…');
 		var targetSectionCard = E('div', { class: 'bcw-card' }, [
+			compactSummaryEl,
 			tilesGridEl,
 			customDomainRow,
 			testStrategyRow,
@@ -1759,8 +1771,9 @@ return view.extend({
 		]);
 
 		// Active Strategy in Zapret2 (Placed right below scanner controls/progress)
-		mainLayout.appendChild(activeStratCard);
-		mainLayout.appendChild(resultsCard);
+		// старые отдельные карточки результатов больше не нужны: всё внутри Сканера
+		if (activeStratCard && activeStratCard.parentNode) activeStratCard.parentNode.removeChild(activeStratCard);
+		if (resultsCard && resultsCard.parentNode) resultsCard.parentNode.removeChild(resultsCard);
 
 		// Live Logs and Diagnostics Monitor Card
 		var consoleLogEl = E('pre', {
@@ -1895,7 +1908,7 @@ return view.extend({
 		rebuildHistory();
 
 		var mainTabDefs = [
-			{ id: 'scan', label: '🔍 Сканер', nodes: [targetSectionCard, unifiedScanCard, activeStratCard, resultsCard] },
+			{ id: 'scan', label: '🔍 Сканер', nodes: [targetSectionCard, unifiedScanCard] },
 			{ id: 'history', label: '🕘 История', nodes: [historyCard] },
 			{ id: 'evolve', label: '🧬 Эволюция', nodes: [buildEvolutionPanel()] },
 			{ id: 'logs', label: '📜 Логи', nodes: [logCard] }
@@ -2607,6 +2620,16 @@ return view.extend({
 				var hl = (zapretInfo.hostlists || []).find(function(h) { return h.key === svc.hostlistKey; });
 				if (hl && hl.domains_count) totalDomains += hl.domains_count;
 			});
+
+			// Компактная сводка в шапке единого списка
+			if (compactSummaryEl) {
+				compactSummaryEl.textContent = 'С обходом: ' + enabledSvc + ' из ' + SERVICES_CONFIG.length +
+					' · стратегий: ' + configuredSvc +
+					' · доменов: ' + totalDomains +
+					' · служба: ' + ((zapretInfo.zapret2_running === 'running') ? 'активна' : 'остановлена');
+			}
+			if (typeof renderTargetTiles === 'function') renderTargetTiles();
+			return;
 
 			function sumBox(k, v) {
 				return E('div', { class: 'bcw-matrix-box' }, [
