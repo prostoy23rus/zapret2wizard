@@ -1188,7 +1188,11 @@ return view.extend({
 			var svc = (zapretInfo && zapretInfo.services) ? zapretInfo.services[key] : null;
 			if (ch.id === 'domains' || ch.id === 'test_strategy') return null;
 			if (!svc) return { cls: 'mute', text: 'не настроен' };
-			if (svc.enabled) return { cls: 'ok', text: 'защищён' };
+			if (svc.enabled) {
+				// «защищён» — только если служба реально работает
+				if (!isServiceRunning) return { cls: 'warn', text: 'настроен · служба выкл.' };
+				return { cls: 'ok', text: 'защищён' };
+			}
 			return { cls: 'warn', text: 'выключен' };
 		}
 
