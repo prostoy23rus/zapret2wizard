@@ -1032,7 +1032,7 @@ return view.extend({
 		var statsStrip = E('div', { class: 'bcw-stats' }, [
 			E('div', { class: 'bcw-stat' }, [
 				E('div', { class: 'k' }, 'Провайдер'),
-				E('div', { class: 'v' }, (statusData && statusData.isp) ? statusData.isp : 'не определён')
+				E('div', { class: 'v', title: (statusData && statusData.isp) ? statusData.isp : '' }, prettyProvider(statusData && statusData.isp))
 			]),
 			E('div', { class: 'bcw-stat' }, [
 				E('div', { class: 'k' }, 'Блокировка'),
@@ -1491,7 +1491,25 @@ return view.extend({
 		var progressPercentEl = E('span', { style: 'font-weight: bold;' }, '0%');
 		var progressPhaseEl = E('h3', { class: 'bcw-card-title', style: 'color: #00d1b2;' }, 'Прогресс сканирования');
 
-		var ispValEl = E('span', { style: 'color: #61afef; font-weight: 600;' }, (statusData.isp || 'Определение...'));
+		// Бренды провайдеров: geo-IP базы отдают юрлицо (АО «ЮТК»), а не бренд.
+		function prettyProvider(raw) {
+			var brands = {
+				'25490': 'Ростелеком', '12389': 'Ростелеком', '42610': 'Ростелеком', '42682': 'Ростелеком',
+				'8359': 'МТС', '25513': 'МТС',
+				'3216': 'Билайн', '8402': 'Билайн', '42683': 'Билайн',
+				'31133': 'МегаФон', '31200': 'МегаФон',
+				'9049': 'ЭР-Телеком', '50479': 'ЭР-Телеком'
+			};
+			if (!raw) return 'не определён';
+			var m = String(raw).match(/AS(\d+)/i);
+			if (!m) return raw;
+			var brand = brands[m[1]];
+			if (!brand) return raw;
+			var legal = String(raw).replace(/^AS\d+\s*/, '').split('|')[0].trim();
+			return brand + ' · AS' + m[1] + (legal ? ' (' + legal + ')' : '');
+		}
+
+		var ispValEl = E('span', { style: 'color: #61afef; font-weight: 600;', title: statusData.isp || '' }, prettyProvider(statusData.isp) || 'Определение...');
 		var blockTypeValEl = E('span', { style: 'color: #e5c07b; font-weight: 600;' }, formatBlockType(statusData.block_type));
 
 		var dpiFingerprintBadgesEl = E('span', {
@@ -3074,7 +3092,7 @@ return view.extend({
 			}
 
 			if (st.isp && st.isp.trim() !== '') {
-				ispValEl.textContent = st.isp;
+				ispValEl.textContent = prettyProvider(st.isp); ispValEl.title = st.isp || '';
 			}
 			if (st.block_type && st.block_type.trim() !== '') {
 				blockTypeValEl.textContent = formatBlockType(st.block_type);
