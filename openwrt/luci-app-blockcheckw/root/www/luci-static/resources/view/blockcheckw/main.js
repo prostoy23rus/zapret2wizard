@@ -235,8 +235,16 @@ function getZapretInfo() {
 }
 
 // Самодиагностика службы (движок, nft, конфигурация, служба).
+function withTimeout(promise, ms, fallback) {
+	return Promise.race([
+		promise,
+		new Promise(function(resolve) { setTimeout(function() { resolve(fallback); }, ms); })
+	]);
+}
+
 function getDoctor() {
-	return fs.exec(HELPER_BIN, ['doctor', '--json']).then(function(res) {
+	return withTimeout(fs.exec(HELPER_BIN, ['doctor', '--json']), 8000, null).then(function(res) {
+		if (!res) return null;
 		var out = (res && res.stdout) ? res.stdout : '';
 		var line = out.split('\n').filter(function(l) { return l.trim().charAt(0) === '{'; }).pop();
 		if (!line) return null;
@@ -847,7 +855,7 @@ return view.extend({
 
 		// Явное управление службой: запуск, остановка, перезапуск.
 		function svcAction(action) {
-			return fs.exec('/etc/init.d/zapret2wizard', [action]).then(function() {
+			return fs.exec(HELPER_BIN, ['service', action]).then(function() {
 				var label = { start: 'запущена', stop: 'остановлена', restart: 'перезапущена' }[action] || 'изменена';
 				ui.addNotification(null, E('p', {}, 'Служба ' + label), 'info');
 				setTimeout(function() { location.reload(); }, 1500);

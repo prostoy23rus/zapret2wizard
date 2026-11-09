@@ -377,25 +377,59 @@ for lua_script in zapret-lib.lua zapret-antidpi.lua zapret-auto.lua zapret-obfs.
     fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/lua/$lua_script" "/usr/share/zapret2wizard/lua/$lua_script" 8 || true
 done
 
-# Установка fake-блобов: полный список из openwrt/fakes.list (иначе — базовый набор)
-FAKES_LIST="/tmp/bcw_fakes.list"
-if fetch_file "openwrt/fakes.list" "$FAKES_LIST" 8 && [ -s "$FAKES_LIST" ]; then
-    echo -e "${BLUE}ℹ${NC} Скачивание fake-блобов по полному списку ($(wc -l < "$FAKES_LIST") шт.)..."
-    while read -r fb; do
-        [ -n "$fb" ] || continue
-        fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/fake/$fb" "/usr/share/zapret2wizard/fake/$fb" 8 || true
-    done < "$FAKES_LIST"
-    rm -f "$FAKES_LIST"
+# Установка fake-блобов. Существующие файлы не трогаем, общий лимит — 45 секунд:
+# если GitHub недоступен, установка продолжается, а не висит.
+FAKES_DIR="/usr/share/zapret2wizard/fake"
+mkdir -p "$FAKES_DIR"
+need_fakes=0
+for fb in zero_1024.bin zero_512.bin tls_clienthello_www_google_com.bin; do
+    [ -s "$FAKES_DIR/$fb" ] || need_fakes=1
+done
+if [ "$need_fakes" = "1" ]; then
+    echo -e "${BLUE}ℹ${NC} Загрузка fake-блобов (лимит 45 с)..."
+    (
+        FAKES_LIST="/tmp/bcw_fakes.list"
+        if fetch_file "openwrt/fakes.list" "$FAKES_LIST" 6 && [ -s "$FAKES_LIST" ]; then
+            while read -r fb; do
+                [ -n "$fb" ] || continue
+                [ -s "$FAKES_DIR/$fb" ] && continue
+                fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/fake/$fb" "$FAKES_DIR/$fb" 5 || true
+            done < "$FAKES_LIST"
+            rm -f "$FAKES_LIST"
+        fi
+        for fake_blob in stun.bin quic_initial_dbankcloud_ru.bin quic_3.bin quic_4.bin quic_initial_vk_com.bin quic_initial_www_google_com.bin quic_initial_facebook_com.bin tls_clienthello_gosuslugi_ru.bin tls_clienthello_sberbank_ru.bin tls_clienthello_t2_ru.bin tls_clienthello_vk_com.bin tls_clienthello_www_google_com.bin tls_clienthello_www_4pda_to.bin tls_clienthello_max_ru.bin tls_clienthello_iana_org.bin tls_alert.bin discord-ip-discovery-with-port.bin discord-ip-discovery-without-port.bin ACTIVE_GAME_UDP.bin zero_1024.bin zero_512.bin zero_256.bin wireguard_initiation.bin wireguard_response.bin; do
+            [ -s "$FAKES_DIR/$fake_blob" ] && continue
+            fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/fake/$fake_blob" "$FAKES_DIR/$fake_blob" 5 || true
+        done
+    ) &
+    fake_pid=$!
+    waited=0
+    while kill -0 "$fake_pid" 2>/dev/null && [ "$waited" -lt 45 ]; do
+        sleep 3
+        waited=$((waited + 3))
+        printf '.'
+    done
+    echo ""
+    kill -9 "$fake_pid" 2>/dev/null
+    echo -e "${GREEN}✓${NC} fake-блобов установлено: $(ls "$FAKES_DIR" 2>/dev/null | wc -l)"
 fi
 
-# Установка ключевых fake-блобов
-for fake_blob in stun.bin quic_initial_dbankcloud_ru.bin quic_3.bin quic_4.bin quic_initial_vk_com.bin quic_initial_www_google_com.bin quic_initial_facebook_com.bin tls_clienthello_gosuslugi_ru.bin tls_clienthello_sberbank_ru.bin tls_clienthello_t2_ru.bin tls_clienthello_vk_com.bin tls_clienthello_www_google_com.bin tls_clienthello_www_4pda_to.bin tls_clienthello_max_ru.bin tls_clienthello_iana_org.bin tls_alert.bin discord-ip-discovery-with-port.bin discord-ip-discovery-without-port.bin ACTIVE_GAME_UDP.bin zero_1024.bin zero_512.bin zero_256.bin wireguard_initiation.bin wireguard_response.bin; do
-    fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/fake/$fake_blob" "/usr/share/zapret2wizard/fake/$fake_blob" 8 || true
+# Установка базовых списков хостов (лимит 40 с, уже существующие не перекачиваем)
+echo -e "${BLUE}ℹ${NC} Проверка списков доменов..."
+(
+    for ipset_file in zapret_hosts_youtube.txt zapret_hosts_discord.txt zapret_hosts_x.txt zapret_hosts_instagram.txt zapret_hosts_twitch.txt zapret_hosts_user.txt zapret_hosts_user_exclude.txt zapret_hosts_auto.txt; do
+        [ -s "/usr/share/zapret2wizard/ipset/$ipset_file" ] && continue
+        fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/ipset/$ipset_file" "/usr/share/zapret2wizard/ipset/$ipset_file" 5 || true
+    done
+) &
+lists_pid=$!
+waited=0
+while kill -0 "$lists_pid" 2>/dev/null && [ "$waited" -lt 40 ]; do
+    sleep 3
+    waited=$((waited + 3))
 done
-
-# Установка базовых списков хостов
+kill -9 "$lists_pid" 2>/dev/null
 for ipset_file in zapret_hosts_youtube.txt zapret_hosts_discord.txt zapret_hosts_x.txt zapret_hosts_instagram.txt zapret_hosts_twitch.txt zapret_hosts_user.txt zapret_hosts_user_exclude.txt zapret_hosts_auto.txt; do
-    fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/ipset/$ipset_file" "/usr/share/zapret2wizard/ipset/$ipset_file" 8 || true
     [ -f "/etc/zapret2wizard/ipset/$ipset_file" ] || cp -f "/usr/share/zapret2wizard/ipset/$ipset_file" "/etc/zapret2wizard/ipset/$ipset_file" 2>/dev/null || true
 done
 

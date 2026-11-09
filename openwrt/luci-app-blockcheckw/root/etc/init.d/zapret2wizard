@@ -427,6 +427,20 @@ reload_service() {
 	start_service
 }
 
+# Быстрый status: не обращаемся к ubus/procd, иначе при занятом rpcd он висит.
+status() {
+	if pgrep -f "nfqws2" >/dev/null 2>&1; then
+		if nft list table inet zapret2wizard >/dev/null 2>&1; then
+			echo "running"
+			return 0
+		fi
+		echo "running (без nft-таблицы)"
+		return 0
+	fi
+	echo "stopped"
+	return 1
+}
+
 service_triggers() {
 	procd_add_reload_trigger "zapret2wizard"
 }

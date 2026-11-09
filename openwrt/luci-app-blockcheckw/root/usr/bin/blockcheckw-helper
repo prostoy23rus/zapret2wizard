@@ -52,22 +52,26 @@ fetch_file() {
         /etc/init.d/dnsmasq reload >/dev/null 2>&1 || true
     fi
 
-    # 1. Direct GitHub Raw with --resolve (always 100% fresh, real-time)
-    for gh_ip in 185.199.108.133 185.199.111.133 185.199.109.133 185.199.110.133; do
-        curl -fsSL -k --connect-timeout 2 -m "$timeout" --resolve "raw.githubusercontent.com:443:$gh_ip" "https://raw.githubusercontent.com/prostoy23rus/zapret2wizard/main/$rel_path" -o "$tmp_file" 2>/dev/null
+    # Жёсткий бюджет на весь вызов: не даём установке и LuCI зависнуть.
+    local tmo=5
+    [ "$timeout" -lt 5 ] && tmo="$timeout"
+    local deadline=$(( $(date +%s) + 14 ))
+
+    # 1. Direct GitHub Raw (два адреса, не четыре)
+    for gh_ip in 185.199.108.133 185.199.111.133; do
+        [ "$(date +%s)" -ge "$deadline" ] && break
+        curl -fsSL -k --connect-timeout 2 -m "$tmo" --resolve "raw.githubusercontent.com:443:$gh_ip" "https://raw.githubusercontent.com/prostoy23rus/zapret2wizard/main/$rel_path" -o "$tmp_file" 2>/dev/null
         _save_download && return 0
     done
 
-    # 2. GHProxy Real-Time Mirror (No edge cache, queries GitHub live)
-    curl -fsSL -k --connect-timeout 3 -m "$timeout" "https://ghproxy.net/https://raw.githubusercontent.com/prostoy23rus/zapret2wizard/main/$rel_path" -o "$tmp_file" 2>/dev/null
+    # 2. jsDelivr (обычно доступен)
+    [ "$(date +%s)" -lt "$deadline" ] && \
+    curl -fsSL -k --connect-timeout 2 -m "$tmo" "https://cdn.jsdelivr.net/gh/prostoy23rus/zapret2wizard@main/$rel_path" -o "$tmp_file" 2>/dev/null
     _save_download && return 0
 
-    # 3. jsDelivr Global CDN Fallback
-    curl -fsSL -k --connect-timeout 3 -m "$timeout" "https://cdn.jsdelivr.net/gh/prostoy23rus/zapret2wizard@main/$rel_path" -o "$tmp_file" 2>/dev/null
-    _save_download && return 0
-
-    # 4. Fastly jsDelivr CDN Fallback
-    curl -fsSL -k --connect-timeout 3 -m "$timeout" "https://fastly.jsdelivr.net/gh/prostoy23rus/zapret2wizard@main/$rel_path" -o "$tmp_file" 2>/dev/null
+    # 3. Fastly jsDelivr
+    [ "$(date +%s)" -lt "$deadline" ] && \
+    curl -fsSL -k --connect-timeout 2 -m "$tmo" "https://fastly.jsdelivr.net/gh/prostoy23rus/zapret2wizard@main/$rel_path" -o "$tmp_file" 2>/dev/null
     _save_download && return 0
 
     rm -f "$tmp_file"
@@ -131,7 +135,7 @@ ensure_dpi_service() {
         rm -f /tmp/bcw_scan_paused
         return 0
     fi
-    /etc/init.d/zapret2wizard start >/dev/null 2>&1
+    _svc_start_bg
     rm -f /tmp/bcw_scan_paused
     logger -t zapret2wizard "служба была остановлена подбором и поднята автоматически"
 }
@@ -143,15 +147,22 @@ restart_dpi_service() {
     fi
 }
 
+# Быстрые операции со службой: procd/ubus может подвиснуть, а нам нужен отклик.
+_svc_running() { pgrep -f "nfqws2" >/dev/null 2>&1; }
+_svc_stop() {
+    for p in $(pgrep -f "nfqws2" 2>/dev/null); do kill "$p" 2>/dev/null; done
+    sleep 1
+    for p in $(pgrep -f "nfqws2" 2>/dev/null); do kill -9 "$p" 2>/dev/null; done
+    nft delete table inet zapret2wizard 2>/dev/null || true
+}
+_svc_start_bg() { ( _svc_start_bg & ); }
+
 get_dpi_service_status() {
-    local st=""
-    if [ -x /etc/init.d/zapret2wizard ]; then
-        st=$(/etc/init.d/zapret2wizard status 2>/dev/null)
-    fi
-    if [ -z "$st" ]; then
-        echo "inactive"
+    # Не зовём init status: он ходит в ubus/procd и может подвиснуть.
+    if pgrep -f "nfqws2" >/dev/null 2>&1; then
+        echo "running"
     else
-        echo "$st"
+        echo "inactive"
     fi
 }
 
@@ -1022,8 +1033,8 @@ cmd_start() {
         history_add "scan_start" "$(metric_target_key "$target")" "Начат подбор для $domain"
         # На время подбора службу останавливаем: иначе её правила перехватывают
         # пробный трафик и сканер видит искажённую картину.
-        if /etc/init.d/zapret2wizard running >/dev/null 2>&1; then
-            /etc/init.d/zapret2wizard stop >/dev/null 2>&1
+        if _svc_running; then
+            _svc_stop
             echo "[blockcheckw-helper] Служба остановлена на время подбора" >> "$LOG_FILE"
             history_add "scan_pause" "$(metric_target_key "$target")" "Служба остановлена на время подбора"
             : > /tmp/bcw_scan_paused
@@ -1036,8 +1047,8 @@ cmd_start() {
                     i=$((i + 1))
                 done
                 sleep 5
-                if ! /etc/init.d/zapret2wizard running >/dev/null 2>&1; then
-                    /etc/init.d/zapret2wizard start >/dev/null 2>&1
+                if ! _svc_running; then
+                    _svc_start_bg
                     logger -t zapret2wizard "сторож подбора: служба поднята после завершения сканирования"
                 fi
             ) &
@@ -1470,7 +1481,7 @@ EOF
             else
                 # Новых вариантов нет — но это не значит, что обход не работает:
                 # ранее применённая стратегия остаётся в конфиге. Проверяем её.
-                /etc/init.d/zapret2wizard running >/dev/null 2>&1 || /etc/init.d/zapret2wizard start >/dev/null 2>&1
+                _svc_running || _svc_start_bg
                 local cur_test=$(cmd_test "$target" "" 2>/dev/null | tail -n 1)
                 if printf '%s' "$cur_test" | grep -q '"all_ok":true'; then
                     write_status "done" 100 "Новых стратегий не найдено — текущая конфигурация уже работает" ",\"strategies\":[],\"current_ok\":true"
@@ -2814,7 +2825,7 @@ cmd_doctor() {
     local strategies=$(uci show zapret2wizard 2>/dev/null | grep -c '=strategy')
     add_check "стратегии в конфиге" 1 "$strategies шт." ""
 
-    if /etc/init.d/zapret2wizard running >/dev/null 2>&1; then add_check "служба" 1 "работает" ""; else add_check "служба" 0 "остановлена" "Запустите: /etc/init.d/zapret2wizard start"; fi
+    if _svc_running; then add_check "служба" 1 "работает" ""; else add_check "служба" 0 "остановлена" "Запустите: /etc/init.d/zapret2wizard start"; fi
 
     if nft list tables 2>/dev/null | grep -q 'inet zapret2wizard'; then add_check "nft-таблица" 1 "inet zapret2wizard" ""; else add_check "nft-таблица" 0 "отсутствует" "Служба не установила правила — проверьте лог: logread -e zapret2wizard"; fi
 
@@ -2930,7 +2941,7 @@ cmd_selftest() {
     local target="${1:-preset_youtube}"
     local ver=$(grep -o '"version": *"[^"]*"' /usr/share/blockcheckw/version.json 2>/dev/null | head -1 | cut -d'"' -f4)
     local svc_state="остановлена"
-    /etc/init.d/zapret2wizard running >/dev/null 2>&1 && svc_state="работает"
+    _svc_running && svc_state="работает"
 
     local engines=0 c name
     for c in /proc/[0-9]*/comm; do
@@ -3446,7 +3457,13 @@ bp_sync() {
         bp_warm_detached
     fi
     if [ ! -s "$BP_RANGES" ] || [ -n "$(find "$BP_RANGES" -mmin +1440 2>/dev/null)" ]; then
-        bp_load_ranges
+        # не пытаемся качать чаще раза в час, даже если сеть лежит
+        local now=$(date +%s)
+        local last=$(cat /tmp/bcw_ranges_try 2>/dev/null || echo 0)
+        if [ $((now - last)) -gt 3600 ]; then
+            echo "$now" > /tmp/bcw_ranges_try
+            bp_load_ranges
+        fi
     fi
     bp_apply_ips
     bp_apply_ranges
@@ -3494,9 +3511,7 @@ bp_unsync() {
 
 bp_status() {
     local targets rules=0 members=0 packets=0 bytes=0 line
-    # оркестраторы перезагружают таблицы и теряют чужие правила —
-    # перед отчётом восстанавливаем свои (идемпотентно и дёшево)
-    bp_sync >/dev/null 2>&1 || true
+    # отчёт должен быть быстрым: восстановлением занимается bypass_watch
     targets=$(bp_targets | wc -l)
     if [ -f "$BP_STATE" ]; then
         while read -r fam tbl ch; do
@@ -3685,7 +3700,7 @@ cmd_cron_install() {
 # Первый запуск: если стратегий нет — подобрать для YouTube и Discord.
 cmd_autosetup() {
     ensure_all_hostlists >/dev/null 2>&1 || true
-    /etc/init.d/zapret2wizard start >/dev/null 2>&1 || true
+    _svc_start_bg
 
     local have=$(uci show zapret2wizard 2>/dev/null | grep -c '=strategy')
     if [ "${have:-0}" -gt 0 ]; then
@@ -3709,13 +3724,45 @@ cmd_autosetup() {
         echo "[autosetup] $target завершён: ${st:-timeout}" >> "$log"
     done
 
-    /etc/init.d/zapret2wizard start >/dev/null 2>&1 || true
+    _svc_start_bg
     local done_n=$(uci show zapret2wizard 2>/dev/null | grep -c '=strategy')
     echo "{\"success\":true,\"strategies\":$done_n}"
 }
 
 # Эволюционный подбор: синтезирует новые комбинации примитивов zapret2,
 # проверяет их и запоминает результаты по провайдеру между запусками.
+# Управление службой без ubus/procd: быстро и предсказуемо.
+cmd_service() {
+    case "${1:-status}" in
+        stop)
+            for p in $(pgrep -f "nfqws2" 2>/dev/null); do
+                kill "$p" 2>/dev/null
+            done
+            sleep 1
+            for p in $(pgrep -f "nfqws2" 2>/dev/null); do
+                kill -9 "$p" 2>/dev/null
+            done
+            nft delete table inet zapret2wizard 2>/dev/null || true
+            bypass_sync disable >/dev/null 2>&1 || true
+            echo '{"ok":true,"service":"stopped"}'
+            ;;
+        start)
+            ( _svc_start_bg & )
+            echo '{"ok":true,"service":"starting"}'
+            ;;
+        restart)
+            for p in $(pgrep -f "nfqws2" 2>/dev/null); do kill "$p" 2>/dev/null; done
+            sleep 1
+            nft delete table inet zapret2wizard 2>/dev/null || true
+            ( _svc_start_bg & )
+            echo '{"ok":true,"service":"restarting"}'
+            ;;
+        *)
+            get_dpi_service_status | sed 's/^/{"service":"/; s/$/"}/'
+            ;;
+    esac
+}
+
 cmd_evolve() {
     local target="preset_youtube" count=16 verify_n=3 tests=3 pause=2
     while [ "$#" -gt 0 ]; do
@@ -3759,8 +3806,8 @@ cmd_evolve() {
     echo "  домен:      $domain"
     echo "  кандидатов: $count, проверка до $verify_n, тестов на стабильность: $tests"
 
-    if /etc/init.d/zapret2wizard running >/dev/null 2>&1; then
-        /etc/init.d/zapret2wizard stop >/dev/null 2>&1
+    if _svc_running; then
+        _svc_stop
     fi
     : > /tmp/bcw_scan_paused
 
@@ -3774,7 +3821,7 @@ cmd_evolve() {
     [ -n "$gen_exploit" ] || gen_exploit=0
     if [ ! -s "$corpus" ]; then
         echo "  ОШИБКА: не удалось сгенерировать кандидатов"
-        /etc/init.d/zapret2wizard start >/dev/null 2>&1
+        _svc_start_bg
         rm -f /tmp/bcw_scan_paused
         return 1
     fi
@@ -3856,7 +3903,7 @@ EVOLIST
     lua "$evo" history "$genomes" "$provider" "$stats_file" >/dev/null 2>&1 || true
     rm -f "$stats_file"
 
-    /etc/init.d/zapret2wizard start >/dev/null 2>&1
+    _svc_start_bg
     rm -f /tmp/bcw_scan_paused
 
     echo "---"
@@ -3869,7 +3916,14 @@ EVOLIST
 
 cmd_info() {
     ensure_dpi_service
-    ensure_all_hostlists >/dev/null 2>&1 || true
+    # Списки догружаем в фоне: сеть может быть недоступна, а интерфейс ждать не должен.
+    if ! _hostlists_ready 2>/dev/null; then
+        if [ ! -f /tmp/bcw_ensuring ]; then
+            : > /tmp/bcw_ensuring
+            start-stop-daemon -S -b -x /usr/bin/blockcheckw-helper -- ensure_hostlists_bg >/dev/null 2>&1 \
+                || ( /usr/bin/blockcheckw-helper ensure_hostlists_bg >/dev/null 2>&1 & )
+        fi
+    fi
     local zapret_running=$(get_dpi_service_status)
 
     # На минимальных сборках OpenWrt нет Lua-модуля uci — тогда отчёт собираем через uci CLI.
@@ -4549,6 +4603,12 @@ cmd_ensure_hostlists() {
     cmd_info
 }
 
+# Фоновая догрузка списков: без вывода и с уборкой маркера.
+cmd_ensure_hostlists_bg() {
+    ensure_all_hostlists >/dev/null 2>&1 || true
+    rm -f /tmp/bcw_ensuring
+}
+
 # Единый маппинг «цель -> файл списка доменов». Держит пути в одном месте,
 # чтобы add/remove/read/write не разъезжались между собой.
 _hostlist_path() {
@@ -4798,6 +4858,8 @@ case "$1" in
     bypass) shift; cmd_bypass "$@" ;;
     bypass_warm) bp_resolve_ips ;;
     bypass_watch) cmd_bypass_watch ;;
+    ensure_hostlists_bg) cmd_ensure_hostlists_bg ;;
+    service) shift; cmd_service "$@" ;;
     asn) cmd_asn ;;
     provider_save) cmd_provider_save ;;
     cron_install) cmd_cron_install ;;
