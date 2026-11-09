@@ -340,7 +340,12 @@ start_service() {
 	# Исключаем из steer то, что обрабатывает наша служба:
 	# трафик должен идти напрямую и попадать в zapret2wizard, а не в туннель.
 	if [ -x /usr/bin/blockcheckw-helper ]; then
-		( sleep 6; /usr/bin/blockcheckw-helper bypass_sync enable >/dev/null 2>&1 ) &
+		touch /var/run/bcw_bypass.run
+		if [ -f /var/run/bcw_bypass.watch.pid ] && kill -0 "$(cat /var/run/bcw_bypass.watch.pid)" 2>/dev/null; then
+			:
+		else
+			start-stop-daemon -S -b -x /usr/bin/blockcheckw-helper -- bypass_watch >/dev/null 2>&1 || true
+		fi
 	fi
 
 	# Start procd instances
@@ -407,6 +412,8 @@ stop_service() {
 	logger -t zapret2wizard "Stopping Zapret2Wizard service and firewall..."
 	# возвращаем steer его трафик
 	if [ -x /usr/bin/blockcheckw-helper ]; then
+		rm -f /var/run/bcw_bypass.run
+		[ -f /var/run/bcw_bypass.watch.pid ] && kill "$(cat /var/run/bcw_bypass.watch.pid)" 2>/dev/null
 		/usr/bin/blockcheckw-helper bypass_sync disable >/dev/null 2>&1 || true
 	fi
 	nft delete table inet zapret2wizard 2>/dev/null || true
