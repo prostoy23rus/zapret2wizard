@@ -198,22 +198,21 @@ var PRESET_DEFS = {
 
 function checkHelperStatus() {
 	return fs.exec(HELPER_BIN, ['status']).then(function(res) {
-		if (res && res.code === 0 && res.stdout) {
-			try {
-				return JSON.parse(res.stdout);
-			} catch (e) {
+		// Код возврата RPC на части сборок приходит строкой, а stdout при этом
+		// валидный — разбираем вывод, а не верим коду.
+		var out = (res && res.stdout) ? String(res.stdout) : '';
+		var s = out.indexOf('{');
+		var f = out.lastIndexOf('}');
+		if (s >= 0 && f > s) {
+			try { return JSON.parse(out.slice(s, f + 1)); } catch (e) {
 				__r.parseError = String(e).slice(0, 120);
-				// helper может вывести служебные строки до JSON — берём объект целиком
-				var s = res.stdout.indexOf('{');
-				var f = res.stdout.lastIndexOf('}');
-				if (s >= 0 && f > s) {
-					try { return JSON.parse(res.stdout.slice(s, f + 1)); } catch (e2) {}
-				}
 			}
 		}
-		return { status: 'idle', percent: 0, phase: 'Готов к работе', strategies: [] };
+		// 'unknown', а не 'idle': иначе один сбойный ответ RPC выглядел как
+		// «подбор завершён, ничего не найдено».
+		return { status: 'unknown', percent: 0, phase: '', strategies: [] };
 	}).catch(function() {
-		return { status: 'idle', percent: 0, phase: 'Готов к работе', strategies: [] };
+		return { status: 'unknown', percent: 0, phase: '', strategies: [] };
 	});
 }
 
@@ -1830,9 +1829,18 @@ return view.extend({
 		]);
 
 		// Active Strategy in Zapret2 (Placed right below scanner controls/progress)
-		// старые отдельные карточки результатов больше не нужны: всё внутри Сканера
+		// Старая карточка «что применяется сейчас» больше не нужна: она внутри Сканера.
 		if (activeStratCard && activeStratCard.parentNode) activeStratCard.parentNode.removeChild(activeStratCard);
-		if (resultsCard && resultsCard.parentNode) resultsCard.parentNode.removeChild(resultsCard);
+		// Список найденных стратегий обязан быть в документе. Раньше resultsCard
+		// просто удаляли, и найденные профили некуда было выводить: счётчик
+		// «найдено 44» был, а списка и кнопок «Применить» — нет.
+		if (resultsCard) {
+			if (resultsCard.parentNode) resultsCard.parentNode.removeChild(resultsCard);
+			monitorCard.appendChild(resultsCard);
+			resultsCard.style.marginTop = '14px';
+			resultsCard.style.borderTop = '1px solid rgba(255,255,255,0.08)';
+			resultsCard.style.background = 'transparent';
+		}
 
 		// Live Logs and Diagnostics Monitor Card
 		var consoleLogEl = E('pre', {
@@ -3156,18 +3164,24 @@ return view.extend({
 			bcwShowModal('🎉 Стратегия успешно активирована в Zapret2!', body, actions);
 		}
 
-		function showManualStrategiesFoundModal(count) {
+		function showManualStrategiesFoundModal(count, opts) {
+			opts = opts || {};
+			var failed = opts.failed === true;
 			var body = [
 				E('div', {
 					style: 'background: rgba(255, 183, 77, 0.12); border: 1.5px solid #ffb74d; border-radius: 8px; padding: 14px 16px; margin-bottom: 14px;'
 				}, [
 					E('div', { style: 'display: flex; align-items: center; gap: 10px; font-weight: bold; font-size: 15px; color: #ffb74d;' }, [
 						E('span', { style: 'font-size: 24px; line-height: 1;' }, '⚠️'),
-						E('span', {}, 'Внимание: стратегия ещё НЕ загружена в Zapret2!')
+						E('span', {}, failed
+							? 'Внимание: автоприменение не подтвердилось'
+							: 'Внимание: стратегия ещё НЕ загружена в Zapret2!')
 					]),
 					E('p', { style: 'margin: 8px 0 0 0; font-size: 13px; color: #e5e9f0; line-height: 1.5;' },
 						'Поиск успешно завершён, найдено рабочих стратегий: ' + count + '. ' +
-						'Так как включен ручной режим применения, стратегия пока не активирована на роутере.'
+						(failed
+							? 'Автоматически выбранная стратегия не подтвердила трафик — прежняя настройка возвращена. Выберите другой вариант из списка ниже.'
+							: 'Так как включен ручной режим применения, стратегия пока не активирована на роутере.')
 					)
 				]),
 
@@ -3306,6 +3320,9 @@ return view.extend({
 			if (pollInterval) clearInterval(pollInterval);
 			pollInterval = setInterval(function() {
 				checkHelperStatus().then(function(st) {
+					// Сбойный ответ RPC (status: unknown) — не повод объявлять
+					// подбор завершённым «с нулём»: просто ждём следующий опрос.
+					if (!st || st.status === 'unknown') return;
 					updateProgressUI(st);
 					if (st.status === 'done' || st.status === 'idle') {
 						var wasActive = activeScanInProgress;
@@ -3344,7 +3361,9 @@ return view.extend({
 									httpCode: st.apply_result ? st.apply_result.http_code : null
 								});
 							} else if (hasStrategies) {
-								showManualStrategiesFoundModal(stratsCount);
+								showManualStrategiesFoundModal(stratsCount, {
+									failed: !!(st.apply_warning || st.apply_restored)
+								});
 							} else {
 								bcwShowModal('Результат поиска', [
 									E('p', { class: st.current_ok ? 'cbi-color-green' : 'cbi-color-yellow', style: 'font-weight: bold; font-size: 14px;' }, st.current_ok ? '✓ Текущая стратегия работает' : '⚠️ Новых рабочих стратегий нет'),

@@ -203,6 +203,40 @@ get_dpi_service_status() {
     fi
 }
 
+# Ждём реальной готовности службы: движки подняты И nft-таблица создана.
+# Один sleep перед проверкой не годится: на медленных роутерах служба
+# поднимается дольше, и тест стратегии падал на пустом месте.
+wait_dpi_ready() {
+    local limit="${1:-25}" i=0
+    while [ "$i" -lt "$limit" ]; do
+        if _svc_running && nft list table inet zapret2wizard >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 1
+        i=$((i + 1))
+    done
+    return 1
+}
+
+# Свободная очередь NFQUEUE для подбора. Раньше был жёсткий --qnum 400:
+# на роутере, где этот номер занят чужим движком, пробы «слепли» и подбор
+# заканчивался нулём. Теперь берём первый незанятый номер из 400..499.
+pick_scan_qnum() {
+    local used=" " q=400 i=0 c
+    for d in /proc/[0-9]*/cmdline; do
+        [ -r "$d" ] || continue
+        c=$(tr '\0' '\n' < "$d" 2>/dev/null | grep -o '^--qnum=[0-9][0-9]*$' | cut -d= -f2)
+        [ -n "$c" ] && used="$used$c "
+    done
+    while [ "$i" -lt 100 ]; do
+        case "$used" in
+            *" $q "*) q=$((q + 1)); i=$((i + 1)) ;;
+            *) break ;;
+        esac
+    done
+    echo "$q"
+}
+
 # Реальный пакет конфигурации: автономный zapret2wizard или старый zapret2.
 _strategy_pkg() {
     if uci -q get "zapret2wizard.BlockcheckW_YouTube" >/dev/null 2>&1; then
@@ -1126,8 +1160,16 @@ cmd_start() {
 
         generate_smart_probe_corpus "$target" "$domain" "$probe_corpus"
 
+        # Сканер хранит «память прошлых запусков» в $HOME/.config/blockcheckw.
+        # Унаследованные от ручных прогонов умолчания (domain_list, dns) молча
+        # ломали подбор на другом роутере. Свой HOME на прогон это отсекает.
+        local scan_qnum=$(pick_scan_qnum)
+        local scan_home=/tmp/bcw_scan_home
+        mkdir -p "$scan_home" 2>/dev/null || true
+        echo "[blockcheckw-helper] Очередь подбора: $scan_qnum" >> "$LOG_FILE"
+
         # Phase 1: Fast diagnostic probe (3-6s)
-        /usr/bin/blockcheckw --qnum 400 -w "$workers" scan -d "$domain" -p "$protocols" --dns auto --from-file "$probe_corpus" -o "$probe_output" --auto --timeout 120 >> "$LOG_FILE" 2>&1
+        HOME="$scan_home" /usr/bin/blockcheckw --qnum "$scan_qnum" -w "$workers" scan -d "$domain" -p "$protocols" --dns auto --from-file "$probe_corpus" -o "$probe_output" --auto --timeout 120 >> "$LOG_FILE" 2>&1
 
         local probe_eval=$(lua - "$probe_output" << 'EOF' 2>/dev/null
 local json = require("luci.jsonc")
@@ -1254,7 +1296,7 @@ EOF
             local adapt_cnt=$(grep -c '^curl_test_' "$adaptive_corpus" 2>/dev/null || echo 0)
             echo "[blockcheckw-helper] [Smart Scan] Generated $adapt_cnt targeted permutations for DPI vector matrix." >> "$LOG_FILE"
 
-            /usr/bin/blockcheckw --qnum 400 --profiles-per-instance 64 -w "$workers" scan -d "$domain" -p "$protocols" --dns auto --timeout 600 --from-file "$adaptive_corpus" -o "$adaptive_output" --auto --progress >> "$LOG_FILE" 2>&1 &
+            HOME="$scan_home" /usr/bin/blockcheckw --qnum "$scan_qnum" --profiles-per-instance 64 -w "$workers" scan -d "$domain" -p "$protocols" --dns auto --timeout 600 --from-file "$adaptive_corpus" -o "$adaptive_output" --auto --progress >> "$LOG_FILE" 2>&1 &
             local bcw_child=$!
             echo "$bcw_child" > "$PID_FILE"
 
@@ -1433,46 +1475,94 @@ EOF
 
         local apply_info=""
         local apply_ok="0"
-        # Auto-apply if requested and strategies found.
-        # Кандидаты пробуются по очереди: Circular, затем одиночные из vanilla.
-        # Останавливаемся на первом, который прошёл полный тест (all_ok), иначе
-        # сообщаем, что стратегия применена с оговоркой.
+        local apply_res=""
+        local apply_restored="0"
+
+        # Авто-применение. Кандидатов берём из JSON-отчёта (поле "args").
+        # Раньше здесь стоял grep '^--' по файлу, но в JSON строки начинаются
+        # с "args": "...", поэтому список кандидатов ВСЕГДА был пуст: сканер
+        # находил десятки стратегий, а в интерфейс уходило «ничего не найдено».
         if [ "$auto_apply" = "1" ] && [ "$found_count" -gt 0 ]; then
             write_status "running" 95 "Автоматическое применение стратегии в Zapret2..."
-            local apply_res="" attempt=0 max_attempts=10 first_cand=""
+
             local candidates="/tmp/blockcheckw_candidates.$$"
-            : > "$candidates"
+            lua - "$OUTPUT_SCAN" "$OUTPUT_VANILLA" > "$candidates" << 'EOF' 2>/dev/null
+local json = require("luci.jsonc")
+local out, seen, fams = {}, {}, {}
+local function add(a)
+    if type(a) ~= "string" or a == "" then return false end
+    a = a:gsub("^%s+", ""):gsub("%s+$", "")
+    if a:sub(1, 2) ~= "--" or seen[a] then return false end
+    -- Три варианта одного приёма не добавят шансов, а проверка одного
+    -- кандидата стоит около минуты: берём разные семейства техник.
+    local fam = a:match("lua%-desync=([%w_]+)") or "other"
+    if fams[fam] then return false end
+    fams[fam] = true
+    seen[a] = true
+    out[#out + 1] = a
+    return true
+end
+local f = io.open(arg[1], "r")
+if f then
+    local d = json.parse(f:read("*a")) or {}
+    f:close()
+    for _, s in ipairs(d.strategies or {}) do
+        local a = (type(s) == "table" and s.args) or s
+        if add(a) and #out >= 3 then break end
+    end
+end
+if #out < 3 then
+    local vf = io.open(arg[2], "r")
+    if vf then
+        for line in vf:lines() do
+            local a = line:match(": nfqws2 (%-%-.*)$") or line:match("^%s*(%-%-.*)$")
+            if add(a) and #out >= 3 then break end
+        end
+        vf:close()
+    end
+end
+for _, a in ipairs(out) do print(a) end
+EOF
+            local cand tried=0
+            local cfg_pkg=$(_strategy_pkg)
+            local cfg_backup="/tmp/bcw_cfg_before_apply.$$"
+            cp -f "/etc/config/$cfg_pkg" "$cfg_backup" 2>/dev/null || true
 
-            # Берём лучшую стратегию из отчёта сканера и применяем напрямую:
-            # цикл из 10 кандидатов с рестартами был слишком медленным и хрупким.
-            local best=""
-            if [ -s "$OUTPUT_SCAN" ]; then
-                best=$(grep -m 1 '^--' "$OUTPUT_SCAN" 2>/dev/null)
-            fi
-            if [ -z "$best" ] && [ -s "$OUTPUT_VANILLA" ]; then
-                best=$(grep -m 1 '^--' "$OUTPUT_VANILLA" 2>/dev/null)
-            fi
-
-            local strats_json="[]"
-            if [ -n "$best" ]; then
-                local esc_best=$(printf '%s' "$best" | sed 's/\\/\\\\/g; s/"/\\"/g')
-                strats_json="[{\"args\":\"$esc_best\",\"coverage\":1,\"protocol\":\"auto\"}]"
-            fi
-
-            local apply_ok="0" apply_res="" apply_info=""
-            if [ "$auto_apply" = "1" ] && [ -n "$best" ]; then
-                echo "[blockcheckw-helper] Применяю лучшую стратегию напрямую" >> "$LOG_FILE"
-                apply_res=$(cmd_strategy_set "$target" "$best" 2>/dev/null)
-                sleep 10
-                local _t=$(cmd_test "$target" "" 2>/dev/null)
-                if printf '%s' "$_t" | grep -q '"all_ok":true'; then
+            while [ "$tried" -lt 3 ] && IFS= read -r cand; do
+                [ -n "$cand" ] || continue
+                tried=$((tried + 1))
+                echo "[blockcheckw-helper] Авто-применение: кандидат $tried — $cand" >> "$LOG_FILE"
+                apply_res=$(cmd_apply --target "$target" --script "$cand" 2>/dev/null)
+                if printf '%s' "$apply_res" | grep -q '"all_ok":true'; then
                     apply_ok="1"
+                    break
                 fi
-                if [ -n "$apply_res" ]; then
-                    apply_info=",\"auto_applied\":true"
-                    [ "$apply_ok" = "1" ] || apply_info="$apply_info,\"apply_warning\":\"Стратегия применена, но полный тест не пройден\""
+            done < "$candidates"
+            rm -f "$candidates"
+
+            if [ "$apply_ok" = "1" ]; then
+                apply_info=",\"auto_applied\":true,\"tried_candidates\":$tried"
+            elif [ "$tried" -gt 0 ]; then
+                # Ни один кандидат не подтвердил трафик. Возвращаем конфиг,
+                # который был до подбора: непроверенная стратегия хуже прежней,
+                # возможно рабочей.
+                if [ -s "$cfg_backup" ]; then
+                    cp -f "$cfg_backup" "/etc/config/$cfg_pkg"
+                    rm -f /tmp/blockcheckw_apply_result.json
+                    echo "[blockcheckw-helper] Проверка не прошла — прежняя конфигурация восстановлена" >> "$LOG_FILE"
+                    ( /etc/init.d/zapret2wizard restart >/dev/null 2>&1 & )
+                    wait_dpi_ready 20
+                    apply_restored="1"
                 fi
+                if [ "$apply_restored" = "1" ]; then
+                    apply_info=",\"apply_warning\":\"Стратегия не подтвердила трафик, прежняя конфигурация возвращена\",\"tried_candidates\":$tried"
+                else
+                    apply_info=",\"apply_warning\":\"Стратегия записана, но трафик не подтвердился\",\"tried_candidates\":$tried"
+                fi
+            else
+                apply_info=",\"apply_warning\":\"В отчёте не нашлось стратегии для применения\""
             fi
+            rm -f "$cfg_backup"
         fi
 
         local dns_err=$(grep -E 'DNS resolve failed|no IPv4 addresses found|DNS resolution error' "$LOG_FILE" 2>/dev/null | tail -n 1)
@@ -1484,6 +1574,8 @@ EOF
             if [ "$auto_apply" = "1" ]; then
                 if [ "$apply_ok" = "1" ]; then
                     final_msg="$final_msg (применена и проверена в Zapret2)"
+                elif [ "$apply_restored" = "1" ]; then
+                    final_msg="$final_msg (применение не подтвердилось, прежняя настройка возвращена)"
                 elif [ -n "$apply_res" ]; then
                     final_msg="$final_msg (применена, но полный тест не пройден)"
                 fi
@@ -1491,7 +1583,7 @@ EOF
             write_status "done" 100 "$final_msg" ",\"strategies\":$strats_json,\"scan_found\":$found_count,\"tried\":$found_count$apply_info"
             echo "[blockcheckw-helper] Finished successfully. Found $found_count working strategies." >> "$LOG_FILE"
             history_add "scan_done" "$(metric_target_key "$target")" "Найдено рабочих стратегий: $found_count"
-            [ "$auto_apply" = "1" ] && history_add "apply" "$(metric_target_key "$target")" "Стратегия применена в Zapret2"
+            [ "$apply_ok" = "1" ] && history_add "apply" "$(metric_target_key "$target")" "Стратегия применена и проверена в Zapret2"
         else
             if [ "$exit_code" -ne 0 ]; then
                 local last_err=$(tail -n 5 "$LOG_FILE" 2>/dev/null | grep -E 'error|Error|failed|FATAL' | tail -n 1)
@@ -1762,7 +1854,8 @@ cmd_apply() {
 
     # Backup zapret2 config
     local ts=$(date +%Y%m%d_%H%M%S)
-    cp -f /etc/config/zapret2 "/etc/config/zapret2.bak.$ts"
+    local _bpkg=$(_strategy_pkg)
+    cp -f "/etc/config/$_bpkg" "/etc/config/$_bpkg.bak.$ts" 2>/dev/null || true
 
     # Map target to base strategy section
     local base_sec=""
