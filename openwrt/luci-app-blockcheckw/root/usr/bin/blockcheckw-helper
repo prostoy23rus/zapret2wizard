@@ -3597,6 +3597,7 @@ BP_STATE="/etc/zapret2wizard/bypass_state.txt"
 BP_CACHE="/etc/zapret2wizard/bypass_ips.txt"
 BP_WARM_MARK="/tmp/bcw_bypass.warm"
 BP_CACHE_TTL=21600
+BP_LOG="/tmp/bcw_bypass.log"
 
 bp_collect_domains() {
     local out="/tmp/bcw_bp_domains.txt"
