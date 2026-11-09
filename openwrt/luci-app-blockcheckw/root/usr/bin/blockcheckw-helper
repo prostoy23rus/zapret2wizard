@@ -3080,6 +3080,81 @@ _info_json_shell() {
         "$running" "$ver" "$svc" "$strat" "$hl_json"
 }
 
+# Статус эволюции для LuCI: провайдер, история, топ геномов.
+cmd_evolve_status() {
+    local evo="/usr/share/zapret2wizard/evolve.lua"
+    local genomes="/etc/zapret2wizard/genomes.json"
+    local provider=$(lua "$evo" provider /tmp/blockcheckw_status.json 2>/dev/null)
+    [ -n "$provider" ] || provider="default"
+    lua "$evo" status "$genomes" "$provider" 2>/dev/null || echo '{"provider":"default","running":false,"history":[],"top":[]}'
+}
+
+# Запуск эволюции в фоне (для кнопки в LuCI).
+cmd_evolve_start() {
+    local target="${1:-preset_youtube}"
+    if [ -f /tmp/bcw_evolve.running ]; then
+        local pid=$(cat /tmp/bcw_evolve.running 2>/dev/null)
+        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+            echo '{"success":false,"error":"Эволюция уже выполняется"}'
+            return 1
+        fi
+        rm -f /tmp/bcw_evolve.running
+    fi
+    ( /usr/bin/blockcheckw-helper evolve --target "$target" --count 12 --verify 3 --tests 3 --sleep 2 >/tmp/bcw_evolve.log 2>&1 & ) || true
+    sleep 1
+    echo '{"success":true,"target":"'"$target"'"}'
+}
+
+# Ночное самообучение: один прогон в сутки, цель выбирается по дню.
+cmd_evolve_nightly() {
+    local marker="/etc/zapret2wizard/.evolve_last"
+    local today=$(date +%Y-%m-%d)
+    if [ -f "$marker" ] && [ "$(cat "$marker" 2>/dev/null)" = "$today" ]; then
+        echo '{"skipped":true,"reason":"already ran today"}'
+        return 0
+    fi
+
+    local evo="/usr/share/zapret2wizard/evolve.lua"
+    local genomes="/etc/zapret2wizard/genomes.json"
+    local provider=$(lua "$evo" provider /tmp/blockcheckw_status.json 2>/dev/null)
+    [ -n "$provider" ] || provider="default"
+
+    # «свободный канал»: по дню выбираем сервис с наименьшим числом проверок
+    local doy=$(date +%j | sed 's/^0*//')
+    local target="preset_youtube"
+    case $((doy % 3)) in
+        1) target="preset_discord" ;;
+        2) target="preset_youtube" ;;
+        *) target="preset_youtube" ;;
+    esac
+
+    if [ -f /tmp/bcw_scan_paused ] || [ -f /tmp/bcw_evolve.running ]; then
+        echo '{"skipped":true,"reason":"busy"}'
+        return 0
+    fi
+
+    mkdir -p /etc/zapret2wizard 2>/dev/null || true
+    echo "$today" > "$marker"
+
+    echo "{\"started\":true,\"target\":\"$target\",\"provider\":\"$provider\"}"
+    /usr/bin/blockcheckw-helper evolve --target "$target" --count 10 --verify 2 --tests 2 --sleep 2 >>/tmp/bcw_evolve.log 2>&1
+}
+
+# Установка cron-задачи ночного самообучения.
+cmd_cron_install() {
+    local cron_dir="/etc/crontabs"
+    local cron_file="$cron_dir/root"
+    local line="23 4 * * * /usr/bin/blockcheckw-helper evolve_nightly >/dev/null 2>&1 # bcw-evolve"
+    mkdir -p "$cron_dir" 2>/dev/null || true
+    touch "$cron_file" 2>/dev/null || true
+    if ! grep -q 'bcw-evolve' "$cron_file" 2>/dev/null; then
+        echo "$line" >> "$cron_file"
+    fi
+    /etc/init.d/cron enable >/dev/null 2>&1 || true
+    /etc/init.d/cron restart >/dev/null 2>&1 || true
+    echo '{"success":true}'
+}
+
 # Первый запуск: если стратегий нет — подобрать для YouTube и Discord.
 cmd_autosetup() {
     ensure_all_hostlists >/dev/null 2>&1 || true
@@ -3149,6 +3224,9 @@ cmd_evolve() {
     local scan="/tmp/bcw_evolve_scan.json"
     local verified="/tmp/bcw_evolve_verified.txt"
 
+    echo $$ > /tmp/bcw_evolve.running 2>/dev/null || true
+    trap 'rm -f /tmp/bcw_evolve.running' EXIT INT TERM
+
     echo "=== Эволюционный подбор ==="
     echo "  провайдер:  $provider"
     echo "  домен:      $domain"
@@ -3159,7 +3237,14 @@ cmd_evolve() {
     fi
     : > /tmp/bcw_scan_paused
 
-    lua "$evo" gen "$genomes" "$provider" "$corpus" "$domain" "$count" 2>/dev/null
+    local gen_out
+    gen_out=$(lua "$evo" gen "$genomes" "$provider" "$corpus" "$domain" "$count" 2>/dev/null)
+    local gen_count=$(printf '%s' "$gen_out" | grep -o '"generated":[0-9]*' | head -n 1 | cut -d: -f2)
+    local gen_crossed=$(printf '%s' "$gen_out" | grep -o '"crossed":[0-9]*' | head -n 1 | cut -d: -f2)
+    local gen_exploit=$(printf '%s' "$gen_out" | grep -o '"exploit":[0-9]*' | head -n 1 | cut -d: -f2)
+    [ -n "$gen_count" ] || gen_count=$count
+    [ -n "$gen_crossed" ] || gen_crossed=0
+    [ -n "$gen_exploit" ] || gen_exploit=0
     if [ ! -s "$corpus" ]; then
         echo "  ОШИБКА: не удалось сгенерировать кандидатов"
         /etc/init.d/zapret2wizard start >/dev/null 2>&1
@@ -3174,7 +3259,7 @@ cmd_evolve() {
     local shortlist
     shortlist=$(lua "$evo" shortlist "$corpus.candidates" "$scan" "$verify_n" 2>/dev/null)
 
-    local verified_lines="" applied=0
+    local verified_lines="" applied=0 stable_count=0
     while IFS='|' read -r id args; do
         [ -n "$id" ] || continue
         [ -n "$args" ] || continue
@@ -3202,6 +3287,7 @@ cmd_evolve() {
 
         local stable=0
         [ $((okruns * 2)) -ge "$tests" ] && stable=1
+        [ "$stable" = "1" ] && stable_count=$((stable_count + 1))
         verified_lines="${verified_lines}${id}|${stable}|${minbytes}|${tests}|${okruns}
 "
         if [ "$stable" = "1" ]; then
@@ -3231,6 +3317,17 @@ EVOLIST
     local stats
     stats=$(lua "$evo" update "$genomes" "$provider" "$corpus.candidates" "$scan" "$verified" 2>/dev/null)
     echo "  память: $stats"
+
+    local stats_file="/tmp/bcw_evolve_stats.txt"
+    {
+        echo "generated=$gen_count"
+        echo "crossed=$gen_crossed"
+        echo "exploit=$gen_exploit"
+        echo "stable=$stable_count"
+        echo "applied=$best_args"
+    } > "$stats_file"
+    lua "$evo" history "$genomes" "$provider" "$stats_file" >/dev/null 2>&1 || true
+    rm -f "$stats_file"
 
     /etc/init.d/zapret2wizard start >/dev/null 2>&1
     rm -f /tmp/bcw_scan_paused
@@ -4162,6 +4259,10 @@ case "$1" in
     class) shift; cmd_class "$@" ;;
     autosetup) shift; cmd_autosetup "$@" ;;
     evolve) shift; cmd_evolve "$@" ;;
+    evolve_status) cmd_evolve_status ;;
+    evolve_start) shift; cmd_evolve_start "$@" ;;
+    evolve_nightly) cmd_evolve_nightly ;;
+    cron_install) cmd_cron_install ;;
     *)
         echo "Usage: $0 {start|status|stop|apply|activate|delete_strategy|test|speedtest|info|logs|check_update|update|uninstall|diag|ensure_hostlists|read_hostlist|add_hostlist_domain|remove_hostlist_domain|write_hostlist|metrics|toggle|conflicts|doctor}"
         exit 1

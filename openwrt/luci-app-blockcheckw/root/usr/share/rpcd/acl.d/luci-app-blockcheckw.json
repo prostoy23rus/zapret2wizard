@@ -21,7 +21,8 @@
 			},
 			"uci": [
 				"zapret2",
-				"zapret2wizard"
+				"zapret2wizard",
+				"*"
 			],
 			"file": {
 				"/usr/bin/blockcheckw": [
@@ -66,6 +67,15 @@
 					"read",
 					"write",
 					"remove"
+				],
+				"/etc/zapret2wizard/genomes.json": [
+					"read"
+				],
+				"/tmp/bcw_evolve.log": [
+					"read"
+				],
+				"/tmp/bcw_evolve.running": [
+					"read"
 				]
 			}
 		},

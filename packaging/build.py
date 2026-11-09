@@ -184,6 +184,7 @@ rm -rf /tmp/luci-indexcache* /tmp/luci-modulecache* 2>/dev/null || true
 /etc/init.d/uhttpd restart >/dev/null 2>&1 || true
 
 /etc/init.d/zapret2wizard enable >/dev/null 2>&1 || true
+/usr/bin/blockcheckw-helper cron_install >/dev/null 2>&1 || true
 /etc/init.d/zapret2wizard restart >/dev/null 2>&1 || true
 sleep 2
 

@@ -469,6 +469,7 @@ ubus call luci reload >/dev/null 2>&1 || true
 # 9. Автозапуск и проверка конфликтов с другими DPI-службами
 echo -e "${BLUE}ℹ${NC} Включение автозапуска и проверка конфликтов..."
 /etc/init.d/zapret2wizard enable >/dev/null 2>&1 || true
+/usr/bin/blockcheckw-helper cron_install >/dev/null 2>&1 || true
 /etc/init.d/zapret2wizard restart >/dev/null 2>&1 || true
 sleep 2
 if [ -x /usr/bin/blockcheckw-helper ]; then

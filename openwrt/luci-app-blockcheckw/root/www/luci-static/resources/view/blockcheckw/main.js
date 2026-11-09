@@ -1813,6 +1813,7 @@ return view.extend({
 			{ id: 'scan', label: '🔍 Сканер', nodes: [targetSectionCard, unifiedScanCard] },
 			{ id: 'results', label: '📊 Результаты', nodes: [activeStratCard, resultsCard] },
 			{ id: 'history', label: '🕘 История', nodes: [historyCard] },
+			{ id: 'evolve', label: '🧬 Эволюция', nodes: [buildEvolutionPanel()] },
 			{ id: 'logs', label: '📜 Логи', nodes: [logCard] }
 		];
 
@@ -1852,6 +1853,146 @@ return view.extend({
 			scanPanel.appendChild(dashRow);
 		}
 
+// -------- Вкладка «Эволюция»: запуск, история поколений, топ геномов --------
+		function buildEvolutionPanel() {
+			var root = E('div', { id: 'bcw-evo-root', class: 'bcw-card', style: 'padding: 16px;' });
+
+			var summary = E('div', { id: 'bcw-evo-summary', style: 'font-size: 12px; color: #abb2bf; margin-top: 4px;' }, 'Загрузка...');
+			var targetSel = E('select', { id: 'bcw-evo-target', class: 'cbi-input-select', style: 'height: 34px;' }, [
+				E('option', { value: 'preset_youtube' }, 'YouTube'),
+				E('option', { value: 'preset_discord' }, 'Discord'),
+				E('option', { value: 'preset_twitch' }, 'Twitch'),
+				E('option', { value: 'preset_x' }, 'X (Twitter)'),
+				E('option', { value: 'preset_instagram' }, 'Instagram')
+			]);
+			var startBtn = E('button', { class: 'bcw-btn-launch', style: 'height: 34px;' }, '🧬 Запустить эволюцию');
+			var histBtn = E('button', { class: 'bcw-btn-secondary', style: 'height: 34px;' }, '🕓 Установить ночное обучение');
+
+			startBtn.addEventListener('click', function() {
+				startBtn.disabled = true;
+				summary.textContent = '⏳ Запускаю эволюцию...';
+				fs.exec(HELPER_BIN, ['evolve_start', targetSel.value]).then(function(res) {
+					var out = null;
+					try { out = JSON.parse(res.stdout); } catch (e) {}
+					if (out && out.success) {
+						summary.textContent = '✓ Эволюция запущена. Прогресс — ниже.';
+						setTimeout(refreshEvolution, 1500);
+					} else {
+						summary.textContent = '✗ ' + ((out && out.error) || 'не удалось запустить');
+					}
+					startBtn.disabled = false;
+				}).catch(function() {
+					summary.textContent = '✗ ошибка вызова helper';
+					startBtn.disabled = false;
+				});
+			});
+
+			histBtn.addEventListener('click', function() {
+				fs.exec(HELPER_BIN, ['cron_install']).then(function() {
+					ui.addNotification(null, E('p', {}, 'Ночное обучение включено: 04:23, один прогон в сутки'), 'info');
+				}).catch(function() {});
+			});
+
+			var top = E('div', { id: 'bcw-evo-top', style: 'margin-top: 14px;' });
+			var hist = E('div', { id: 'bcw-evo-hist', style: 'margin-top: 14px;' });
+			var logBox = E('pre', {
+				id: 'bcw-evo-log',
+				style: 'max-height: 200px; overflow: auto; margin: 12px 0 0; padding: 10px; background: #0c1016; border: 1px solid var(--bcw-border-divider); border-radius: 8px; font: 11px/1.45 ui-monospace, monospace; color: #cfe0ff; white-space: pre-wrap;'
+			}, '');
+
+			root.appendChild(E('div', { style: 'display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center;' }, [
+				E('div', {}, [
+					E('div', { style: 'font-weight: bold; font-size: 15px; color: var(--bcw-text-title);' }, '🧬 Эволюция стратегий'),
+					summary
+				]),
+				E('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;' }, [targetSel, startBtn, histBtn])
+			]));
+			root.appendChild(top);
+			root.appendChild(hist);
+			root.appendChild(logBox);
+			return root;
+		}
+
+		function fmtStamp(ts) {
+			if (!ts) return '—';
+			var d = new Date(ts * 1000);
+			return ('0' + d.getDate()).slice(-2) + '.' + ('0' + (d.getMonth() + 1)).slice(-2) + ' ' +
+				('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
+		}
+
+		function shortArgs(a) {
+			if (!a) return '—';
+			return a.length > 92 ? a.slice(0, 92) + '…' : a;
+		}
+
+		var evoPollTimer = null;
+		function refreshEvolution() {
+			fs.exec(HELPER_BIN, ['evolve_status']).then(function(res) {
+				var st = null;
+				try { st = JSON.parse(res.stdout); } catch (e) {}
+				if (!st) return;
+
+				var summary = document.getElementById('bcw-evo-summary');
+				if (summary) {
+					summary.textContent = 'Провайдер: ' + (st.provider || '—') +
+						' · геномов: ' + (st.total_genomes || 0) +
+						' · последний прогон: ' + fmtStamp(st.last_run) +
+						' · ночной: ' + fmtStamp(st.next_run) +
+						(st.running ? ' · ⏳ выполняется' : '');
+				}
+
+				var top = document.getElementById('bcw-evo-top');
+				if (top) {
+					top.innerHTML = '';
+					top.appendChild(E('div', { style: 'font-weight:bold;font-size:13px;margin-bottom:6px;' }, '🏆 Топ геномов'));
+					if (!st.top || !st.top.length) {
+						top.appendChild(E('div', { style: 'font-size:12px;color:#abb2bf;' }, 'Пока пусто — запустите эволюцию.'));
+					} else {
+						var tbl = E('table', { class: 'table', style: 'width:100%;font-size:12px;' });
+						tbl.appendChild(E('tr', {}, [
+							E('th', {}, '#'), E('th', {}, 'Стратегия'), E('th', {}, 'OK'), E('th', {}, 'Стаб.'),
+							E('th', {}, 'Лучший'), E('th', {}, 'Когда')
+						]));
+						st.top.forEach(function(g, i) {
+							tbl.appendChild(E('tr', {}, [
+								E('td', {}, String(i + 1)),
+								E('td', { style: 'font-family:monospace;font-size:11px;' }, shortArgs(g.args)),
+								E('td', {}, g.ok + '/' + (g.ok + g.fail)),
+								E('td', {}, (g.stability || 0) + '%'),
+								E('td', {}, Math.round((g.best || 0) / 1024) + ' КБ'),
+								E('td', {}, fmtStamp(g.last))
+							]));
+						});
+						top.appendChild(tbl);
+					}
+				}
+
+				var hist = document.getElementById('bcw-evo-hist');
+				if (hist) {
+					hist.innerHTML = '';
+					hist.appendChild(E('div', { style: 'font-weight:bold;font-size:13px;margin-bottom:6px;' }, '📈 История поколений'));
+					if (!st.history || !st.history.length) {
+						hist.appendChild(E('div', { style: 'font-size:12px;color:#abb2bf;' }, 'Поколений пока нет.'));
+					} else {
+						st.history.slice().reverse().forEach(function(h) {
+							hist.appendChild(E('div', { style: 'font-size:12px;padding:6px 0;border-bottom:1px solid var(--bcw-border-divider);' }, [
+								E('span', { style: 'color:#61afef;font-family:monospace;' }, fmtStamp(h.ts) + '  '),
+								E('span', {}, 'сгенерировано ' + h.generated + ' · кроссовер ' + (h.crossed || 0) +
+									' · из памяти ' + (h.exploit || 0) + ' · стабильных ' + (h.stable || 0) +
+									' · всего в памяти ' + h.total),
+								h.applied ? E('div', { style: 'font-family:monospace;font-size:11px;color:#98c379;margin-top:3px;' }, '→ ' + shortArgs(h.applied)) : null
+							].filter(Boolean)));
+						});
+					}
+				}
+
+				if (st.running) {
+					if (evoPollTimer) clearTimeout(evoPollTimer);
+					evoPollTimer = setTimeout(refreshEvolution, 4000);
+				}
+			}).catch(function() {});
+		}
+
 		function switchMainTab(id) {
 			if (!mainTabPanels[id]) id = 'scan';
 			mainTabDefs.forEach(function(def) {
@@ -1865,6 +2006,7 @@ return view.extend({
 				}
 			});
 			try { localStorage.setItem(MAIN_TAB_KEY, id); } catch (e) {}
+			if (id === 'evolve') refreshEvolution();
 		}
 
 		mainTabDefs.forEach(function(def) {

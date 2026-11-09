@@ -394,6 +394,118 @@ local function mode_shortlist()
     end
 end
 
+-- --------------------------------------------- режимы history и status -------
+
+local function read_pairs(path)
+    local out = {}
+    local f = io.open(path, "r")
+    if f then
+        for line in f:lines() do
+            local k, v = line:match("^([%w_]+)=(.*)$")
+            if k then out[k] = v end
+        end
+        f:close()
+    end
+    return out
+end
+
+local function mode_history()
+    local genomes_path = arg[2]
+    local provider = arg[3] or "default"
+    local stats_path = arg[4]
+
+    local db = read_json(genomes_path) or { providers = {} }
+    db.providers = db.providers or {}
+    local prov = db.providers[provider] or { genomes = {} }
+    db.providers[provider] = prov
+    prov.history = prov.history or {}
+
+    local st = read_pairs(stats_path)
+    local n = 0
+    for _ in pairs(prov.genomes) do n = n + 1 end
+
+    prov.history[#prov.history + 1] = {
+        ts = now_ts(),
+        generated = tonumber(st.generated) or 0,
+        crossed = tonumber(st.crossed) or 0,
+        exploit = tonumber(st.exploit) or 0,
+        stable = tonumber(st.stable) or 0,
+        applied = st.applied or "",
+        total = n,
+    }
+
+    -- храним 30 последних поколений
+    while #prov.history > 30 do table.remove(prov.history, 1) end
+
+    write_json(genomes_path, db)
+    print(json.stringify({ ok = true, total = n, generations = #prov.history }))
+end
+
+local function is_running()
+    local f = io.open("/tmp/bcw_evolve.running", "r")
+    if not f then return false, 0 end
+    local pid = tonumber(f:read("*a")) or 0
+    f:close()
+    if pid <= 0 then return false, 0 end
+    local ok = os.execute("kill -0 " .. pid .. " 2>/dev/null")
+    return ok == true or ok == 0, pid
+end
+
+local function mode_status()
+    local genomes_path = arg[2]
+    local provider = arg[3] or "default"
+
+    local db = read_json(genomes_path) or { providers = {} }
+    local prov = (db.providers or {})[provider] or { genomes = {}, history = {} }
+
+    local running, pid = is_running()
+
+    local top = {}
+    for id, g in pairs(prov.genomes or {}) do
+        if g.args then
+            top[#top + 1] = {
+                id = id,
+                args = g.args,
+                ok = g.ok or 0,
+                fail = g.fail or 0,
+                best = g.best or 0,
+                stability = g.stability or 0,
+                last = g.last or 0,
+            }
+        end
+    end
+    table.sort(top, function(a, b)
+        return (a.ok * 1000 + a.stability * 2 + a.best / 1024) > (b.ok * 1000 + b.stability * 2 + b.best / 1024)
+    end)
+
+    local top_n = {}
+    for i = 1, math.min(#top, 10) do top_n[i] = top[i] end
+
+    local hist = prov.history or {}
+    local hist_n = {}
+    local start = math.max(1, #hist - 14)
+    for i = start, #hist do hist_n[#hist_n + 1] = hist[i] end
+
+    local last_run = 0
+    if #hist > 0 then last_run = hist[#hist].ts end
+
+    -- ближайший ночной запуск: 04:23 по местному времени
+    local lt = os.date("*t")
+    local next_run = os.time({ year = lt.year, month = lt.month, day = lt.day, hour = 4, min = 23, sec = 0 })
+    if next_run <= now_ts() then next_run = next_run + 86400 end
+
+    print(json.stringify({
+        provider = provider,
+        running = running,
+        pid = pid,
+        last_run = last_run,
+        next_run = next_run,
+        total_genomes = #top,
+        history = hist_n,
+        top = top_n,
+    }))
+end
+
 if mode == "gen" then
     mode_gen()
 elseif mode == "update" then
@@ -402,6 +514,10 @@ elseif mode == "provider" then
     mode_provider()
 elseif mode == "shortlist" then
     mode_shortlist()
+elseif mode == "history" then
+    mode_history()
+elseif mode == "status" then
+    mode_status()
 else
-    print("usage: evolve.lua gen|update|provider|shortlist ...")
+    print("usage: evolve.lua gen|update|provider|shortlist|history|status ...")
 end
