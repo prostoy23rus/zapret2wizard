@@ -1,13 +1,15 @@
 {
 	"admin/services/blockcheckw": {
-		"title": "Zapret2Wizard (Поиск стратегий)",
+		"title": "Zapret2Wizard",
 		"order": 65,
 		"action": {
 			"type": "view",
 			"path": "blockcheckw/main"
 		},
 		"depends": {
-			"acl": [ "luci-app-blockcheckw" ]
+			"acl": [
+				"luci-app-blockcheckw"
+			]
 		}
 	}
 }
