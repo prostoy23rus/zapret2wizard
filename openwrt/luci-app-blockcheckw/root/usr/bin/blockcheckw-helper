@@ -2569,8 +2569,11 @@ cmd_test() {
     ensure_dpi_service
     local out
     out=$(cmd_test_impl "$@")
-    printf '%s\n' "$out"
+    # Метрики печатаем ПЕРВЫМИ: все вызывающие берут `cmd_test | tail -1`
+    # и ждут JSON проверки. Раньше последней строкой шла запись истории,
+    # из-за чего selftest и стабильность всегда видели 000/неудачу.
     record_test_metrics "$out" "${1:-preset_youtube}"
+    printf '%s\n' "$out"
 }
 
 # Серия независимых проверок одного и того же канала. Один удачный curl ещё
