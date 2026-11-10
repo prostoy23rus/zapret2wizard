@@ -3137,7 +3137,7 @@ _kmods_fetch_official() {
     local base="https://downloads.openwrt.org/releases/$rel/targets/$tgt/kmods"
     local idx dir list pkg file
     idx=$(curl -fsSL -m 20 "$base/" 2>/dev/null) || return 1
-    dir=$(printf '%s' "$idx" | grep -oE "href=\"$kv[^\"/]*/\"" | head -1 | sed 's/^href="//; s/"$//')
+    dir=$(printf '%s' "$idx" | grep -oE "href=\"${kv}[^\"/]*/\"" | head -1 | sed 's/^href="//; s/"$//')
     [ -n "$dir" ] || return 1
     echo "[kmods] официальный фид: $base/$dir" >> /tmp/bcw_kmods.log
     [ "$dry" = "dry" ] && echo "$base/$dir"

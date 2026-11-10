@@ -2546,19 +2546,30 @@ return view.extend({
 				id: 'bcw-route-audit',
 				style: 'margin-top:8px; margin-left:6px; font-size:12px; padding:4px 10px;'
 			}, '▶ Проверить YouTube');
+			var auditOut = E('div', {
+				id: 'bcw-route-audit-out',
+				style: 'font-size:12px; margin-top:6px; display:none;'
+			});
 			auditBtn.addEventListener('click', function() {
 				auditBtn.disabled = true;
-				status.textContent = '⏳ Проверяю веб, превью, API и CDN...';
+				auditOut.style.display = '';
+				auditOut.style.color = '#abb2bf';
+				auditOut.textContent = '⏳ Проверяю веб, превью, API и CDN...';
 				fs.exec(HELPER_BIN, ['youtube_audit']).then(function(res) {
 					auditBtn.disabled = false;
 					var d = null;
 					try { d = JSON.parse(res.stdout); } catch (e) {}
-					if (!d) { status.textContent = '✗ Не удалось разобрать ответ'; return; }
-					status.textContent = d.ok
+					if (!d) { auditOut.textContent = '✗ Не удалось разобрать ответ'; return; }
+					// отдельная строка: периодическое обновление карточки её не трогает
+					auditOut.textContent = d.ok
 						? '✓ YouTube: OK (' + d.score + '/' + d.total + '), маршрут ' + ((d.route && d.route.backend) || '?')
 						: '✗ YouTube: ' + (d.advice || 'проблема') + ' (' + d.score + '/' + d.total + ')';
-					status.style.color = d.ok ? '#98c379' : '#e06c75';
-				}).catch(function() { auditBtn.disabled = false; status.textContent = '✗ ошибка проверки'; });
+					auditOut.style.color = d.ok ? '#98c379' : '#e06c75';
+				}).catch(function() {
+					auditBtn.disabled = false;
+					auditOut.textContent = '✗ ошибка проверки';
+					auditOut.style.color = '#e06c75';
+				});
 			});
 
 			var card = E('div', { class: 'bcw-card', id: 'bcw-route-card', style: 'padding: 14px; margin-top: 16px; display: none;' }, [
@@ -2572,6 +2583,7 @@ return view.extend({
 					E('span', {}, 'Не отправлять в туннель домены, которые обслуживает служба')
 				]),
 				status,
+				auditOut,
 				E('div', {}, [showBtn, rebuildBtn, auditBtn]),
 				domainList
 			]);
