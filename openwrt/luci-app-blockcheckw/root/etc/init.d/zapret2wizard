@@ -338,6 +338,12 @@ start_service() {
 	# uci2config обязан быть исполняемым: иначе стратегии применяются в UCI,
 	# но config не пересобирается и движок работает по старому профилю.
 	[ -x /usr/share/zapret2wizard/uci2config ] || chmod 755 /usr/share/zapret2wizard/uci2config 2>/dev/null || true
+	# DNS: уникальные googlevideo-хосты через DoH, иначе dns-failsafe ждёт
+	# медленный upstream и Shorts стартуют с задержкой в секунды.
+	[ -x /usr/bin/blockcheckw-helper ] && /usr/bin/blockcheckw-helper optimize_dns >/dev/null 2>&1 || true
+	# QUIC: если UDP/443 реально проходит — не режем его, приложение не ждёт
+	# fallback; если нет — reject + без ICMP-лимита, чтобы падение на TCP было быстрым.
+	[ -x /usr/bin/blockcheckw-helper ] && /usr/bin/blockcheckw-helper quic_mode >/dev/null 2>&1 || true
 	kill_foreign_engines
 
 	local uci_pkg="zapret2wizard"

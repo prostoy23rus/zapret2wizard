@@ -3184,6 +3184,59 @@ cmd_kmods_status() {
     printf '{"running":%d,"nfnetlink_queue":%d,"nft_queue":%d,"log":"%s"}\n' "$running" "$nfq" "$nftq" "$logt"
 }
 
+# Проверка QUIC-пути (UDP/443) без QUIC-клиента: Version Negotiation.
+# DNS-оптимизация: уникальные rr*.googlevideo.com идут через DoH-прокси
+# (dns-failsafe сначала ждёт медленный upstream ~1 c, из-за чего Shorts
+# стартуют с задержкой). Трогаем только если DoH реально слушает 5053.
+cmd_optimize_dns() {
+    local changed=0 entry dom cs
+    uci -q get dhcp.@dnsmasq[0] >/dev/null 2>&1 || return 0
+    netstat -ln 2>/dev/null | grep -q '127.0.0.1:5053' || return 0
+    for dom in googlevideo.com ytimg.com ggpht.com; do
+        entry="/$dom/127.0.0.1#5053"
+        if ! uci -q get dhcp.@dnsmasq[0].server 2>/dev/null | grep -q "/$dom/"; then
+            uci add_list dhcp.@dnsmasq[0].server="$entry"
+            changed=1
+        fi
+    done
+    cs=$(uci -q get dhcp.@dnsmasq[0].cachesize 2>/dev/null)
+    case "$cs" in ''|*[!0-9]*) uci set dhcp.@dnsmasq[0].cachesize='2000'; changed=1 ;; *) [ "$cs" -lt 1000 ] && { uci set dhcp.@dnsmasq[0].cachesize='2000'; changed=1; } ;; esac
+    if [ "$changed" = "1" ]; then
+        uci commit dhcp
+        /etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
+    fi
+    echo "{\"changed\":$changed}"
+}
+
+cmd_quic_probe() {
+    local ips
+    ips=$(nslookup www.youtube.com 2>/dev/null | awk '/^Address: /{print $2}' | head -3 | tr '\n' ' ')
+    [ -n "$ips" ] || ips="142.250.74.138 172.217.117.4"
+    lua /usr/share/zapret2wizard/quicprobe.lua "$ips" >/dev/null 2>&1
+}
+
+# Политика QUIC: auto — разрешаем, если QUIC реально проходит, иначе
+# оставляем reject с быстрым ICMP (иначе приложение ждёт fallback 3-5 с).
+cmd_quic_mode() {
+    local mode=$(uci -q get zapret2wizard.main.quic_mode 2>/dev/null || echo auto)
+    [ -n "$mode" ] || mode="auto"
+    local want=1
+    case "$mode" in
+        allow) want=0 ;;
+        reject) want=1 ;;
+        *) cmd_quic_probe && want=0 || want=1 ;;
+    esac
+    local cur=$(uci -q get firewall.reject_quic.enabled 2>/dev/null)
+    [ -n "$cur" ] || cur=1
+    if [ "$want" != "$cur" ] && uci -q get firewall.reject_quic >/dev/null 2>&1; then
+        uci set firewall.reject_quic.enabled="$want"
+        uci commit firewall
+        /etc/init.d/firewall reload >/dev/null 2>&1 || true
+    fi
+    sysctl -w net.ipv4.icmp_ratelimit=0 >/dev/null 2>&1 || true
+    echo "{\"reject_quic\":$want,\"mode\":\"$mode\"}"
+}
+
 # Приложение YouTube ходит в youtubei.googleapis.com, который МТС блокирует
 # отдельным SNI. Если этот хост не открывается, добавляем отдельную секцию
 # YTApi со своим desync и исключаем хост из основной секции.
@@ -5539,6 +5592,9 @@ kmods_install_bg) cmd_kmods_install_bg ;;
 kmods_status) cmd_kmods_status ;;
 kmods_resolve) shift; _kmods_fetch_official "$@" dry ;;
 fix_ytapi) cmd_fix_ytapi ;;
+quic_probe) cmd_quic_probe && echo ok || echo fail ;;
+quic_mode) cmd_quic_mode ;;
+optimize_dns) cmd_optimize_dns ;;
     install_engine) cmd_install_engine ;;
     selftest) shift; cmd_selftest "$@" ;;
     class) shift; cmd_class "$@" ;;
