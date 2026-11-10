@@ -2,7 +2,7 @@
 
 **Автономный обход DPI/ТСПУ для OpenWrt:** движок `zapret2 (nfqws2)`, собственный сканер стратегий, подбор под конкретного провайдера и веб-интерфейс LuCI. Ставится одним пакетом, работает без сторонних зависимостей и без интернета после установки.
 
-[![Version](https://img.shields.io/badge/version-0.18.35-00d1b2?style=flat-square)](https://github.com/prostoy23rus/zapret2wizard/releases)
+[![Version](https://img.shields.io/badge/version-0.19.0-00d1b2?style=flat-square)](https://github.com/prostoy23rus/zapret2wizard/releases)
 [![OpenWrt](https://img.shields.io/badge/OpenWrt-23.05%20|%2024.10%20|%2025.x-blue?style=flat-square)](https://openwrt.org)
 [![Arch](https://img.shields.io/badge/arch-aarch64%20|%20arm%20|%20x86__64%20|%20mips%20|%20mipsel%20|%20riscv64-success?style=flat-square)](#поддерживаемые-архитектуры)
 [![License](https://img.shields.io/badge/license-MIT-yellow?style=flat-square)](LICENSE)
@@ -20,6 +20,7 @@
 - **Обход работает для всех устройств в сети** — телефоны, ноутбуки, ТВ. Настраивается на роутере, клиенты ничего не ставят.
 - **Стратегия подбирается под вашего провайдера.** Готовых универсальных стратегий не бывает: сканер проверяет кандидатов реальной загрузкой до 256 КБ и применяет только ту, что действительно пропускает трафик.
 - **Обход только там, где нужно** — отдельные списки доменов для YouTube, Discord, Twitch, X, Instagram, плюс «Свои домены» и список исключений.
+- **Прямой маршрут без ZeroBlock** — если маршрутизацией занимается `steer`, домены службы уходят в его родные «Исключения» (`exclude.lst`), а не в туннель. Для mihomo/sing-box/своего nft — правило `return` до маркировки, IPv4 и IPv6. YouTube видит один и тот же IP, Gemini остаётся в туннеле.
 - **Самодиагностика**: `doctor`, `selftest`, `class` — показывают, что сломано и какой класс фильтрации у провайдера.
 - **Живёт после перезагрузки**: автозапуск, восстановление после подбора, самоподъём службы.
 
@@ -118,6 +119,11 @@ blockcheckw-helper catalog_fetch AS25490    # или вручную
 blockcheckw-helper doctor      # окружение: nftables, движок, служба, права, автозапуск
 blockcheckw-helper selftest    # живая проверка: статус, HTTP-код, байты, DNS, контрольный сайт
 blockcheckw-helper class       # 9 базовых приёмов desync → класс ТСПУ и рекомендация
+blockcheckw-helper bypass enable   # прямой маршрут: steer/nft определится сам
+blockcheckw-helper bypass status   # backend, домены, правила, проверка steer
+blockcheckw-helper youtube_audit   # веб + превью + API + CDN + маршрут, с подсказкой
+blockcheckw-helper quic_mode fake  # fake QUIC Initial вместо глобального reject
+blockcheckw-helper netcheck    # CIDR-whitelist, обрезка 16 КБ, подмена DNS
 blockcheckw-helper autosetup   # подбор YouTube и Discord с нуля
 blockcheckw-helper evolve      # синтез новых комбинаций + память по провайдеру
 blockcheckw-helper toggle <сервис>  # включить/выключить обход для сервиса
@@ -125,6 +131,9 @@ blockcheckw-helper update      # обновление с GitHub
 ```
 
 `class` полезен, когда подбор не находит ничего: он показывает, какие механики провайдер пропускает, и подсказывает семейство стратегий.
+
+Прямой маршрут для steer и других оркестраторов: [docs/ROUTE-STEER.md](docs/ROUTE-STEER.md).
+Разбор эталонных репозиториев и выбранных техник: [docs/ANALYSIS-2026-11.md](docs/ANALYSIS-2026-11.md).
 
 ## Что проверено
 
@@ -134,6 +143,8 @@ blockcheckw-helper update      # обновление с GitHub
 | RouteRich | OpenWrt 24.10 (opkg) | Краснодар | YouTube 200 · ~970 КБ, Discord 200 · 170 КБ, BBC/Facebook 200 |
 
 Установка проверена двумя способами на одном и том же роутере: бандлом и пакетом `.apk` (включая обновление `0.18.31 → 0.18.34` с сохранением конфига).
+
+Маршрутный движок проверяется без роутера: `sudo unshare -n sh tools/test_route_engine.sh` — nft-таблица в отдельном netns, steer-заглушка, проверка «правило до `mark set`», IPv4/IPv6 и отката.
 
 ## Если обход не работает
 
@@ -148,6 +159,7 @@ blockcheckw-helper selftest
 | `status: degraded`, ответ рвётся на 16 КБ | ТСПУ режет поток | запустить подбор: кандидаты проверяются полной загрузкой, обрезанные отклоняются |
 | подбор пишет «не найдено», но сервис открывается | подбор ищет **новые** варианты, текущая стратегия уже работает | это норма; сообщение теперь так и объясняет |
 | всё зелёное, сайт не открывается | кэш браузера / QUIC | Ctrl+F5, отключить QUIC |
+| YouTube открывается, но регион прыгает / Shorts тормозят | часть доменов уходит в туннель (`steer`), часть — напрямую | `blockcheckw-helper bypass enable`, затем `bypass status` и `youtube_audit` |
 
 Полный разбор — в [docs/ZAPRET2-KNOWLEDGE.md](docs/ZAPRET2-KNOWLEDGE.md) и [skills/zapret2-desync/SKILL.md](skills/zapret2-desync/SKILL.md).
 

@@ -33,6 +33,37 @@ jobs:
       # бинарём: среди юнит-тестов оно убивало чужих детей (`nfqws2::run`).
       - run: cargo test --test background_shutdown
 
+  # Скрипты OpenWrt (helper, init, uci2config) живут вне rust-тестов, но это
+  # такой же код пакета: проверяем синтаксис busybox ash и гоняем shell-тесты
+  # из tools/. Route-тест ставит nft-правила в отдельный netns, поэтому нужен
+  # root — на раннере он есть через sudo.
+  openwrt-scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq busybox-static nftables
+
+      - name: Syntax check (busybox ash)
+        run: |
+          for f in openwrt/luci-app-blockcheckw/root/usr/bin/blockcheckw-helper \
+                   openwrt/luci-app-blockcheckw/root/etc/init.d/zapret2wizard \
+                   openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/uci2config; do
+            printf '%s: ' "$f"
+            busybox ash -n "$f" && echo OK
+          done
+
+      - name: Helper unit tests
+        run: |
+          sh tools/test_quic_mode.sh
+          sh tools/test_netcheck.sh
+
+      - name: Route engine (netns)
+        run: sudo unshare -n sh tools/test_route_engine.sh
+
   # Экзотические цели собираются ТОЛЬКО в релизном воркфлоу, поэтому их поломка
   # всплывала уже после нарезки тега: v0.11.0 потерял mips, mipsel и ppc на
   # `AtomicU64` в зависимости — при зелёном CI на самом PR. Здесь они проверяются

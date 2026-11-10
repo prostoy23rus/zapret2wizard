@@ -1,12 +1,16 @@
 {
-  "version": "0.18.84",
-  "release_date": "2026-11-09",
+  "version": "0.19.0",
+  "release_date": "2026-11-10",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "Shorts: найден источник задержки — desync для API-хоста youtubei; выбран более быстрый вариант hostfakesplit:host=gosuslugi.ru",
-    "fix_ytapi теперь пробует gosuslugi первым: открытие Shorts ~2.2 c вместо ~4.3 c при host=www.google.com",
-    "Подтверждено: без обхода Shorts открываются за 0.5 c, с обходом и медленным API-профилем — 4.3 c; разница в стратегии API",
-    "Напоминание: DNS видео-хостов и QUIC-политика из 0.18.83 остаются"
+    "Прямой маршрут без ZeroBlock: для steer используются родные исключения /etc/zm-steer/user/exclude.lst (домены, IPv4/IPv6/QUIC/DoH), для остальных оркестраторов — nft-наборы bcw_route4/6 и return до маркировки",
+    "Домены маршрута отделены от широких hostlist: youtube.lst не тянет google.com и Gemini; YTApi и youtubei больше не остаются в туннеле",
+    "Исправлен резолв IP (busybox nslookup: Address 1:, AAAA), добавлены IPv6-наборы и проверка покрытия",
+    "Эталонные связки RU 2026 (Flowseal / Zapret-Manager) в подборе: multisplit pos=1 seqovl=681 + ip_id=zero, hostfakesplit, multidisorder по SNI/host",
+    "Подбор больше не идёт через steer: туннель временно выключается, иначе «рабочая» стратегия — это туннель; doctor и UI показывают реальный backend",
+    "В карточке «Обход туннелей» — выбор backend (авто/steer/nft) и кнопка «Проверить YouTube»; переключение снимает блок из steer или nft-правила, чтобы не было двух источников правды",
+    "Новый режим quic_mode=fake: fake QUIC Initial (blob Google) перед настоящим вместо глобального reject — QUIC остаётся живым, DPI видит поддельный Initial",
+    "netcheck: классификация CIDR-whitelist / обрезки 16 КБ / подмены DNS локальными средствами, без внешних API"
   ]
 }

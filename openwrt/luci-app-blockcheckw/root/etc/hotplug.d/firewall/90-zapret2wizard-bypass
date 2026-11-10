@@ -3,5 +3,6 @@
 # правила «эти домены не заворачивать в туннель» исчезают. Возвращаем их
 # в фоне, чтобы не задерживать сам reload.
 [ -x /usr/bin/blockcheckw-helper ] || exit 0
-( sleep 2; /usr/bin/blockcheckw-helper bypass_sync enable >/dev/null 2>&1 ) &
+# sync: возвращаем только то, что пользователь включил сам (route_enabled).
+( sleep 2; /usr/bin/blockcheckw-helper bypass_sync sync >/dev/null 2>&1 ) &
 exit 0

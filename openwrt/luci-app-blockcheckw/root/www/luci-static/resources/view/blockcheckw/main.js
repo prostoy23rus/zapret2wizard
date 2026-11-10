@@ -2432,18 +2432,29 @@ return view.extend({
 				try { st = JSON.parse(res.stdout); } catch (e) {}
 				var card = document.getElementById('bcw-steer-card');
 				var toggle = document.getElementById('bcw-steer-toggle');
+				var backendSel = document.getElementById('bcw-steer-backend');
 				var status = document.getElementById('bcw-steer-status');
 				if (!card || !st) return;
-				if (!st.targets) { card.style.display = 'none'; return; }
+				// available: маршрут применим (steer или таблицы с маркировкой),
+				// даже если сейчас выключен — иначе галочку не вернуть.
+				if (!st.targets && !st.available) { card.style.display = 'none'; return; }
 				card.style.display = '';
 				if (toggle) toggle.checked = !!st.rules;
+				if (backendSel && st.pref) backendSel.value = st.pref;
 				if (status) {
 					if (st.rules) {
-						status.textContent = 'Исключено из туннелей: ' + (st.packets || 0) + ' пакетов · доменов ' +
-							(st.domains || 0) + ' · IP ' + (st.members || 0);
+						if (st.backend === 'steer') {
+							status.textContent = 'Прямой маршрут steer: доменов ' + (st.excluded || st.domains || 0) +
+								(st.verified ? ' · проверено' : ' · проверка идёт');
+						} else {
+							status.textContent = 'Исключено из туннелей: ' + (st.packets || 0) + ' пакетов · доменов ' +
+								(st.domains || 0) + ' · IP ' + (st.members || 0);
+						}
 						status.style.color = '#98c379';
 					} else {
-						status.textContent = 'Выключено: домены службы уходят в туннель';
+						status.textContent = st.backend === 'steer'
+							? 'Выключено: steer снова забирает домены службы в туннель'
+							: 'Выключено: домены службы уходят в туннель';
 						status.style.color = '#abb2bf';
 					}
 				}
@@ -2454,6 +2465,24 @@ return view.extend({
 			var toggle = E('input', { type: 'checkbox', id: 'bcw-steer-toggle', style: 'margin: 0 8px 0 0; vertical-align: middle;' });
 			var status = E('div', { id: 'bcw-steer-status', style: 'font-size: 12px; color: #abb2bf; margin-top: 8px;' }, 'Загрузка...');
 			var title = E('div', { style: 'font-weight:bold;font-size:13px;margin-bottom:6px;' }, '🔀 Обход туннелей');
+
+			var backendSel = E('select', {
+				id: 'bcw-steer-backend',
+				style: 'margin-top:8px; font-size:12px; padding:3px 6px;'
+			}, [
+				E('option', { value: 'auto' }, 'Авто: steer, если есть'),
+				E('option', { value: 'steer' }, 'Только steer'),
+				E('option', { value: 'nft' }, 'Только nft')
+			]);
+			backendSel.addEventListener('change', function() {
+				backendSel.disabled = true;
+				status.textContent = '⏳ Переключаю backend...';
+				fs.exec(HELPER_BIN, ['bypass', 'backend', backendSel.value]).then(function() {
+					backendSel.disabled = false;
+					setTimeout(refreshSteerCard, 1000);
+					setTimeout(refreshSteerCard, 4000);
+				}).catch(function() { backendSel.disabled = false; status.textContent = '✗ ошибка backend'; });
+			});
 
 			toggle.addEventListener('change', function() {
 				var want = toggle.checked;
@@ -2510,14 +2539,38 @@ return view.extend({
 				}).catch(function() { rebuildBtn.disabled = false; });
 			});
 
+			var auditBtn = E('button', {
+				class: 'bcw-btn-secondary',
+				id: 'bcw-steer-audit',
+				style: 'margin-top:8px; margin-left:6px; font-size:12px; padding:4px 10px;'
+			}, '▶ Проверить YouTube');
+			auditBtn.addEventListener('click', function() {
+				auditBtn.disabled = true;
+				status.textContent = '⏳ Проверяю веб, превью, API и CDN...';
+				fs.exec(HELPER_BIN, ['youtube_audit']).then(function(res) {
+					auditBtn.disabled = false;
+					var d = null;
+					try { d = JSON.parse(res.stdout); } catch (e) {}
+					if (!d) { status.textContent = '✗ Не удалось разобрать ответ'; return; }
+					status.textContent = d.ok
+						? '✓ YouTube: OK (' + d.score + '/' + d.total + '), маршрут ' + ((d.route && d.route.backend) || '?')
+						: '✗ YouTube: ' + (d.advice || 'проблема') + ' (' + d.score + '/' + d.total + ')';
+					status.style.color = d.ok ? '#98c379' : '#e06c75';
+				}).catch(function() { auditBtn.disabled = false; status.textContent = '✗ ошибка проверки'; });
+			});
+
 			var card = E('div', { class: 'bcw-card', id: 'bcw-steer-card', style: 'padding: 14px; margin-top: 16px; display: none;' }, [
 				title,
+				E('div', { style: 'font-size:12px; color:var(--bcw-text-title); margin-bottom:6px;' }, [
+					E('span', {}, 'Маршрут: '),
+					backendSel
+				]),
 				E('label', { style: 'font-size: 12.5px; color: var(--bcw-text-title); display:flex; align-items:flex-start; gap:2px; cursor:pointer;' }, [
 					toggle,
 					E('span', {}, 'Не отправлять в туннель домены, которые обслуживает служба')
 				]),
 				status,
-				E('div', {}, [showBtn, rebuildBtn]),
+				E('div', {}, [showBtn, rebuildBtn, auditBtn]),
 				domainList
 			]);
 			setTimeout(refreshSteerCard, 1200);

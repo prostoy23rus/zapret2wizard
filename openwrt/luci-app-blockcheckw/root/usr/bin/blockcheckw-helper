@@ -661,6 +661,12 @@ curl_test_https_tls12 ipv4 $domain : nfqws2 --payload=tls_client_hello --lua-des
 curl_test_https_tls13 ipv4 $domain : nfqws2 --payload=tls_client_hello --lua-desync=hostfakesplit:host=www.google.com:tcp_md5:midhost=midsld:disorder_after:ip_id=zero
 curl_test_https_tls13 ipv4 $domain : nfqws2 --payload=tls_client_hello --lua-desync=multidisorder:pos=midsld:seqovl=sniext+1:seqovl_pattern=0x16030300
 curl_test_https_tls13 ipv4 $domain : nfqws2 --payload=tls_client_hello --lua-desync=fakeddisorder:pos=midsld:ip_autottl=-2,3-20:ip_id=zero
+
+# --- Family 9: Эталонные связки RU 2026 (Flowseal / Zapret-Manager) ---
+curl_test_https_tls12 ipv4 $domain : nfqws2 --payload=tls_client_hello --lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=blob_tls_clienthello_www_google_com:ip_id=zero
+curl_test_https_tls13 ipv4 $domain : nfqws2 --payload=tls_client_hello --lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=blob_tls_clienthello_www_google_com:ip_id=zero
+curl_test_https_tls13 ipv4 $domain : nfqws2 --payload=tls_client_hello --lua-desync=fake:blob=0x0F0F0F0F:tcp_seq=-10000:tcp_ack=-66000:badsum --lua-desync=multisplit:pos=2,sld:seqovl=620:seqovl_pattern=blob_tls_clienthello_www_google_com
+curl_test_https_tls13 ipv4 $domain : nfqws2 --payload=tls_client_hello --lua-desync=multidisorder:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1
 EOF
 
     # Family 7: Window Size Scaling (wssize) - STRICTLY for non-discord targets
@@ -835,7 +841,7 @@ generate_adaptive_corpus() {
             local pos_list = {
                 "pos=1,midsld",
                 "pos=1,midsld,1220",
-                "pos=1,slectv+1,mlds:0-2,acold,eopold+2,ewdhost=1",
+                "pos=1,sniext+1,midsld-2,midsld,midsld+2,endhost-1",
                 "pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1",
                 "pos=2,midsld",
                 "pos=sniext+1,host+1",
@@ -863,6 +869,7 @@ generate_adaptive_corpus() {
             add_cand("--in-range=-s1 --lua-desync=oob:urp=midsld")
             add_cand("--in-range=-s1 --lua-desync=oob:urp=2")
             add_cand("--in-range=-s1 --lua-desync=oob:urp=0")
+            add_cand("--in-range=-s1 --lua-desync=oob:urp=b")
         end
         if fams.syndata then
             add_cand("--lua-desync=syndata --payload=tls_client_hello --lua-desync=multisplit:pos=1,midsld")
@@ -892,6 +899,21 @@ generate_adaptive_corpus() {
             add_cand("--payload=tls_client_hello --lua-desync=fakeddisorder:pos=midsld:tcp_md5")
             add_cand("--payload=tls_client_hello --lua-desync=fakeddisorder:pos=1,midsld:tcp_md5")
             add_cand("--payload=tls_client_hello --lua-desync=fake:blob=0x00000000:tcp_md5:repeats=6")
+        end
+
+        -- 9. Эталонные связки RU 2026 (Flowseal / Zapret-Manager, переведены
+        --    в синтаксис zapret2). blob_tls_clienthello_www_google_com —
+        --    реальный 681-байтный ClientHello www.google.com из комплекта.
+        if fams.fake or fams.seqovl or not any_active then
+            add_cand("--payload=tls_client_hello --lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=blob_tls_clienthello_www_google_com:ip_id=zero")
+            add_cand("--payload=tls_client_hello --lua-desync=multisplit:pos=1,sniext+1:seqovl=1")
+            add_cand("--payload=tls_client_hello --lua-desync=fake:blob=0x0F0F0F0F:tcp_seq=-10000:tcp_ack=-66000:badsum --lua-desync=multisplit:pos=2,sld:seqovl=620:seqovl_pattern=blob_tls_clienthello_www_google_com")
+            add_cand("--payload=tls_client_hello --lua-desync=fake:blob=blob_tls_clienthello_www_google_com:tcp_md5:repeats=6 --lua-desync=multisplit:pos=midsld")
+            add_cand("--payload=tls_client_hello --lua-desync=multidisorder:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1")
+            add_cand("--payload=tls_client_hello --lua-desync=hostfakesplit:host=www.google.com:tcp_ts=-600000")
+            add_cand("--payload=tls_client_hello --lua-desync=multidisorder:pos=1,midsld:seqovl=2:seqovl_pattern=0x16030300")
+            add_cand("--payload=tls_client_hello --lua-desync=fakeddisorder:pos=midsld:tcp_md5")
+            add_cand("--payload=tls_client_hello --lua-desync=fake:blob=0x00000000:ip_autottl=-2,3-20:repeats=6 --lua-desync=multisplit:pos=1,midsld")
         end
 
         -- Deduplicate candidates
@@ -1031,6 +1053,7 @@ cmd_start() {
             [ "$xray_stopped" = "1" ] && /etc/init.d/xray start >/dev/null 2>&1
             [ "$openclash_stopped" = "1" ] && /etc/init.d/openclash start >/dev/null 2>&1
             [ "$passwall_stopped" = "1" ] && /etc/init.d/passwall start >/dev/null 2>&1
+            [ "$steer_stopped" = "1" ] && /etc/init.d/steer start >/dev/null 2>&1
 
             # Restore DPI service if not running — или если исчезла таблица nft:
             # сканер сносит inet zapret2wizard, но процессы nfqws2 при этом
@@ -1099,6 +1122,15 @@ cmd_start() {
             echo "[blockcheckw-helper] passwall is running. Temporarily suspending..." >> "$LOG_FILE"
             /etc/init.d/passwall stop >/dev/null 2>&1
             passwall_stopped=1
+        fi
+
+        # steer заворачивает домены в туннель: на время замера он должен быть
+        # выключен, иначе «работающая» стратегия — это туннель, а не обход.
+        local steer_stopped=0
+        if [ -x /etc/init.d/steer ] && /etc/init.d/steer status 2>/dev/null | grep -qiE 'running|active'; then
+            echo "[blockcheckw-helper] steer is running. Temporarily suspending..." >> "$LOG_FILE"
+            /etc/init.d/steer stop >/dev/null 2>&1
+            steer_stopped=1
         fi
 
         # Flush DNS cache in case Fake-IP pool (198.18.x.x) was cached by dnsmasq
@@ -3215,17 +3247,40 @@ cmd_quic_probe() {
     lua /usr/share/zapret2wizard/quicprobe.lua "$ips" >/dev/null 2>&1
 }
 
-# Политика QUIC: auto — разрешаем, если QUIC реально проходит, иначе
-# оставляем reject с быстрым ICMP (иначе приложение ждёт fallback 3-5 с).
+# Политика QUIC:
+#   auto   — разрешаем, если QUIC реально проходит, иначе reject с быстрым ICMP;
+#   allow  — не трогаем UDP/443;
+#   reject — режем UDP/443, приложение быстро падает на TCP;
+#   fake   — не режем, а подмешиваем fake QUIC Initial (blob Google) перед
+#            настоящим. Это техника Flowseal: DPI видит «чужой» Initial,
+#            а реальный QUIC продолжает работать. Если не помогло — reject.
 cmd_quic_mode() {
-    local mode=$(uci -q get zapret2wizard.main.quic_mode 2>/dev/null || echo auto)
+    local mode="${1:-$(uci -q get zapret2wizard.main.quic_mode 2>/dev/null || echo auto)}"
     [ -n "$mode" ] || mode="auto"
-    local want=1
+    case "$mode" in
+        allow|reject|fake|auto) ;;
+        *) mode="auto" ;;
+    esac
+    # Явный аргумент — сразу сохраняем в UCI, чтобы режим пережил reboot.
+    if [ -n "${1:-}" ] && command -v uci >/dev/null 2>&1; then
+        uci -q set zapret2wizard.main.quic_mode="$mode"
+        uci -q commit zapret2wizard
+    fi
+    local want=1 fake=0 restart=0
+    local blob="${BCW_QUIC_BLOB:-/usr/share/zapret2wizard/fake/quic_initial_www_google_com.bin}"
     case "$mode" in
         allow) want=0 ;;
         reject) want=1 ;;
+        fake)
+            if [ -f "$blob" ] && command -v uci >/dev/null 2>&1; then
+                want=0; fake=1
+            else
+                want=1; mode="reject"
+            fi
+            ;;
         *) cmd_quic_probe && want=0 || want=1 ;;
     esac
+
     local cur=$(uci -q get firewall.reject_quic.enabled 2>/dev/null)
     [ -n "$cur" ] || cur=1
     if [ "$want" != "$cur" ] && uci -q get firewall.reject_quic >/dev/null 2>&1; then
@@ -3233,8 +3288,42 @@ cmd_quic_mode() {
         uci commit firewall
         /etc/init.d/firewall reload >/dev/null 2>&1 || true
     fi
+
+    if command -v uci >/dev/null 2>&1; then
+        if [ "$fake" = "1" ]; then
+            uci -q set zapret2wizard.blob_quic_google=blob
+            uci -q set zapret2wizard.blob_quic_google.path="$blob"
+            uci -q set zapret2wizard.blob_quic_google.enabled=1
+            uci -q set zapret2wizard.BlockcheckW_QUIC=strategy
+            uci -q set zapret2wizard.BlockcheckW_QUIC.enabled=1
+            uci -q set zapret2wizard.BlockcheckW_QUIC.port=443
+            uci -q set zapret2wizard.BlockcheckW_QUIC.protocol=udp
+            uci -q delete zapret2wizard.BlockcheckW_QUIC.filter_l3
+            uci -q add_list zapret2wizard.BlockcheckW_QUIC.filter_l3=ipv4
+            uci -q delete zapret2wizard.BlockcheckW_QUIC.filter_l7
+            uci -q add_list zapret2wizard.BlockcheckW_QUIC.filter_l7=quic
+            uci -q set zapret2wizard.BlockcheckW_QUIC.script='--payload=quic_initial --lua-desync=fake:blob=blob_quic_google:repeats=6'
+            uci -q commit zapret2wizard
+        elif uci -q get zapret2wizard.BlockcheckW_QUIC >/dev/null 2>&1; then
+            # удаляем только свой профиль, чужой QUIC-профиль не трогаем
+            case "$(uci -q get zapret2wizard.BlockcheckW_QUIC.script 2>/dev/null)" in
+                *quic_initial*)
+                    uci -q delete zapret2wizard.BlockcheckW_QUIC
+                    uci -q commit zapret2wizard
+                    ;;
+            esac
+        fi
+        if [ -x /usr/share/zapret2wizard/uci2config ]; then
+            /usr/share/zapret2wizard/uci2config >/dev/null 2>&1 || true
+        fi
+        if [ "$BCW_QUIC_NO_RESTART" != "1" ] && _svc_running; then
+            restart_dpi_service
+            restart=1
+        fi
+    fi
+
     sysctl -w net.ipv4.icmp_ratelimit=0 >/dev/null 2>&1 || true
-    echo "{\"reject_quic\":$want,\"mode\":\"$mode\"}"
+    echo "{\"reject_quic\":$want,\"mode\":\"$mode\",\"fake_quic\":$fake,\"restart\":$restart}"
 }
 
 # Приложение YouTube ходит в youtubei.googleapis.com, который МТС блокирует
@@ -3354,32 +3443,35 @@ cmd_doctor() {
         add_check "наши движки" 0 "ни один экземпляр nfqws2 не запущен" "Перезапустите службу и проверьте лог: logread | grep -i nfqws | tail -20"
     fi
 
-    # Исключение наших доменов из любых туннелей/policy-routing
-    local bp_targets=$(bp_targets 2>/dev/null | wc -l)
-    local bp_covered=0
-    if [ "$bp_targets" -gt 0 ]; then
-        # Правила могли снести reload'ом firewall/туннеля — починим здесь же,
-        # быстрым режимом (без скачивания диапазонов и прогрева кэша).
-        BCW_BP_FAST=1 bp_sync >/dev/null 2>&1
-        if [ -f "$BP_STATE" ]; then
-            while read -r _bf _bt _bc; do
-                case "$_bf" in iptables|"") continue ;; esac
-                [ -n "$_bc" ] || continue
-                nft -a list chain "$_bf" "$_bt" "$_bc" 2>/dev/null | grep -q "bcw-bypass" && bp_covered=$((bp_covered + 1))
-            done < "$BP_STATE"
-        fi
-        local bperr=$(tail -n 1 "$BP_LOG" 2>/dev/null | tr -d '"' | tr '\n' ' ')
-        if [ "$bp_covered" -ge "$bp_targets" ]; then
-            add_check "обход туннелей" 1 "включено: цепочек $bp_covered из $bp_targets" ""
-        elif [ "$bp_covered" -gt 0 ]; then
-            local bpd="правила на $bp_covered из $bp_targets цепочек"
-            [ -n "$bperr" ] && bpd="$bpd: $bperr"
-            add_check "обход туннелей" 0 "$bpd" "Перепримените: blockcheckw-helper bypass enable"
+    # Прямой маршрут: steer (родные исключения) или nft-return.
+    local rj rbackend rtargets rrules rdom
+    rj=$(route_status 2>/dev/null)
+    rbackend=$(printf '%s' "$rj" | sed -n 's/.*"backend":"\([^"]*\)".*/\1/p')
+    rtargets=$(printf '%s' "$rj" | sed -n 's/.*"targets":\([0-9]*\).*/\1/p')
+    rrules=$(printf '%s' "$rj" | sed -n 's/.*"rules":\([0-9]*\).*/\1/p')
+    rdom=$(printf '%s' "$rj" | sed -n 's/.*"domains":\([0-9]*\).*/\1/p')
+    if [ "$rbackend" = "steer" ]; then
+        if [ "${rrules:-0}" -ge 1 ]; then
+            add_check "обход туннелей" 1 "steer: ${rdom:-0} доменов напрямую" ""
         else
-            local bpd="правила не применяются"
-            [ -n "$bperr" ] && bpd="$bpd: $bperr"
-            add_check "обход туннелей" 0 "$bpd" "Запустите: blockcheckw-helper bypass enable"
+            add_check "обход туннелей" 0 "steer: список исключений не применён" "blockcheckw-helper bypass enable"
         fi
+    elif [ "${rtargets:-0}" -gt 0 ]; then
+        if [ "${rrules:-0}" -ge "${rtargets:-0}" ]; then
+            add_check "обход туннелей" 1 "nft: правил ${rrules} из ${rtargets} цепочек" ""
+        else
+            add_check "обход туннелей" 0 "nft: правил ${rrules} из ${rtargets} цепочек" "blockcheckw-helper bypass enable"
+        fi
+    elif route_steer_available; then
+        # Маршрут выключен. Ругаемся, только если steer действительно
+        # заворачивает домены службы в туннель — иначе это осознанный выбор.
+        if route_steer_explain youtube.com >/dev/null 2>&1; then
+            add_check "обход туннелей" 1 "steer: YouTube идёт напрямую" ""
+        else
+            add_check "обход туннелей" 0 "steer: домены службы уходят в туннель" "blockcheckw-helper bypass enable"
+        fi
+    elif [ "$(route_nft_targets 2>/dev/null | wc -l)" -gt 0 ]; then
+        add_check "обход туннелей" 0 "nft: туннель есть, правил нет" "blockcheckw-helper bypass enable"
     else
         add_check "обход туннелей" 1 "туннели не обнаружены" ""
     fi
@@ -3629,6 +3721,80 @@ CLASSLIST
     fi
 }
 
+# Сетевая классификация в духе dpi-checkers: что именно мешает —
+# CIDR-whitelist, обрезка на 16 КБ, подмена DNS или интернета нет вовсе.
+# Дешёвые проверки, без внешних API: только curl/nslookup.
+_net_code() {
+    command -v curl >/dev/null 2>&1 || { echo 000; return; }
+    # curl печатает код и при ошибке (000), поэтому "|| echo 000" нельзя:
+    # получалось "000\n000", и вызов считался успешным.
+    curl -4 -s -o /dev/null -m 6 -w '%{http_code}' "$1" 2>/dev/null
+}
+
+_net_dns() {
+    nslookup "$1" "$2" 2>/dev/null | awk '
+        /^Name:/ { s=1; next }
+        s && /^Address[ \t]*[0-9]*:/ { print $3 }
+        s && /^Address:/ { print $2 }
+    ' | grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}$' | sort -u
+}
+
+cmd_netcheck() {
+    local wl=0 rg=0 code blocking=none dns=unknown advice="ok"
+    local l="" p="" common="" bytes=0
+    if ! command -v curl >/dev/null 2>&1; then
+        echo '{"ok":false,"error":"curl not installed"}'
+        return 1
+    fi
+    for u in https://max.ru/ https://ya.ru/ https://vk.ru/; do
+        code=$(_net_code "$u")
+        [ "$code" != "000" ] && wl=1
+    done
+    for u in https://github.com/ https://www.google.com/ https://ru.wikipedia.org/; do
+        code=$(_net_code "$u")
+        [ "$code" != "000" ] && rg=1
+    done
+    if [ "$rg" = "1" ]; then
+        blocking=none
+    elif [ "$wl" = "1" ]; then
+        blocking=cidr_whitelist
+    else
+        blocking=no_internet
+    fi
+
+    # Обрезка ответа на ~16 КБ: качаем диапазон и смотрим, сколько отдали.
+    bytes=$(curl -4 -s -o /dev/null -m 15 -r 0-65535 -w '%{size_download}' https://www.youtube.com/ 2>/dev/null)
+    case "$bytes" in ''|*[!0-9]*) bytes=0 ;; *) bytes=$((bytes + 0)) ;; esac
+    if [ "$blocking" = "none" ] && [ "$bytes" -gt 0 ] && [ "$bytes" -lt 60000 ]; then
+        blocking=throttle_16k
+    fi
+
+    # Подмена DNS: локальный резолвер против 1.1.1.1 (best effort).
+    l=$(_net_dns www.youtube.com 127.0.0.1)
+    p=$(_net_dns www.youtube.com 1.1.1.1)
+    if [ -n "$l" ] && [ -n "$p" ]; then
+        common=$(printf '%s\n%s\n' "$l" "$p" | sort | uniq -d)
+        if [ -z "$common" ]; then
+            dns=spoof
+            [ "$blocking" = "none" ] && blocking=dns_spoof
+        else
+            dns=ok
+        fi
+    fi
+
+    case "$blocking" in
+        none) advice="ok" ;;
+        cidr_whitelist) advice="whitelist: обход только по домену/SNI, проверьте стратегию" ;;
+        no_internet) advice="нет интернета: WAN/DNS/шлюз" ;;
+        throttle_16k) advice="обрезка на 16 КБ: сканер должен проверять полной загрузкой" ;;
+        dns_spoof) advice="DNS подменён: включите DoH/DoT и проверьте optimize_dns" ;;
+    esac
+
+    printf '{"ok":%s,"blocking":"%s","cidr_whitelist":%s,"regular":%s,"dns":"%s","bytes_16k":%s,"advice":"%s"}\n' \
+        "$([ "$blocking" = none ] && echo true || echo false)" \
+        "$blocking" "$wl" "$rg" "$dns" "$bytes" "$advice"
+}
+
 # Ключ сервиса по имени секции (для интерфейса и отчётов).
 _info_sec_key() {
     case "$1" in
@@ -3849,363 +4015,1099 @@ cmd_evolve_import() {
     rm -f "$tmp"
 }
 
-# ---- Обход policy-routing и туннелей (универсально) -------------------------
+# ---- Прямой маршрут: вывод трафика службы из туннелей (steer и другие) ----
 #
-# Любой оркестратор (steer, mihomo, sing-box, v2rayA, кастомные nft-скрипты)
-# помечает трафик по адресатам в своих цепочках prerouting/ingress или через
-# iptables/ipset. Мы не привязываемся к именам: находим такие цепочки сами,
-# создаём в них свой набор IP и вставляем первым правило-исключение.
+# Если оркестратор (steer, mihomo, sing-box, v2rayA, кастомный nft) заворачивает
+# домены службы в туннель, DPI-обход простаивает, а YouTube получает то
+# российский, то зарубежный адрес и теряет регион.
 #
-# Домены включённых стратегий резолвим через локальный dnsmasq и складываем
-# IP в свой кэш — это работает без nftset и без знаний о конкретном менеджере.
+# Два независимых исполнения, оба локальные, без сторонних служб:
+#
+#   1) steer (Zapret Manager) — родной список исключений
+#      /etc/zm-steer/user/exclude.lst. Исключаем ДОМЕНЫ, а не IP: работают
+#      IPv4, IPv6, QUIC и клиенты с DoH. Ничего не патчим в nft, поэтому
+#      перезапуск steer и reload firewall ничего не ломают.
+#
+#   2) Любой nft-оркестратор — наборы bcw_route4/bcw_route6 и правило return
+#      ДО маркировки в base-цепочке. Правило ставится не в начало цепочки,
+#      а перед первой маркировкой, поэтому фильтры интерфейсов/адресов
+#      оркестратора остаются в силе.
+#
+# Домены берутся из собственных списков службы (route/*.lst), а не из
+# широких hostlist'ов: youtube.lst не тянет google.com и Gemini.
 
-BP_COMMENT="bcw-bypass"
-BP_SET="bcw_bypass4"
+RT_COMMENT="bcw-route"
+RT_SET4="bcw_route4"
+RT_SET6="bcw_route6"
+RT_STATE="/etc/zapret2wizard/route_state.txt"
+RT_BACKEND_FILE="/etc/zapret2wizard/route_backend"
+RT_DOMAINS="/etc/zapret2wizard/route_domains.txt"
+RT_IPS4="/etc/zapret2wizard/route_ips4.txt"
+RT_IPS6="/etc/zapret2wizard/route_ips6.txt"
+RT_STATIC4="/etc/zapret2wizard/route_static4.txt"
+RT_STATIC6="/etc/zapret2wizard/route_static6.txt"
+RT_DIR="/etc/zapret2wizard/route"
+RT_SEED_VER="2026-11-10.3"
+RT_WATCH_PID="/var/run/bcw_bypass.watch.pid"
+RT_WATCH_RUN="/var/run/bcw_bypass.run"
+RT_LOG="/tmp/bcw_route.log"
+RT_VERIFY="/tmp/bcw_route_verify.json"
+RT_LOCK="/var/run/bcw_route.lock"
+
+RT_STEER_SPEC="/etc/steer/spec.json"
+RT_STEER_USER="/etc/zm-steer/user"
+RT_STEER_EXCL="$RT_STEER_USER/exclude.lst"
+RT_STEER_PFX="$RT_STEER_USER/exclude.pfx"
+RT_MB="# >>> zapret2wizard direct (managed)"
+RT_ME="# <<< zapret2wizard direct (managed)"
+
+# Совместимость с прежними именами (hotplug, init).
 BP_SET_R="bcw_bypass4r"
-BP_STATE="/etc/zapret2wizard/bypass_state.txt"
-BP_CACHE="/etc/zapret2wizard/bypass_ips.txt"
-BP_WARM_MARK="/tmp/bcw_bypass.warm"
-BP_CACHE_TTL=21600
-BP_LOG="/tmp/bcw_bypass.log"
 
-bp_collect_domains() {
-    local out="/tmp/bcw_bp_domains.txt"
-    : > "$out"
-    local sec hl f
-    for sec in $(uci show zapret2wizard 2>/dev/null | sed -n 's/^zapret2wizard\.\([^=]*\)=strategy$/\1/p'); do
-        [ "$(uci -q get "zapret2wizard.$sec.enabled")" = "1" ] || continue
-        hl=$(uci -q get "zapret2wizard.$sec.hostlist")
-        case "$hl" in
-            list_hosts_*) ;;
-            *) continue ;;
-        esac
-        f="/etc/zapret2wizard/ipset/zapret_hosts_${hl#list_hosts_}.txt"
-        [ -f "$f" ] || continue
-        grep -v '^#' "$f" 2>/dev/null | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' \
-            | sed 's/^\^//' | grep -E '^[a-zA-Z0-9._-]+$' >> "$out"
-    done
-    sort -u "$out"
+_rt_log() {
+    printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$RT_LOG" 2>/dev/null || true
 }
 
-# Найти цепочки, которые помечают трафик по адресату (prerouting/ingress).
-bp_targets() {
-    local fam tbl ch body
-    nft list tables 2>/dev/null | awk '{print $2" "$3}' | while read -r fam tbl; do
-        nft list table "$fam" "$tbl" 2>/dev/null | sed -n 's/^[[:space:]]*chain \([^ {]*\).*/\1/p' | while read -r ch; do
+_rt_uci_get() {
+    command -v uci >/dev/null 2>&1 || return 1
+    uci -q get "$1" 2>/dev/null
+}
+
+_rt_uci_set() {
+    command -v uci >/dev/null 2>&1 || return 1
+    uci -q set "$1" 2>/dev/null || return 1
+    uci -q commit zapret2wizard 2>/dev/null || true
+}
+
+# Прямой маршрут — осознанное включение: он правит чужие списки (steer) и
+# nft-таблицы оркестратора, поэтому сам по себе не включается ни при старте,
+# ни по cron. Включается командой bypass enable или галочкой в карточке LuCI.
+route_is_enabled() {
+    case "$(_rt_uci_get zapret2wizard.main.route_enabled)" in
+        1|on|true|yes) return 0 ;;
+    esac
+    return 1
+}
+
+# ---------------------------------------------------------------- списки ---
+
+_rt_seed_one() {
+    mkdir -p "$RT_DIR" 2>/dev/null || true
+    {
+        printf '# managed by zapret2wizard %s — list: %s\n' "$RT_SEED_VER" "$1"
+        cat
+    } > "$RT_DIR/$1.lst"
+}
+
+route_seed_lists() {
+    mkdir -p "$RT_DIR" 2>/dev/null || return 0
+    _rt_seed_one youtube <<'EOF'
+youtube.com
+www.youtube.com
+m.youtube.com
+music.youtube.com
+youtu.be
+youtube-nocookie.com
+youtubekids.com
+ytimg.com
+i.ytimg.com
+yt3.ggpht.com
+yt4.ggpht.com
+yt3.googleusercontent.com
+googlevideo.com
+manifest.googlevideo.com
+redirector.googlevideo.com
+youtubei.googleapis.com
+youtube.googleapis.com
+youtube-ui.l.google.com
+wide-youtube.l.google.com
+yt-video-upload.l.google.com
+youtubeembeddedplayer.googleapis.com
+jnn-pa.googleapis.com
+EOF
+    _rt_seed_one discord <<'EOF'
+discord.com
+discord.gg
+discordapp.com
+discordapp.net
+discord.media
+discordstatus.com
+gateway.discord.gg
+cdn.discordapp.com
+media.discordapp.net
+EOF
+    _rt_seed_one twitch <<'EOF'
+twitch.tv
+ttvnw.net
+usher.ttvnw.net
+jtvnw.net
+static-cdn.jtvnw.net
+twitchcdn.net
+EOF
+    _rt_seed_one x <<'EOF'
+x.com
+twitter.com
+t.co
+twimg.com
+api.x.com
+pbs.twimg.com
+video.twimg.com
+EOF
+    _rt_seed_one instagram <<'EOF'
+instagram.com
+cdninstagram.com
+fbcdn.net
+EOF
+    [ -f "$RT_DIR/user.lst" ] || cat > "$RT_DIR/user.lst" <<'EOF'
+# Свои домены и IP, которые должны идти напрямую, мимо туннеля.
+# По одному в строке. Поддомены включаются сами: example.com = *.example.com
+# Можно указывать IP и подсети (1.2.3.0/24, 2a00::/32).
+EOF
+}
+
+route_services() {
+    local manual sec hl p out="" low
+    manual=$(_rt_uci_get zapret2wizard.main.route_services)
+    if [ -n "$manual" ]; then
+        case "$manual" in none|off|0) return 0 ;; esac
+        for sec in $(printf '%s' "$manual" | tr ',' ' '); do
+            case "$sec" in
+                youtube|discord|twitch|x|instagram) out="$out $sec" ;;
+            esac
+        done
+        printf '%s\n' "$out" | tr ' ' '\n' | awk 'NF && !seen[$0]++'
+        return 0
+    fi
+    for sec in $(uci show zapret2wizard 2>/dev/null | sed -n 's/^zapret2wizard\.\([^=]*\)=strategy$/\1/p'); do
+        [ "$(_rt_uci_get "zapret2wizard.$sec.enabled")" = "0" ] && continue
+        low=$(printf '%s' "$sec" | tr 'A-Z' 'a-z')
+        case "$low" in
+            *youtube*|*ytapi*) out="$out youtube" ;;
+            *discord*) out="$out discord" ;;
+            *twitch*) out="$out twitch" ;;
+            *instagram*) out="$out instagram" ;;
+            x|*_x|preset_x|*twitter*) out="$out x" ;;
+        esac
+        for hl in $(_rt_uci_get "zapret2wizard.$sec.hostlist"); do
+            p=$(_rt_uci_get "zapret2wizard.$hl.path")
+            case "$p" in
+                *youtube*) out="$out youtube" ;;
+                *discord*) out="$out discord" ;;
+                *twitch*) out="$out twitch" ;;
+                *instagram*) out="$out instagram" ;;
+                */zapret_hosts_x.txt) out="$out x" ;;
+            esac
+        done
+    done
+    printf '%s\n' "$out" | tr ' ' '\n' | awk 'NF && !seen[$0]++'
+}
+
+route_hostlist_path() {
+    local p
+    p=$(_rt_uci_get "zapret2wizard.$1.path")
+    [ -n "$p" ] && printf '%s\n' "$p"
+}
+
+# Пользовательские исключения: их нельзя выводить из туннеля, иначе они
+# останутся без обхода и без туннеля.
+route_excluded_domains() {
+    local f
+    {
+        printf '%s\n' "/etc/zapret2wizard/ipset/zapret_hosts_user_exclude.txt"
+        for f in $(_rt_uci_get zapret2wizard.main.route_exclude); do
+            printf '%s\n' "$f"
+        done
+    } | sort -u | while IFS= read -r f; do
+        [ -f "$f" ] || continue
+        sed 's/#.*$//; s/^[[:space:]]*//; s/[[:space:]]*$//' "$f" 2>/dev/null \
+            | grep -E '^[a-z0-9][a-z0-9.-]*\.[a-z0-9-]+$'
+    done | tr 'A-Z' 'a-z' | sort -u
+}
+
+route_collect_sources() {
+    local svc extra
+    route_seed_lists
+    for svc in $(route_services); do
+        [ -f "$RT_DIR/$svc.lst" ] && cat "$RT_DIR/$svc.lst"
+    done
+    [ -f "$RT_DIR/user.lst" ] && cat "$RT_DIR/user.lst"
+    for extra in $(_rt_uci_get zapret2wizard.main.route_extra); do
+        printf '%s\n' "$extra"
+    done
+}
+
+_rt_normalize_domains() {
+    tr -d '\r' | sed 's/#.*$//; s/^[[:space:]]*//; s/[[:space:]]*$//' \
+        | sed 's#^[a-zA-Z][a-zA-Z0-9+.-]*://##; s#/.*$##; s/:[0-9]*$//' \
+        | sed 's/^\*\.//; s/^\.//' | tr 'A-Z' 'a-z' \
+        | grep -E '^[a-z0-9][a-z0-9.-]*\.[a-z0-9-]+$' \
+        | grep -vE '^([0-9]{1,3}\.){3}[0-9]{1,3}$' | grep -v ':' \
+        | grep -vE '^(localhost|local|lan|invalid|test)$' | sort -u
+}
+
+route_collect_domains() {
+    local raw="/tmp/bcw_route_raw.$$" ex="/tmp/bcw_route_ex.$$"
+    route_collect_sources | _rt_normalize_domains > "$raw"
+    route_excluded_domains > "$ex"
+    awk -v exf="$ex" '
+        FILENAME==exf { ex[++n]=$0; next }
+        {
+            d=$0
+            for (i=1; i<=n; i++) {
+                e=ex[i]
+                if (d==e) next
+                if (length(d)>length(e) && substr(d,length(d)-length(e)) == "." e) next
+            }
+            print
+        }
+    ' "$ex" "$raw" | awk '!seen[$0]++' > "$RT_DOMAINS"
+    rm -f "$raw" "$ex"
+    wc -l < "$RT_DOMAINS" 2>/dev/null | tr -d ' '
+}
+
+route_collect_static_ips() {
+    local raw="/tmp/bcw_route_src.$$"
+    route_collect_sources | tr -d '\r' | sed 's/#.*$//; s/^[[:space:]]*//; s/[[:space:]]*$//' > "$raw"
+    grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]{1,2})?$' "$raw" | sort -u > "$RT_STATIC4"
+    grep -E '^[0-9a-fA-F:]+(/[0-9]{1,3})?$' "$raw" | grep ':' | sort -u > "$RT_STATIC6"
+    rm -f "$raw"
+}
+
+# ------------------------------------------------------- резолв через dnsmasq ---
+
+_rt_parse_nslookup() {
+    awk '
+        /^Name:/ { seen=1; next }
+        seen && /^Address[ \t]*[0-9]*:/ { print $3 }
+        seen && /^Address:/ { print $2 }
+    ' | sed 's/%.*$//' \
+        | grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}$|^[0-9a-fA-F:]+$' \
+        | grep -vE '^(127\.|0\.0\.0\.0$|::1$|::$)'
+}
+
+_rt_resolve_domain() {
+    nslookup "$1" 127.0.0.1 2>/dev/null | _rt_parse_nslookup
+    nslookup -type=aaaa "$1" 127.0.0.1 2>/dev/null | _rt_parse_nslookup
+}
+
+route_refresh_ips() {
+    if ! mkdir "$RT_LOCK" 2>/dev/null; then
+        local oldp
+        oldp=$(cat "$RT_LOCK/pid" 2>/dev/null)
+        [ -n "$oldp" ] && kill -0 "$oldp" 2>/dev/null && return 0
+        rm -rf "$RT_LOCK" 2>/dev/null || true
+        mkdir "$RT_LOCK" 2>/dev/null || return 0
+    fi
+    echo $$ > "$RT_LOCK/pid"
+    route_collect_static_ips
+    local all="/tmp/bcw_ips_all.$$" d
+    : > "$all"
+    for d in $(head -n 250 "$RT_DOMAINS" 2>/dev/null); do
+        [ -n "$d" ] && _rt_resolve_domain "$d" >> "$all"
+    done
+    sort -u "$all" | grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}$' > "$RT_IPS4"
+    sort -u "$all" | grep ':' > "$RT_IPS6"
+    cat "$RT_STATIC4" >> "$RT_IPS4" 2>/dev/null || true
+    cat "$RT_STATIC6" >> "$RT_IPS6" 2>/dev/null || true
+    sort -u "$RT_IPS4" -o "$RT_IPS4" 2>/dev/null || true
+    sort -u "$RT_IPS6" -o "$RT_IPS6" 2>/dev/null || true
+    rm -f "$all"
+    rm -rf "$RT_LOCK" 2>/dev/null || true
+    _rt_log "ip cache: $(wc -l < "$RT_IPS4" 2>/dev/null) v4, $(wc -l < "$RT_IPS6" 2>/dev/null) v6"
+    [ "$(cat "$RT_BACKEND_FILE" 2>/dev/null)" = "nft" ] && route_nft_fill_all
+    return 0
+}
+
+route_refresh_ips_detached() {
+    if command -v start-stop-daemon >/dev/null 2>&1; then
+        start-stop-daemon -S -b -x /usr/bin/blockcheckw-helper -- route_refresh \
+            1000>&- 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&- >/dev/null 2>&1 && return 0
+    fi
+    ( /usr/bin/blockcheckw-helper route_refresh >/dev/null 2>&1 & )
+}
+
+# ---------------------------------------------------------------- steer ---
+
+route_steer_excl_path() {
+    local p=""
+    if [ -f "$RT_STEER_SPEC" ]; then
+        p=$(tr -d '\n' < "$RT_STEER_SPEC" 2>/dev/null \
+            | sed -n 's/.*"zm_excl"[^}]*"domains_file"[[:space:]]*:[[:space:]]*\[[[:space:]]*"\([^"]*\)".*/\1/p')
+        [ -n "$p" ] || p=$(tr -d '\n' < "$RT_STEER_SPEC" 2>/dev/null \
+            | sed -n 's/.*"zm_excl"[^}]*"domains_file"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+    fi
+    [ -n "$p" ] || p="$RT_STEER_EXCL"
+    printf '%s\n' "$p"
+}
+
+route_steer_pfx_path() {
+    local p=""
+    if [ -f "$RT_STEER_SPEC" ]; then
+        p=$(tr -d '\n' < "$RT_STEER_SPEC" 2>/dev/null \
+            | sed -n 's/.*"zm_excl"[^}]*"prefixes_file"[[:space:]]*:[[:space:]]*\[[[:space:]]*"\([^"]*\)".*/\1/p')
+        [ -n "$p" ] || p=$(tr -d '\n' < "$RT_STEER_SPEC" 2>/dev/null \
+            | sed -n 's/.*"zm_excl"[^}]*"prefixes_file"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+    fi
+    [ -n "$p" ] || p="$RT_STEER_PFX"
+    printf '%s\n' "$p"
+}
+
+route_steer_available() {
+    [ -f "$RT_STEER_SPEC" ] || return 1
+    [ -d "$RT_STEER_USER" ] || return 1
+    grep -q '"zm_excl"' "$RT_STEER_SPEC" 2>/dev/null || return 1
+}
+
+_rt_block_strip() {
+    [ -f "$1" ] || { : > "$1"; return 0; }
+    awk -v b="$RT_MB" -v e="$RT_ME" '
+        index($0,b)==1 { skip=1; next }
+        index($0,e)==1 { skip=0; next }
+        skip!=1 { print }
+    ' "$1"
+}
+
+_rt_block_count() {
+    [ -f "$1" ] || { echo 0; return 0; }
+    awk -v b="$RT_MB" -v e="$RT_ME" '
+        index($0,b)==1 { on=1; next }
+        index($0,e)==1 { on=0; next }
+        on && $0 !~ /^[[:space:]]*#/ && NF { n++ }
+        END { print n+0 }
+    ' "$1"
+}
+
+_rt_block_write() {
+    local file="$1" src="$2" tmp="$1.bcw.$$"
+    [ -f "$file" ] || : > "$file"
+    _rt_block_strip "$file" > "$tmp" 2>/dev/null || : > "$tmp"
+    {
+        printf '%s\n' "$RT_MB"
+        sed 's/#.*$//; s/^[[:space:]]*//; s/[[:space:]]*$//' "$src" 2>/dev/null | grep -v '^$'
+        printf '%s\n' "$RT_ME"
+    } >> "$tmp"
+    mv -f "$tmp" "$file" 2>/dev/null || { rm -f "$tmp"; return 1; }
+    chmod 644 "$file" 2>/dev/null || true
+}
+
+route_steer_reload_now() {
+    if command -v steer >/dev/null 2>&1; then
+        if command -v timeout >/dev/null 2>&1; then
+            timeout 25 steer reload >/dev/null 2>&1 && return 0
+        else
+            steer reload >/dev/null 2>&1 && return 0
+        fi
+    fi
+    [ -x /etc/init.d/steer ] && /etc/init.d/steer reload >/dev/null 2>&1
+    return 0
+}
+
+route_steer_reload_bg() { ( route_steer_reload_now ) >/dev/null 2>&1 & }
+
+route_steer_explain() {
+    command -v steer >/dev/null 2>&1 || return 2
+    local out
+    if command -v timeout >/dev/null 2>&1; then
+        out=$(timeout 8 steer explain "$1" 2>/dev/null) || return 2
+    else
+        out=$(steer explain "$1" 2>/dev/null) || return 2
+    fi
+    case "$out" in
+        *zm_direct*|*'"out":"direct"'*|*'"out": "direct"'*|*"-> direct"*) return 0 ;;
+        *zm_vpn*|*tunnel*) return 1 ;;
+    esac
+    return 2
+}
+
+route_steer_apply() {
+    local excl pfx pfxsrc
+    excl=$(route_steer_excl_path)
+    [ -n "$excl" ] || return 1
+    mkdir -p "$(dirname "$excl")" 2>/dev/null || true
+    [ -f "$excl.bcw.bak" ] || cp -f "$excl" "$excl.bcw.bak" 2>/dev/null || true
+    _rt_block_write "$excl" "$RT_DOMAINS" || return 1
+    if [ "$(_rt_uci_get zapret2wizard.main.route_steer_ips)" = "1" ]; then
+        [ -s "$RT_IPS4" ] || route_refresh_ips
+        pfx=$(route_steer_pfx_path)
+        pfxsrc="/tmp/bcw_pfx.$$"
+        awk '{ if ($0 ~ /\//) print; else print $0 "/32" }' "$RT_IPS4" 2>/dev/null > "$pfxsrc"
+        awk '{ if ($0 ~ /\//) print; else print $0 "/128" }' "$RT_IPS6" 2>/dev/null >> "$pfxsrc"
+        [ -n "$pfx" ] && _rt_block_write "$pfx" "$pfxsrc"
+        rm -f "$pfxsrc"
+    else
+        pfx=$(route_steer_pfx_path)
+        if [ -f "$pfx" ] && grep -qF "$RT_MB" "$pfx" 2>/dev/null; then
+            _rt_block_strip "$pfx" > "$pfx.bcw.$$" && mv -f "$pfx.bcw.$$" "$pfx"
+        fi
+    fi
+    _rt_log "steer: $(wc -l < "$RT_DOMAINS" 2>/dev/null) domains -> $excl"
+    echo steer > "$RT_BACKEND_FILE"
+    route_steer_reload_bg
+    return 0
+}
+
+route_steer_remove() {
+    local excl pfx changed=0
+    excl=$(route_steer_excl_path)
+    pfx=$(route_steer_pfx_path)
+    if [ -f "$excl" ] && grep -qF "$RT_MB" "$excl" 2>/dev/null; then
+        _rt_block_strip "$excl" > "$excl.bcw.$$" && mv -f "$excl.bcw.$$" "$excl" && changed=1
+    fi
+    if [ -f "$pfx" ] && grep -qF "$RT_MB" "$pfx" 2>/dev/null; then
+        _rt_block_strip "$pfx" > "$pfx.bcw.$$" && mv -f "$pfx.bcw.$$" "$pfx" && changed=1
+    fi
+    [ "$changed" = "1" ] && route_steer_reload_bg
+    return 0
+}
+
+_rt_block_sig() {
+    [ -f "$1" ] || { echo none; return 0; }
+    awk -v b="$RT_MB" -v e="$RT_ME" '
+        index($0,b)==1 { on=1; next }
+        index($0,e)==1 { on=0; next }
+        on && $0 !~ /^[[:space:]]*#/ && NF { print }
+    ' "$1" 2>/dev/null | cksum 2>/dev/null | awk '{print $1"-"$2}'
+}
+
+route_steer_applied() {
+    local excl pfx
+    excl=$(route_steer_excl_path)
+    [ -f "$excl" ] && grep -qF "$RT_MB" "$excl" 2>/dev/null || return 1
+    pfx=$(route_steer_pfx_path)
+    if [ "$(_rt_uci_get zapret2wizard.main.route_steer_ips)" != "1" ] \
+        && [ -f "$pfx" ] && grep -qF "$RT_MB" "$pfx" 2>/dev/null; then
+        return 1
+    fi
+    [ "$(_rt_block_sig "$excl")" = "$(cksum < "$RT_DOMAINS" 2>/dev/null | awk '{print $1"-"$2}')" ]
+}
+
+# ---------------------------------------------------------------- nft ---
+
+_rt_table_skip() {
+    case "$1 $2" in
+        *" fw4"|*" zapret2wizard"|*" firewall"|*" nat"|*" mangle"|*" filter") return 0 ;;
+    esac
+    return 1
+}
+
+_rt_chain_marks() {
+    local fam="$1" tbl="$2" start="$3" q="$3" seen=" " c body j found=0 n=0
+    while [ -n "$q" ] && [ "$n" -lt 80 ]; do
+        set -- $q; c="$1"; shift; q="$*"
+        case "$seen" in *" $c "*) continue ;; esac
+        seen="$seen $c"; n=$((n + 1))
+        body=$(nft list chain "$fam" "$tbl" "$c" 2>/dev/null)
+        printf '%s\n' "$body" | grep -q 'mark set' && found=1
+        for j in $(printf '%s\n' "$body" \
+            | sed -n 's/.*[[:space:]]\(jump\|goto\)[[:space:]]\+\([A-Za-z0-9_.-]*\).*/\2/p'); do
+            q="$q $j"
+        done
+    done
+    [ "$found" = 1 ]
+}
+
+route_nft_targets() {
+    local pair fam tbl ch body
+    for pair in $(nft list tables 2>/dev/null | awk '{print $2":"$3}'); do
+        fam=${pair%%:*}; tbl=${pair#*:}
+        case "$fam" in ip|ip6|inet) ;; *) continue ;; esac
+        _rt_table_skip "$fam" "$tbl" && continue
+        body=$(nft list table "$fam" "$tbl" 2>/dev/null)
+        printf '%s\n' "$body" | grep -q 'mark set' || continue
+        for ch in $(printf '%s\n' "$body" | sed -n 's/^[[:space:]]*chain \([^ {]*\).*/\1/p'); do
             body=$(nft list chain "$fam" "$tbl" "$ch" 2>/dev/null)
-            echo "$body" | grep -qE 'hook (prerouting|ingress)' || continue
-            echo "$body" | grep -q 'mark set' || continue
-            echo "$body" | grep -qE 'daddr[[:space:]]+(@|\{)' || continue
-            echo "$fam $tbl $ch"
+            case "$body" in
+                *"hook prerouting"*|*"hook ingress"*) ;;
+                *) continue ;;
+            esac
+            _rt_chain_marks "$fam" "$tbl" "$ch" && printf '%s %s %s\n' "$fam" "$tbl" "$ch"
         done
     done | sort -u
 }
 
-bp_set_exists() { nft list set "$1" "$2" "$BP_SET" >/dev/null 2>&1; }
+route_nft_set_ok() { nft list set "$1" "$2" "$3" >/dev/null 2>&1; }
 
-bp_rule_line() { nft -a list chain "$1" "$2" "$3" 2>/dev/null | grep "$BP_COMMENT"; }
-
-# Заполнить кэш IP через локальный резолвер.
-bp_resolve_ips() {
-    [ -f "$BP_WARM_MARK" ] && return 0
-    : > "$BP_WARM_MARK"
-    mkdir -p /etc/zapret2wizard
-    local tmp="/tmp/bcw_bp_ips.new"
-    : > "$tmp"
-    bp_collect_domains | head -n 200 | while IFS= read -r d; do
-        [ -n "$d" ] || continue
-        nslookup "$d" 127.0.0.1 2>/dev/null | awk '/^Address: /{print $2}'
-    done | sort -u > "$tmp"
-    [ -s "$tmp" ] && mv -f "$tmp" "$BP_CACHE"
-    rm -f "$BP_WARM_MARK"
-}
-
-# Диапазоны Google/YouTube: гарантируют, что весь трафик сервисов идёт напрямую,
-# а не наполовину через туннель (иначе YouTube видит разные IP и теряет регион).
-BP_RANGES="/etc/zapret2wizard/bypass_ranges.txt"
-
-bp_load_ranges() {
-    local tmp="/tmp/bcw_ranges.json"
-    curl -fsSL -m 30 "https://www.gstatic.com/ipranges/goog.json" -o "$tmp" 2>/dev/null || return 0
-    [ -s "$tmp" ] || return 0
-    grep -o '"ipv4Prefix": *"[^"]*"' "$tmp" | cut -d'"' -f4 | sort -u > "$BP_RANGES"
-    rm -f "$tmp"
-}
-
-bp_apply_ranges() {
-    [ -s "$BP_RANGES" ] || return 0
-    [ -f "$BP_STATE" ] || return 0
-    local fam tbl ch batch n r
-    while read -r fam tbl ch; do
-        [ -n "$fam" ] || continue
-        case "$fam" in iptables) continue ;; esac
-        bp_set_exists "$fam" "$tbl" || continue
-        batch=""
-        n=0
-        while IFS= read -r r; do
-            [ -n "$r" ] || continue
-            case "$batch" in
-                "") batch="$r" ;;
-                *) batch="$batch, $r" ;;
-            esac
-            n=$((n + 1))
-            if [ "$n" -ge 60 ]; then
-                nft add element "$fam" "$tbl" "$BP_SET_R" "{ $batch }" 2>/dev/null || true
-                batch=""
-                n=0
-            fi
-        done < "$BP_RANGES"
-        [ -n "$batch" ] && nft add element "$fam" "$tbl" "$BP_SET_R" "{ $batch }" 2>/dev/null || true
-    done < "$BP_STATE"
-}
-
-# Залить IP из кэша во все наборы-исключения.
-bp_apply_ips() {
-    [ -s "$BP_CACHE" ] || return 0
-    local fam tbl ch batch n ip
-    [ -f "$BP_STATE" ] || return 0
-    while read -r fam tbl ch; do
-        [ -n "$fam" ] || continue
-        bp_set_exists "$fam" "$tbl" || continue
-        batch=""
-        n=0
-        while IFS= read -r ip; do
-            [ -n "$ip" ] || continue
-            case "$batch" in
-                "") batch="$ip" ;;
-                *) batch="$batch, $ip" ;;
-            esac
-            n=$((n + 1))
-            if [ "$n" -ge 150 ]; then
-                nft add element "$fam" "$tbl" "$BP_SET" "{ $batch }" 2>/dev/null || true
-                batch=""
-                n=0
-            fi
-        done < "$BP_CACHE"
-        [ -n "$batch" ] && nft add element "$fam" "$tbl" "$BP_SET" "{ $batch }" 2>/dev/null || true
-    done < "$BP_STATE"
-
-    # iptables/ipset-сценарий (fw3, старые менеджеры) — только если там есть маркировка
-    if command -v ipset >/dev/null 2>&1 && iptables -t mangle -S PREROUTING >/dev/null 2>&1 \
-        && iptables -t mangle -S PREROUTING 2>/dev/null | grep -qE 'MARK|--match-set'; then
-        ipset create "$BP_SET" hash:ip -exist 2>/dev/null || true
-        while IFS= read -r ip; do
-            [ -n "$ip" ] && ipset add "$BP_SET" "$ip" -exist 2>/dev/null
-        done < "$BP_CACHE"
+route_set_ensure() {
+    route_nft_set_ok "$1" "$2" "$3" && return 0
+    if ! nft add set "$1" "$2" "$3" "{ type $4; flags interval; }" 2>>"$RT_LOG"; then
+        # старые ядра без interval: набор без диапазонов, только отдельные IP
+        nft add set "$1" "$2" "$3" "{ type $4; }" 2>>"$RT_LOG" \
+            || { _rt_log "set $1 $2 $3 failed"; return 1; }
+        _rt_log "set $1 $2 $3: no interval support"
     fi
+    return 0
 }
 
-bp_sync() {
-    local targets fam tbl ch
-    targets=$(bp_targets)
-    : > "$BP_STATE.new"
+route_set_fill() {
+    local fam="$1" tbl="$2" set="$3" file="$4" batch="" n=0 ip interval=0
+    [ -s "$file" ] || return 0
+    route_nft_set_ok "$fam" "$tbl" "$set" || return 0
+    nft list set "$fam" "$tbl" "$set" 2>/dev/null | grep -q 'flags interval' && interval=1
+    nft flush set "$fam" "$tbl" "$set" 2>/dev/null || true
+    while IFS= read -r ip; do
+        [ -n "$ip" ] || continue
+        if [ "$interval" = "0" ]; then
+            case "$ip" in */[0-9]*) continue ;; esac
+        fi
+        batch="${batch:+$batch, }$ip"
+        n=$((n + 1))
+        if [ "$n" -ge 150 ]; then
+            nft add element "$fam" "$tbl" "$set" "{ $batch }" 2>/dev/null || true
+            batch=""; n=0
+        fi
+    done < "$file"
+    [ -n "$batch" ] && nft add element "$fam" "$tbl" "$set" "{ $batch }" 2>/dev/null || true
+    return 0
+}
+
+route_nft_fill_all() {
+    [ -f "$RT_STATE" ] || return 0
+    local fam tbl
+    while read -r fam tbl; do
+        [ -n "$fam" ] && [ -n "$tbl" ] || continue
+        case "$fam" in
+            ip) route_set_fill "$fam" "$tbl" "$RT_SET4" "$RT_IPS4" ;;
+            ip6) route_set_fill "$fam" "$tbl" "$RT_SET6" "$RT_IPS6" ;;
+            *) route_set_fill "$fam" "$tbl" "$RT_SET4" "$RT_IPS4"
+               route_set_fill "$fam" "$tbl" "$RT_SET6" "$RT_IPS6" ;;
+        esac
+    done <<EOF
+$(awk '{print $1" "$2}' "$RT_STATE" 2>/dev/null | sort -u)
+EOF
+    return 0
+}
+
+route_rule_present() {
+    nft -a list chain "$1" "$2" "$3" 2>/dev/null | grep -q "comment \"$RT_COMMENT\""
+}
+
+route_nft_insert() {
+    local fam="$1" tbl="$2" ch="$3" handle="" line h
+    route_rule_present "$fam" "$tbl" "$ch" && return 0
+    while IFS= read -r line; do
+        case "$line" in
+            *"mark set"*) handle=$(printf '%s\n' "$line" | awk '{print $NF}'); break ;;
+            *"jump "*|*"goto "*)
+                h=$(printf '%s\n' "$line" | sed -n 's/.*[[:space:]]\(jump\|goto\)[[:space:]]\+\([A-Za-z0-9_.-]*\).*/\2/p')
+                if [ -n "$h" ] && _rt_chain_marks "$fam" "$tbl" "$h"; then
+                    handle=$(printf '%s\n' "$line" | awk '{print $NF}'); break
+                fi
+                ;;
+        esac
+    done <<EOF
+$(nft -a list chain "$fam" "$tbl" "$ch" 2>/dev/null | grep -E 'mark set|jump |goto ')
+EOF
+    [ -n "$handle" ] || { _rt_log "no mark position: $fam $tbl $ch"; return 1; }
+    # nft: add position H ставит ПОСЛЕ правила H, а insert handle H — ДО него.
+    local idx idx6
+    if [ "$fam" != "ip6" ]; then
+        if ! nft insert rule "$fam" "$tbl" "$ch" handle "$handle" \
+            ip daddr "@$RT_SET4" counter return comment "$RT_COMMENT" 2>>"$RT_LOG"; then
+            idx=$(nft -a list chain "$fam" "$tbl" "$ch" 2>/dev/null \
+                | awk -v h="$handle" '/# handle/{n++} $NF==h{print n-1; exit}')
+            nft insert rule "$fam" "$tbl" "$ch" index "${idx:-0}" \
+                ip daddr "@$RT_SET4" counter return comment "$RT_COMMENT" 2>>"$RT_LOG" \
+                || { _rt_log "insert4 failed: $fam $tbl $ch"; return 1; }
+        fi
+    fi
+    if [ "$fam" != "ip" ]; then
+        if ! nft insert rule "$fam" "$tbl" "$ch" handle "$handle" \
+            ip6 daddr "@$RT_SET6" counter return comment "$RT_COMMENT" 2>>"$RT_LOG"; then
+            idx6=$(nft -a list chain "$fam" "$tbl" "$ch" 2>/dev/null \
+                | awk -v h="$handle" '/# handle/{n++} $NF==h{print n-1; exit}')
+            nft insert rule "$fam" "$tbl" "$ch" index "${idx6:-0}" \
+                ip6 daddr "@$RT_SET6" counter return comment "$RT_COMMENT" 2>>"$RT_LOG" \
+                || _rt_log "insert6 failed: $fam $tbl $ch"
+        fi
+    fi
+    return 0
+}
+
+route_nft_apply() {
+    route_cleanup_legacy
+    local targets fam tbl ch state="$RT_STATE.new"
+    targets=$(route_nft_targets)
+    : > "$state"
     if [ -n "$targets" ]; then
-        echo "$targets" | while read -r fam tbl ch; do
-            [ -n "$fam" ] || continue
-            if bp_set_exists "$fam" "$tbl" && ! nft list set "$fam" "$tbl" "$BP_SET" 2>/dev/null | grep -q 'flags interval'; then
-                # старый набор без interval — снимаем правило, пересоздаём
-                for h in $(bp_rule_line "$fam" "$tbl" "$ch" | awk '{print $NF}'); do
-                    nft delete rule "$fam" "$tbl" "$ch" handle "$h" 2>/dev/null || true
-                done
-                nft delete set "$fam" "$tbl" "$BP_SET" 2>/dev/null || true
-            fi
-            bp_set_exists "$fam" "$tbl" || nft add set "$fam" "$tbl" "$BP_SET" '{ type ipv4_addr; flags interval; }' 2>/dev/null || true
-            nft list set "$fam" "$tbl" "$BP_SET_R" >/dev/null 2>&1 || nft add set "$fam" "$tbl" "$BP_SET_R" '{ type ipv4_addr; flags interval; }' 2>/dev/null || true
-            bp_set_exists "$fam" "$tbl" || continue
-            if ! bp_rule_line "$fam" "$tbl" "$ch" | grep -q "$BP_COMMENT"; then
-                # iifname ненадёжен: на ingress это физический порт, на prerouting
-                # имя может отличаться от br-lan. Матчим только по адресату.
-                if ! nft insert rule "$fam" "$tbl" "$ch" \
-                    ip daddr "@$BP_SET" counter return comment "$BP_COMMENT" 2>>"$BP_LOG"; then
-                    echo "$(date) insert failed: $fam $tbl $ch (ip daddr)" >> "$BP_LOG"
-                fi
-            fi
-            if ! nft -a list chain "$fam" "$tbl" "$ch" 2>/dev/null | grep -q "$BP_COMMENT-r"; then
-                if ! nft insert rule "$fam" "$tbl" "$ch" \
-                    ip daddr "@$BP_SET_R" counter return comment "$BP_COMMENT-r" 2>>"$BP_LOG"; then
-                    echo "$(date) insert failed: $fam $tbl $ch (ranges)" >> "$BP_LOG"
-                fi
-            fi
-            echo "$fam $tbl $ch" >> "$BP_STATE.new"
+        printf '%s\n' "$targets" | while read -r fam tbl ch; do
+            [ -n "$ch" ] || continue
+            case "$fam" in
+                ip)
+                    route_set_ensure "$fam" "$tbl" "$RT_SET4" ipv4_addr || continue
+                    ;;
+                ip6)
+                    route_set_ensure "$fam" "$tbl" "$RT_SET6" ipv6_addr || continue
+                    ;;
+                *)
+                    route_set_ensure "$fam" "$tbl" "$RT_SET4" ipv4_addr || continue
+                    route_set_ensure "$fam" "$tbl" "$RT_SET6" ipv6_addr || true
+                    ;;
+            esac
+            route_nft_insert "$fam" "$tbl" "$ch" \
+                && printf '%s %s %s\n' "$fam" "$tbl" "$ch" >> "$state"
         done
     fi
-    mv -f "$BP_STATE.new" "$BP_STATE" 2>/dev/null || true
-
-    # iptables-путь: правило возврата до маркировки
-    if command -v ipset >/dev/null 2>&1 && iptables -t mangle -S PREROUTING >/dev/null 2>&1 \
-        && iptables -t mangle -S PREROUTING 2>/dev/null | grep -qE 'MARK|--match-set'; then
-        ipset create "$BP_SET" hash:ip -exist 2>/dev/null || true
-        if ! iptables -t mangle -C PREROUTING -i br-lan -m set --match-set "$BP_SET" dst -j RETURN >/dev/null 2>&1; then
-            iptables -t mangle -I PREROUTING 1 -i br-lan -m set --match-set "$BP_SET" dst -j RETURN 2>/dev/null || true
-        fi
-        echo "iptables mangle PREROUTING" >> "$BP_STATE"
-    fi
-
-    # BCW_BP_FAST=1 — только правила, без сети: этим пользуется doctor,
-    # чтобы самовосстановиться и не подвиснуть на скачивании диапазонов.
-    if [ "$BCW_BP_FAST" != "1" ]; then
-        if [ ! -s "$BP_CACHE" ] || [ -n "$(find "$BP_CACHE" -mmin +$((BP_CACHE_TTL / 60)) 2>/dev/null)" ]; then
-            bp_warm_detached
-        fi
-        if [ ! -s "$BP_RANGES" ] || [ -n "$(find "$BP_RANGES" -mmin +1440 2>/dev/null)" ]; then
-            # не пытаемся качать чаще раза в час, даже если сеть лежит
-            local now=$(date +%s)
-            local last=$(cat /tmp/bcw_ranges_try 2>/dev/null || echo 0)
-            if [ $((now - last)) -gt 3600 ]; then
-                echo "$now" > /tmp/bcw_ranges_try
-                bp_load_ranges
-            fi
-        fi
-        bp_apply_ips
-        bp_apply_ranges
-    fi
+    mv -f "$state" "$RT_STATE" 2>/dev/null || : > "$RT_STATE"
+    echo nft > "$RT_BACKEND_FILE"
+    route_nft_fill_all
+    _rt_log "nft: $(wc -l < "$RT_STATE" 2>/dev/null) chains"
+    return 0
 }
 
-bp_warm_detached() {
-    if command -v start-stop-daemon >/dev/null 2>&1; then
-        start-stop-daemon -S -b -x /usr/bin/blockcheckw-helper -- bypass_warm >/dev/null 2>&1 && return 0
-    fi
-    ( /usr/bin/blockcheckw-helper bypass_warm >/dev/null 2>&1 & )
+route_nft_ok() {
+    [ -s "$RT_STATE" ] || return 1
+    local fam tbl ch
+    while read -r fam tbl ch; do
+        [ -n "$ch" ] || continue
+        route_rule_present "$fam" "$tbl" "$ch" || return 1
+    done < "$RT_STATE"
+    return 0
 }
 
-bp_unsync() {
-    local fam tbl ch handles h
-    if [ -f "$BP_STATE" ]; then
+route_nft_unsync() {
+    local fam tbl ch h pair
+    if [ -f "$RT_STATE" ]; then
+        # сначала снимаем все правила, потом наборы: набор нельзя удалить,
+        # пока на него ссылается хоть одно правило
         while read -r fam tbl ch; do
-            case "$fam" in
-                iptables) continue ;;
-            esac
             [ -n "$ch" ] || continue
-            handles=$(nft -a list chain "$fam" "$tbl" "$ch" 2>/dev/null | awk "/$BP_COMMENT/{print \$NF}")
-            for h in $handles; do
+            for h in $(nft -a list chain "$fam" "$tbl" "$ch" 2>/dev/null \
+                | awk -v c="comment \"$RT_COMMENT\"" 'index($0,c){print $NF}'); do
                 nft delete rule "$fam" "$tbl" "$ch" handle "$h" 2>/dev/null || true
             done
-            nft flush set "$fam" "$tbl" "$BP_SET" 2>/dev/null || true
-            nft delete set "$fam" "$tbl" "$BP_SET" 2>/dev/null || true
+        done < "$RT_STATE"
+        while read -r fam tbl; do
+            [ -n "$fam" ] && [ -n "$tbl" ] || continue
+            nft flush set "$fam" "$tbl" "$RT_SET4" 2>/dev/null || true
+            nft delete set "$fam" "$tbl" "$RT_SET4" 2>/dev/null || true
+            nft delete set "$fam" "$tbl" "$RT_SET6" 2>/dev/null || true
+        done <<EOF
+$(awk '{print $1" "$2}' "$RT_STATE" 2>/dev/null | sort -u)
+EOF
+        rm -f "$RT_STATE"
+    fi
+    route_cleanup_legacy
+}
+
+route_cleanup_legacy() {
+    local old="/etc/zapret2wizard/bypass_state.txt" fam tbl ch h
+    if [ -f "$old" ]; then
+        while read -r fam tbl ch; do
+            case "$fam" in iptables|"") continue ;; esac
+            [ -n "$ch" ] || continue
+            for h in $(nft -a list chain "$fam" "$tbl" "$ch" 2>/dev/null \
+                | awk '/bcw-bypass|bcw-exclude/{print $NF}'); do
+                nft delete rule "$fam" "$tbl" "$ch" handle "$h" 2>/dev/null || true
+            done
             nft delete set "$fam" "$tbl" "$BP_SET_R" 2>/dev/null || true
-        done < "$BP_STATE"
-        rm -f "$BP_STATE"
+            nft delete set "$fam" "$tbl" "bcw_bypass4" 2>/dev/null || true
+        done < "$old"
+        rm -f "$old"
     fi
-    if command -v ipset >/dev/null 2>&1; then
-        iptables -t mangle -D PREROUTING -i br-lan -m set --match-set "$BP_SET" dst -j RETURN 2>/dev/null || true
-        ipset destroy "$BP_SET" 2>/dev/null || true
+    if command -v ipset >/dev/null 2>&1 && command -v iptables >/dev/null 2>&1; then
+        iptables -t mangle -D PREROUTING -i br-lan -m set --match-set bcw_bypass4 dst -j RETURN 2>/dev/null || true
+        ipset destroy bcw_bypass4 2>/dev/null || true
     fi
-    # уборка правил старого формата (bcw-exclude)
-    local fam tbl ch h
-    nft list tables 2>/dev/null | awk '{print $2" "$3}' | while read -r fam tbl; do
-        nft list table "$fam" "$tbl" 2>/dev/null | sed -n 's/^[[:space:]]*chain \([^ {]*\).*/\1/p' | while read -r ch; do
-            for h in $(nft -a list chain "$fam" "$tbl" "$ch" 2>/dev/null | awk '/bcw-exclude/{print $NF}'); do
-                nft delete rule "$fam" "$tbl" "$ch" handle "$h" 2>/dev/null || true
-            done
-        done
-    done
+    rm -f /etc/zapret2wizard/bypass_ranges.txt /tmp/bcw_bypass.warm
 }
 
-bp_status() {
-    local targets rules=0 members=0 packets=0 bytes=0 line
-    # отчёт должен быть быстрым: восстановлением занимается bypass_watch
-    targets=$(bp_targets | wc -l)
-    if [ -f "$BP_STATE" ]; then
+# ------------------------------------------------------------ управление ---
+
+route_detect_backend() {
+    local want
+    want=$(_rt_uci_get zapret2wizard.main.route_backend)
+    case "$want" in
+        steer) route_steer_available && { echo steer; return 0; } ;;
+        nft) echo nft; return 0 ;;
+    esac
+    if route_steer_available; then echo steer; else echo nft; fi
+}
+
+route_enable() {
+    local backend
+    route_seed_lists
+    route_collect_domains >/dev/null
+    route_collect_static_ips
+    backend=$(route_detect_backend)
+    if [ "$backend" = "steer" ]; then
+        if route_steer_applied || route_steer_apply; then
+            route_nft_unsync
+            echo steer > "$RT_BACKEND_FILE"
+        else
+            backend=nft
+        fi
+    fi
+    if [ "$backend" = "nft" ]; then
+        # если пользователь явно выбрал nft — снимаем наш блок из steer,
+        # чтобы не было двух источников правды
+        route_steer_remove
+        route_nft_ok || route_nft_apply
+        echo nft > "$RT_BACKEND_FILE"
+        if [ -s "$RT_STATE" ] && { [ ! -s "$RT_IPS4" ] || [ -n "$(find "$RT_IPS4" -mmin +360 2>/dev/null)" ]; }; then
+            [ "$BCW_BP_FAST" = "1" ] || route_refresh_ips_detached
+        fi
+    fi
+    touch "$RT_WATCH_RUN" 2>/dev/null || true
+    route_watch_start
+}
+
+route_disable() {
+    rm -f "$RT_WATCH_RUN"
+    if [ -f "$RT_WATCH_PID" ]; then
+        kill "$(cat "$RT_WATCH_PID" 2>/dev/null)" 2>/dev/null || true
+        rm -f "$RT_WATCH_PID"
+    fi
+    route_steer_remove
+    route_nft_unsync
+    echo none > "$RT_BACKEND_FILE"
+}
+
+route_nft_stats() {
+    local fam tbl ch line p b tmp="/tmp/bcw_members.$$"
+    local rules=0 members=0 packets=0 bytes=0
+    : > "$tmp"
+    if [ -f "$RT_STATE" ]; then
         while read -r fam tbl ch; do
-            case "$fam" in
-                iptables) rules=$((rules + 1)); continue ;;
-            esac
             [ -n "$ch" ] || continue
-            line=$(bp_rule_line "$fam" "$tbl" "$ch" | head -n 1)
+            line=$(nft -a list chain "$fam" "$tbl" "$ch" 2>/dev/null \
+                | awk -v c="comment \"$RT_COMMENT\"" 'index($0,c){print; exit}')
             if [ -n "$line" ]; then
                 rules=$((rules + 1))
-                packets=$((packets + $(printf '%s' "$line" | sed -n 's/.*counter packets \([0-9]*\).*/\1/p' | head -n 1)))
-                bytes=$((bytes + $(printf '%s' "$line" | sed -n 's/.*bytes \([0-9]*\) return.*/\1/p' | head -n 1)))
+                p=$(printf '%s' "$line" | sed -n 's/.*counter packets \([0-9]*\) bytes \([0-9]*\).*/\1/p')
+                b=$(printf '%s' "$line" | sed -n 's/.*counter packets \([0-9]*\) bytes \([0-9]*\).*/\2/p')
+                [ -n "$p" ] && packets=$((packets + p))
+                [ -n "$b" ] && bytes=$((bytes + b))
             fi
-            members=$((members + $(nft list set "$fam" "$tbl" "$BP_SET" 2>/dev/null \
-                | sed -n '/elements = {/,/}/p' | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | wc -l)))
-            members=$((members + $(nft list set "$fam" "$tbl" "$BP_SET_R" 2>/dev/null \
-                | sed -n '/elements = {/,/}/p' | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | wc -l)))
-        done < "$BP_STATE"
+            nft list set "$fam" "$tbl" "$RT_SET4" 2>/dev/null \
+                | sed -n '/elements = {/,/}/p' | tr ',' '\n' \
+                | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]{1,2})?' >> "$tmp"
+            nft list set "$fam" "$tbl" "$RT_SET6" 2>/dev/null \
+                | sed -n '/elements = {/,/}/p' | tr ',' '\n' \
+                | grep -oE '[0-9a-fA-F:]{2,}(/[0-9]{1,3})?' | grep ':' >> "$tmp"
+        done < "$RT_STATE"
     fi
-    if command -v ipset >/dev/null 2>&1 && ipset list "$BP_SET" >/dev/null 2>&1; then
-        members=$((members + $(ipset list "$BP_SET" 2>/dev/null | grep -cE '^[0-9]+\.')))
-    fi
-    echo "{\"targets\":${targets:-0},\"rules\":$rules,\"members\":${members:-0},\"packets\":${packets:-0},\"bytes\":${bytes:-0},\"domains\":$(bp_collect_domains | wc -l)}"
+    members=$(sort -u "$tmp" 2>/dev/null | grep -c .)
+    rm -f "$tmp"
+    printf '%s %s %s %s\n' "$rules" "$members" "$packets" "$bytes"
 }
 
-# Сторож: оркестраторы пересоздают таблицы и стирают чужие правила.
-# Держим наши правила на месте с точностью до секунд.
-cmd_bypass_watch() {
-    if [ -f /var/run/bcw_bypass.watch.pid ]; then
-        local _wp=$(cat /var/run/bcw_bypass.watch.pid 2>/dev/null)
-        if [ -n "$_wp" ] && [ "$_wp" != "$$" ] && kill -0 "$_wp" 2>/dev/null; then
-            return 0
-        fi
+# 0.18.x не имел переключателя: исключения из туннеля применялись всегда.
+# При обновлении conffile не перезаписывается, поэтому option route_enabled
+# может отсутствовать. Если от старой версии осталось её состояние (набор
+# bypass_state.txt) или наш блок уже лежит в exclude.lst — сохраняем прежнее
+# поведение: включаем маршрут один раз, дальше решает пользователь.
+_rt_migrate_legacy() {
+    [ -n "$(_rt_uci_get zapret2wizard.main.route_enabled)" ] && return 0
+    if [ -f /etc/zapret2wizard/bypass_state.txt ] \
+        || grep -qF "$RT_MB" "$(route_steer_excl_path)" 2>/dev/null; then
+        _rt_uci_set zapret2wizard.main.route_enabled=1
+        _rt_log "migrated from 0.18.x: route_enabled=1"
     fi
-    echo $$ > /var/run/bcw_bypass.watch.pid
-    while [ -f /var/run/bcw_bypass.run ]; do
-        local t r
-        t=$(bp_targets 2>/dev/null | wc -l)
-        r=$(nft list ruleset 2>/dev/null | grep -c "bcw-bypass")
-        _svc_heal
-        if [ "${t:-0}" -gt 0 ] && [ "${r:-0}" -lt "${t:-0}" ]; then
-            echo "$(date '+%H:%M:%S') targets=$t rules=$r -> sync" >> /tmp/bcw_watch.log
-            bp_sync >> /tmp/bcw_watch.log 2>&1 || true
-        fi
-        sleep 8
+}
+
+# Старые установки держат в /etc/crontabs/root строку "bypass_sync enable":
+# она включала маршрут принудительно и отменяла выключение в UI. Переписываем
+# на "sync" (уважает route_enabled), не трогая остальной crontab.
+_rt_fix_cron() {
+    local f="/etc/crontabs/root"
+    [ -f "$f" ] || return 0
+    grep -q 'bypass_sync enable' "$f" 2>/dev/null || return 0
+    awk '/bypass_sync enable/ { sub(/bypass_sync enable/, "bypass_sync sync") } { print }' \
+        "$f" > "$f.bcw.$$" 2>/dev/null && mv -f "$f.bcw.$$" "$f" 2>/dev/null \
+        || rm -f "$f.bcw.$$" 2>/dev/null
+    /etc/init.d/cron restart >/dev/null 2>&1 || true
+    _rt_log "cron: bypass_sync enable -> sync"
+}
+
+# Есть ли куда применить маршрут: родные исключения steer или таблицы
+# оркестратора с маркировкой. Нужно карточке LuCI: маршрут бывает выключен,
+# но включить его должно быть можно, а не только из консоли.
+route_available() {
+    local cache="/tmp/bcw_route_detect"
+    route_steer_available && return 0
+    [ -s "$RT_IPS4" ] && return 0
+    if [ -f "$cache" ] && [ -z "$(find "$cache" -mmin +2 2>/dev/null)" ]; then
+        [ -s "$cache" ] && return 0
+        return 1
+    fi
+    if [ -n "$(route_nft_targets 2>/dev/null | head -n 1)" ]; then
+        echo 1 > "$cache" 2>/dev/null
+        return 0
+    fi
+    : > "$cache" 2>/dev/null
+    return 1
+}
+
+route_status() {
+    local backend enabled domains targets=0 rules=0 members=0 packets=0 bytes=0
+    local excluded=0 verified=false detail="no tunnel" pref avail=0
+    backend=$(cat "$RT_BACKEND_FILE" 2>/dev/null); [ -n "$backend" ] || backend=none
+    pref=$(_rt_uci_get zapret2wizard.main.route_backend); [ -n "$pref" ] || pref=auto
+    route_is_enabled && enabled=1 || enabled=0
+    domains=$( [ -f "$RT_DOMAINS" ] && wc -l < "$RT_DOMAINS" 2>/dev/null | tr -d ' ' )
+    [ -n "$domains" ] || domains=0
+    case "$backend" in
+        none) route_available && avail=1 ;;
+        *) avail=1 ;;
+    esac
+    case "$backend" in
+        steer)
+            excluded=$(_rt_block_count "$(route_steer_excl_path)")
+            targets=1
+            [ "$excluded" -gt 0 ] && rules=1
+            members=$(_rt_block_count "$(route_steer_pfx_path)")
+            detail="steer: domains direct, no nft hacks"
+            if [ -f "$RT_VERIFY" ] && [ -z "$(find "$RT_VERIFY" -mmin +60 2>/dev/null)" ]; then
+                grep -q '"ok":true' "$RT_VERIFY" 2>/dev/null && verified=true
+            fi
+            ;;
+        nft)
+            targets=$(wc -l < "$RT_STATE" 2>/dev/null | tr -d ' '); [ -n "$targets" ] || targets=0
+            set -- $(route_nft_stats)
+            rules="$1"; members="$2"; packets="$3"; bytes="$4"
+            detail="nft: return before mark"
+            ;;
+    esac
+    # Если маршрут выключен в UCI, галочка в UI должна быть снята,
+    # даже если старые правила ещё не успели удалить.
+    [ "$enabled" = "0" ] && rules=0
+    printf '{"backend":"%s","pref":"%s","enabled":%s,"available":%s,"targets":%s,"rules":%s,"members":%s,"packets":%s,"bytes":%s,"domains":%s,"excluded":%s,"verified":%s,"detail":"%s"}\n' \
+        "$backend" "$pref" "$enabled" "$avail" "$targets" "$rules" "$members" "$packets" "$bytes" "$domains" "$excluded" "$verified" "$detail"
+}
+
+route_domains_json() {
+    local list="" count=0 d esc
+    if [ -f "$RT_DOMAINS" ]; then
+        while IFS= read -r d; do
+            [ -n "$d" ] || continue
+            esc=$(printf '%s' "$d" | sed 's/"/\\"/g')
+            list="${list:+$list,}\"$esc\""
+            count=$((count + 1))
+        done < "$RT_DOMAINS"
+    fi
+    printf '{"count":%s,"domains":[%s]}\n' "$count" "$list"
+}
+
+route_verify() {
+    local backend ok=0 total=0 detail="" d ip fam tbl ch hit
+    backend=$(cat "$RT_BACKEND_FILE" 2>/dev/null)
+    if [ -z "$backend" ]; then
+        route_is_enabled && backend=$(route_detect_backend) || backend=none
+    fi
+    case "$backend" in
+        none) ok=0; total=1; detail="route disabled" ;;
+        steer)
+            for d in www.youtube.com googlevideo.com youtubei.googleapis.com discord.com; do
+                _rt_domain_covered "$d" || continue
+                total=$((total + 1))
+                route_steer_explain "$d" && ok=$((ok + 1))
+            done
+            detail="steer explain: $ok/$total direct"
+            ;;
+        nft)
+            for d in www.youtube.com googlevideo.com youtubei.googleapis.com; do
+                _rt_domain_covered "$d" || continue
+                total=$((total + 1))
+                ip=$(_rt_resolve_domain "$d" | grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}$' | head -n 1)
+                [ -n "$ip" ] || continue
+                hit=0
+                if [ -f "$RT_STATE" ]; then
+                    while read -r fam tbl ch; do
+                        [ -n "$ch" ] || continue
+                        nft get element "$fam" "$tbl" "$RT_SET4" "{ $ip }" >/dev/null 2>&1 && hit=1
+                    done < "$RT_STATE"
+                fi
+                [ "$hit" = "1" ] && ok=$((ok + 1))
+            done
+            detail="nft set: $ok/$total resolved"
+            ;;
+    esac
+    printf '{"ok":%s,"backend":"%s","passed":%s,"total":%s,"detail":"%s","ts":%s}\n' \
+        "$([ "$total" -eq 0 ] && echo true || { [ "$ok" -ge "$total" ] && echo true || echo false; })" \
+        "$backend" "$ok" "$total" "$detail" "$(date +%s)" > "$RT_VERIFY"
+    cat "$RT_VERIFY"
+}
+
+route_explain() {
+    if command -v steer >/dev/null 2>&1; then
+        steer explain "${1:-www.youtube.com}" 2>&1
+    else
+        echo '{"error":"steer not installed"}'
+    fi
+}
+
+# Домен покрыт списком, если совпадает сам или его родитель (www.youtube.com
+# покрывается строкой youtube.com).
+_rt_domain_covered() {
+    [ -f "$RT_DOMAINS" ] || return 1
+    awk -v d="$1" '
+        d==$0 { f=1; exit }
+        length(d)>length($0) && substr(d,length(d)-length($0))=="."$0 { f=1; exit }
+        END { exit !f }
+    ' "$RT_DOMAINS"
+}
+
+# Комплексная проверка «YouTube глазами роутера»: веб, превью, API, CDN.
+# Показывает не только «работает/нет», но и где именно рвётся.
+_yt_probe() {
+    if command -v curl >/dev/null 2>&1; then
+        curl -4 -s -o /dev/null -m 8 -w '%{http_code} %{size_download} %{time_total}' "$1" 2>/dev/null
+    else
+        printf '000 0 0'
+    fi
+}
+
+cmd_youtube_audit() {
+    local www img api gv rv rj score=0 total=0 checks="" name url out code bytes sec ok advice="ok"
+    local qm qr
+    for pair in \
+        "www|https://www.youtube.com/" \
+        "img|https://i.ytimg.com/vi/dQw4w9WgXcQ/default.jpg" \
+        "api|https://youtubei.googleapis.com/" \
+        "cdn|https://redirector.googlevideo.com/report_mapping?di=no"; do
+        name=${pair%%|*}; url=${pair#*|}
+        set -- $(_yt_probe "$url")
+        code="$1"; bytes="$2"; sec="$3"
+        total=$((total + 1))
+        [ "$code" != "000" ] && score=$((score + 1))
+        checks="${checks:+$checks,}{\"name\":\"$name\",\"code\":\"$code\",\"bytes\":${bytes:-0},\"time\":${sec:-0}}"
+        [ "$name" = "api" ] && [ "$code" = "000" ] && advice="fix_ytapi"
+        [ "$name" = "cdn" ] && [ "$code" = "000" ] && advice="rescan_youtube"
     done
-    rm -f /var/run/bcw_bypass.watch.pid
+    rj=$(route_verify 2>/dev/null)
+    [ -n "$rj" ] || rj='{"ok":false}'
+    echo "$rj" | grep -q '"ok":true' || advice="route_enable"
+    qm=$(_rt_uci_get zapret2wizard.main.quic_mode); [ -n "$qm" ] || qm=auto
+    qr=$(_rt_uci_get firewall.reject_quic.enabled); [ -n "$qr" ] || qr=?
+    ok=false
+    [ "$score" -ge 3 ] && [ "$advice" = "ok" ] && ok=true
+    printf '{"ok":%s,"score":%s,"total":%s,"advice":"%s","checks":[%s],"quic":{"mode":"%s","reject":%s},"route":%s}\n' \
+        "$ok" "$score" "$total" "$advice" "$checks" "$qm" "$qr" "$rj"
+}
+
+route_watch_start() {
+    touch "$RT_WATCH_RUN" 2>/dev/null || true
+    if [ -f "$RT_WATCH_PID" ]; then
+        local p
+        p=$(cat "$RT_WATCH_PID" 2>/dev/null)
+        [ -n "$p" ] && kill -0 "$p" 2>/dev/null && return 0
+    fi
+    if command -v start-stop-daemon >/dev/null 2>&1; then
+        start-stop-daemon -S -b -x /usr/bin/blockcheckw-helper -- route_watch \
+            1000>&- 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&- >/dev/null 2>&1 && return 0
+    fi
+    ( /usr/bin/blockcheckw-helper route_watch >/dev/null 2>&1 & )
+}
+
+cmd_route_watch() {
+    if [ -f "$RT_WATCH_PID" ]; then
+        local p
+        p=$(cat "$RT_WATCH_PID" 2>/dev/null)
+        [ -n "$p" ] && [ "$p" != "$$" ] && kill -0 "$p" 2>/dev/null && return 0
+    fi
+    echo $$ > "$RT_WATCH_PID"
+    local n=0 backend spec_sum last_sum="" missing fam tbl ch
+    while [ -f "$RT_WATCH_RUN" ]; do
+        route_is_enabled || break
+        backend=$(cat "$RT_BACKEND_FILE" 2>/dev/null)
+        n=$((n + 1))
+        case "$backend" in
+            steer)
+                grep -qF "$RT_MB" "$(route_steer_excl_path)" 2>/dev/null \
+                    || route_steer_apply
+                spec_sum=$(md5sum "$RT_STEER_SPEC" 2>/dev/null | awk '{print $1}')
+                if [ -n "$spec_sum" ] && [ "$spec_sum" != "$last_sum" ]; then
+                    [ -n "$last_sum" ] && route_steer_apply
+                    last_sum="$spec_sum"
+                fi
+                [ $((n % 30)) = 0 ] && route_verify >/dev/null 2>&1
+                ;;
+            nft)
+                missing=0
+                if [ -f "$RT_STATE" ]; then
+                    while read -r fam tbl ch; do
+                        [ -n "$ch" ] || continue
+                        route_rule_present "$fam" "$tbl" "$ch" || missing=1
+                    done < "$RT_STATE"
+                fi
+                [ "$missing" = "1" ] && route_nft_apply
+                [ $((n % 60)) = 0 ] && route_nft_apply
+                if [ ! -s "$RT_IPS4" ] || [ -n "$(find "$RT_IPS4" -mmin +360 2>/dev/null)" ]; then
+                    route_refresh_ips_detached
+                fi
+                ;;
+            *)
+                # применять некуда (маршрут выключен или туннелей нет) —
+                # сторожу нечего сторожить, иначе он живёт вхолостую
+                break
+                ;;
+        esac
+        [ $((n % 3)) = 0 ] && _svc_heal 2>/dev/null
+        sleep 10
+    done
+    rm -f "$RT_WATCH_PID"
 }
 
 cmd_bypass() {
-    case "${1:-sync}" in
-        enable|sync)
-            bp_sync
-            echo "{\"bypass\":\"active\",\"targets\":$(bp_targets | wc -l)}"
-            # Сторож мог умереть (reboot, kill): без него правила не вернутся
-            # после reload firewall/туннеля. Поднимаем, если не запущен.
-            [ -f /var/run/bcw_bypass.run ] || touch /var/run/bcw_bypass.run 2>/dev/null
-            ( /usr/bin/blockcheckw-helper bypass_watch >/dev/null 2>&1 & )
-            start-stop-daemon -S -b -x /bin/sh -- -c 'sleep 6; /usr/bin/blockcheckw-helper bypass_sync enable' >/dev/null 2>&1 || true
+    local action="${1:-sync}"
+    _rt_migrate_legacy
+    _rt_fix_cron
+    case "$action" in
+        enable|on)
+            _rt_uci_set zapret2wizard.main.route_enabled=1
+            route_enable
+            printf '{"bypass":"active","backend":"%s","domains":%s}\n' \
+                "$(cat "$RT_BACKEND_FILE" 2>/dev/null)" \
+                "$( [ -f "$RT_DOMAINS" ] && wc -l < "$RT_DOMAINS" 2>/dev/null | tr -d ' ' )"
+            ;;
+        sync)
+            route_is_enabled || { echo '{"bypass":"disabled"}'; return 0; }
+            # Во время подбора служба остановлена, а cron/hotplug не должны
+            # возвращать правила: иначе замер снова пойдёт через туннель.
+            if [ -f /tmp/bcw_scan_paused ] || [ -d /var/run/bcw_scan.lock ]; then
+                echo '{"bypass":"paused"}'
+                return 0
+            fi
+            route_enable
+            printf '{"bypass":"synced","backend":"%s"}\n' "$(cat "$RT_BACKEND_FILE" 2>/dev/null)"
             ;;
         disable|off)
-            bp_unsync
+            # keep: временная остановка (init/service stop) не должна
+            # выключать маршрут в UCI — иначе после restart он не вернётся.
+            [ "${2:-}" = "keep" ] || _rt_uci_set zapret2wizard.main.route_enabled=0
+            route_disable
             echo '{"bypass":"disabled"}'
             ;;
-        status)
-            bp_status
-            ;;
+        status) route_status ;;
         domains)
-            local list="" count=0 d esc
-            while IFS= read -r d; do
-                [ -n "$d" ] || continue
-                esc=$(printf '%s' "$d" | sed 's/"/\\"/g')
-                case "$list" in
-                    "") list="\"$esc\"" ;;
-                    *) list="$list,\"$esc\"" ;;
-                esac
-                count=$((count + 1))
-            done <<EOF
-$(bp_collect_domains)
-EOF
-            echo "{\"count\":$count,\"domains\":[$list]}"
+            [ -f "$RT_DOMAINS" ] || route_collect_domains >/dev/null
+            route_domains_json
             ;;
         rebuild)
-            if [ -f "$BP_STATE" ]; then
-                while read -r fam tbl ch; do
-                    case "$fam" in iptables) continue ;; esac
-                    [ -n "$ch" ] && nft flush set "$fam" "$tbl" "$BP_SET" 2>/dev/null || true
-                    [ -n "$ch" ] && nft flush set "$fam" "$tbl" "$BP_SET_R" 2>/dev/null || true
-                done < "$BP_STATE"
-            fi
-            rm -f "$BP_CACHE" "$BP_WARM_MARK"
-            bp_sync
-            bp_warm_detached
+            rm -f "$RT_IPS4" "$RT_IPS6"
+            route_enable
+            [ "$(cat "$RT_BACKEND_FILE" 2>/dev/null)" = "nft" ] && route_refresh_ips_detached
             echo '{"rebuilt":true}'
             ;;
-        *)
-            echo '{"error":"usage: bypass enable|disable|status|domains|rebuild"}'
+        verify) route_verify ;;
+        explain) shift; route_explain "$@" ;;
+        backend)
+            shift
+            case "${1:-}" in
+                auto|steer|nft)
+                    _rt_uci_set "zapret2wizard.main.route_backend=$1"
+                    route_enable
+                    printf '{"backend":"%s","active":"%s"}\n' "$1" "$(cat "$RT_BACKEND_FILE" 2>/dev/null)"
+                    ;;
+                *)
+                    route_detect_backend
+                    ;;
+            esac
             ;;
+        *) echo '{"error":"usage: bypass enable|disable|status|domains|rebuild|verify|explain|backend"}' ;;
     esac
 }
 
-# Совместимость со старым именем
 cmd_steer_sync() { cmd_bypass "$@"; }
 
 # Полные аргументы генома (для копирования).
@@ -4378,8 +5280,11 @@ cmd_cron_install() {
         echo "*/30 * * * * /usr/bin/blockcheckw-helper health_tick >/dev/null 2>&1 # bcw-health" >> "$cron_file"
     fi
     if ! grep -q 'bcw-bypass' "$cron_file" 2>/dev/null; then
-        echo "*/2 * * * * /usr/bin/blockcheckw-helper bypass_sync enable >/dev/null 2>&1 # bcw-bypass" >> "$cron_file"
+        echo "*/2 * * * * /usr/bin/blockcheckw-helper bypass_sync sync >/dev/null 2>&1 # bcw-bypass" >> "$cron_file"
     fi
+    # Установки до 0.19.0 держали здесь "bypass_sync enable": такая строка
+    # включала маршрут каждые две минуты, даже если пользователь его выключил.
+    _rt_fix_cron 2>/dev/null || true
     /etc/init.d/cron enable >/dev/null 2>&1 || true
     /etc/init.d/cron restart >/dev/null 2>&1 || true
     echo '{"success":true}'
@@ -4431,7 +5336,7 @@ cmd_service() {
                 kill -9 "$p" 2>/dev/null
             done
             nft delete table inet zapret2wizard 2>/dev/null || true
-            bypass_sync disable >/dev/null 2>&1 || true
+            bypass_sync disable keep >/dev/null 2>&1 || true
             echo '{"ok":true,"service":"stopped"}'
             ;;
         start)
@@ -5563,6 +6468,11 @@ EOF
     echo "{\"success\":true,\"file\":\"$file\",\"written\":$written,\"skipped\":$skipped,\"count\":$(_hl_count "$file")}"
 }
 
+# Тестовый режим: source helper без запуска диспетчера.
+if [ "${BCW_LIB_ONLY:-0}" = "1" ]; then
+    return 0 2>/dev/null || exit 0
+fi
+
 case "$1" in
     start) shift; cmd_start "$@" ;;
     start_bg) shift; cmd_start_bg "$@" ;;
@@ -5595,11 +6505,12 @@ kmods_status) cmd_kmods_status ;;
 kmods_resolve) shift; _kmods_fetch_official "$@" dry ;;
 fix_ytapi) cmd_fix_ytapi ;;
 quic_probe) cmd_quic_probe && echo ok || echo fail ;;
-quic_mode) cmd_quic_mode ;;
+quic_mode) shift; cmd_quic_mode "$@" ;;
 optimize_dns) cmd_optimize_dns ;;
     install_engine) cmd_install_engine ;;
     selftest) shift; cmd_selftest "$@" ;;
     class) shift; cmd_class "$@" ;;
+    netcheck) cmd_netcheck ;;
     autosetup) shift; cmd_autosetup "$@" ;;
     evolve) shift; cmd_evolve "$@" ;;
     evolve_status) cmd_evolve_status ;;
@@ -5611,9 +6522,13 @@ optimize_dns) cmd_optimize_dns ;;
     catalog_export) cmd_catalog_export ;;
     health_tick) cmd_health_tick ;;
     steer_sync|bypass_sync) shift; cmd_bypass "$@" ;;
-    bypass) shift; cmd_bypass "$@" ;;
-    bypass_warm) bp_resolve_ips ;;
-    bypass_watch) cmd_bypass_watch ;;
+    bypass|route) shift; cmd_bypass "$@" ;;
+    bypass_warm|route_refresh) route_refresh_ips ;;
+    bypass_watch|route_watch) cmd_route_watch ;;
+    route_verify) route_verify ;;
+    route_status) route_status ;;
+    route_explain) shift; route_explain "$@" ;;
+    youtube_audit) shift; cmd_youtube_audit "$@" ;;
     ensure_hostlists_bg) cmd_ensure_hostlists_bg ;;
     service) shift; cmd_service "$@" ;;
     svc_heal) _svc_heal ;;
@@ -5626,7 +6541,7 @@ optimize_dns) cmd_optimize_dns ;;
     provider_save) cmd_provider_save ;;
     cron_install) cmd_cron_install ;;
     *)
-        echo "Usage: $0 {start|status|stop|apply|activate|delete_strategy|test|speedtest|info|logs|check_update|update|uninstall|diag|ensure_hostlists|read_hostlist|add_hostlist_domain|remove_hostlist_domain|write_hostlist|metrics|toggle|conflicts|doctor}"
+        echo "Usage: $0 {start|status|stop|apply|activate|delete_strategy|test|speedtest|info|logs|check_update|update|uninstall|diag|ensure_hostlists|read_hostlist|add_hostlist_domain|remove_hostlist_domain|write_hostlist|metrics|toggle|conflicts|doctor|bypass|route|youtube_audit|netcheck}"
         exit 1
         ;;
 esac

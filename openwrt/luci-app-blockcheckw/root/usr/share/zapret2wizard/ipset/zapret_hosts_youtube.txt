@@ -42,3 +42,7 @@ dl.google.com
 test.googlevideo.com
 m.youtube.com
 music.youtube.com
+jnn-pa.googleapis.com
+youtubeembeddedplayer.googleapis.com
+youtube.googleapis.com
+redirector.googlevideo.com

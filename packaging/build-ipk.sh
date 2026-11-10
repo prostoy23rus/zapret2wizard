@@ -74,8 +74,14 @@ chmod 755 "$CTRL/postinst" "$CTRL/prerm"
 echo "/etc/config/zapret2wizard" > "$CTRL/conffiles"
 chmod 644 "$CTRL/conffiles"
 
-mkdir -p "$REPO/$OUT"
-PKG="$REPO/$OUT/luci-app-blockcheckw_${VERSION}-1_${ARCH}.ipk"
+# OUT может быть и относительным (dist), и абсолютным (/tmp/out) — не склеиваем
+# его с корнем репозитория вслепую, иначе пакет уезжает в $REPO/tmp/...
+case "$OUT" in
+  /*) OUTDIR="$OUT" ;;
+  *)  OUTDIR="$REPO/$OUT" ;;
+esac
+mkdir -p "$OUTDIR"
+PKG="$OUTDIR/luci-app-blockcheckw_${VERSION}-1_${ARCH}.ipk"
 
 (cd "$CTRL" && tar --owner=0 --group=0 --numeric-owner -czf "$WORK/control.tar.gz" ./control ./postinst ./prerm ./conffiles)
 (cd "$DATA" && tar --owner=0 --group=0 --numeric-owner -czf "$WORK/data.tar.gz" .)
