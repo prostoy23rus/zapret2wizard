@@ -1120,7 +1120,7 @@ return view.extend({
 			if (!failed.length) { repairCard.style.display = 'none'; return; }
 
 			// Не все проверки одинаково критичны: «обход туннелей» — это замечание
-			// (трафик может идти через steer), а не «служба не готова».
+			// (трафик может идти через туннель), а не «служба не готова».
 			var CRITICAL_CHECKS = ['nftables', 'наши движки', 'движок nfqws2', 'служба', 'nft-таблица', 'конфигурация', 'автозапуск'];
 			var criticalFailed = failed.filter(function(c) { return CRITICAL_CHECKS.indexOf(c.name) >= 0; });
 			var onlyWarnings = criticalFailed.length === 0;
@@ -1137,10 +1137,10 @@ return view.extend({
 			];
 
 			// Частая путаница: при остановленной службе сайты могут открываться,
-			// если трафик заворачивает steer-туннель (zm_vpn/z m_vpn2) — он не зависит от zapret.
+			// если трафик заворачивает туннель — он не зависит от zapret.
 			if (!isServiceRunning) {
 				nodes.push(E('div', { style: 'font-size: 12px; color: var(--bcw-text-muted); margin-top: 6px;' },
-					'Если сайты всё равно открываются — трафик может идти через steer-туннель (zm_vpn): он работает независимо от этой службы.'));
+					'Если сайты всё равно открываются — трафик может идти через туннель: он работает независимо от этой службы.'));
 			}
 
 			if (engineFailed) {
@@ -2075,7 +2075,7 @@ return view.extend({
 			dashRow.appendChild(dashLeft);
 			dashRow.appendChild(dashRight);
 			scanPanel.appendChild(dashRow);
-			dashRight.appendChild(buildSteerCard());
+			dashRight.appendChild(buildRouteCard());
 			// «Что применяется сейчас» и результаты — внутрь того же блока целей,
 			// чтобы это был один раздел, а не отдельная карточка
 			for (var ci = 2; ci < cards.length; ci++) {
@@ -2425,35 +2425,35 @@ return view.extend({
 			}).catch(function() {});
 		}
 
-		// -------- Steer: переключатель исключения и счётчик --------
-		function refreshSteerCard() {
+		// -------- Прямой маршрут: переключатель исключения и счётчик --------
+		function refreshRouteCard() {
 			fs.exec(HELPER_BIN, ['bypass', 'status']).then(function(res) {
 				var st = null;
 				try { st = JSON.parse(res.stdout); } catch (e) {}
-				var card = document.getElementById('bcw-steer-card');
-				var toggle = document.getElementById('bcw-steer-toggle');
-				var backendSel = document.getElementById('bcw-steer-backend');
-				var status = document.getElementById('bcw-steer-status');
+				var card = document.getElementById('bcw-route-card');
+				var toggle = document.getElementById('bcw-route-toggle');
+				var backendSel = document.getElementById('bcw-route-backend');
+				var status = document.getElementById('bcw-route-status');
 				if (!card || !st) return;
-				// available: маршрут применим (steer или таблицы с маркировкой),
-				// даже если сейчас выключен — иначе галочку не вернуть.
+				// available: маршрут применим (список службы или таблицы с
+				// маркировкой), даже если сейчас выключен — иначе галочку не вернуть.
 				if (!st.targets && !st.available) { card.style.display = 'none'; return; }
 				card.style.display = '';
 				if (toggle) toggle.checked = !!st.rules;
 				if (backendSel && st.pref) backendSel.value = st.pref;
 				if (status) {
 					if (st.rules) {
-						if (st.backend === 'steer') {
-							status.textContent = 'Прямой маршрут steer: доменов ' + (st.excluded || st.domains || 0) +
-								(st.verified ? ' · проверено' : ' · проверка идёт');
+						if (st.backend === 'list') {
+							status.textContent = 'Прямой маршрут: доменов ' + (st.excluded || st.domains || 0) +
+								(st.verified ? ' · проверено' : ' · применено');
 						} else {
 							status.textContent = 'Исключено из туннелей: ' + (st.packets || 0) + ' пакетов · доменов ' +
 								(st.domains || 0) + ' · IP ' + (st.members || 0);
 						}
 						status.style.color = '#98c379';
 					} else {
-						status.textContent = st.backend === 'steer'
-							? 'Выключено: steer снова забирает домены службы в туннель'
+						status.textContent = st.backend === 'list'
+							? 'Выключено: служба снова забирает домены в туннель'
 							: 'Выключено: домены службы уходят в туннель';
 						status.style.color = '#abb2bf';
 					}
@@ -2461,26 +2461,26 @@ return view.extend({
 			}).catch(function() {});
 		}
 
-		function buildSteerCard() {
-			var toggle = E('input', { type: 'checkbox', id: 'bcw-steer-toggle', style: 'margin: 0 8px 0 0; vertical-align: middle;' });
-			var status = E('div', { id: 'bcw-steer-status', style: 'font-size: 12px; color: #abb2bf; margin-top: 8px;' }, 'Загрузка...');
+		function buildRouteCard() {
+			var toggle = E('input', { type: 'checkbox', id: 'bcw-route-toggle', style: 'margin: 0 8px 0 0; vertical-align: middle;' });
+			var status = E('div', { id: 'bcw-route-status', style: 'font-size: 12px; color: #abb2bf; margin-top: 8px;' }, 'Загрузка...');
 			var title = E('div', { style: 'font-weight:bold;font-size:13px;margin-bottom:6px;' }, '🔀 Обход туннелей');
 
 			var backendSel = E('select', {
-				id: 'bcw-steer-backend',
+				id: 'bcw-route-backend',
 				style: 'margin-top:8px; font-size:12px; padding:3px 6px;'
 			}, [
-				E('option', { value: 'auto' }, 'Авто: steer, если есть'),
-				E('option', { value: 'steer' }, 'Только steer'),
-				E('option', { value: 'nft' }, 'Только nft')
+				E('option', { value: 'auto' }, 'Авто: список службы, иначе nft'),
+				E('option', { value: 'list' }, 'Список исключений службы'),
+				E('option', { value: 'nft' }, 'Правило nft до маркировки')
 			]);
 			backendSel.addEventListener('change', function() {
 				backendSel.disabled = true;
 				status.textContent = '⏳ Переключаю backend...';
 				fs.exec(HELPER_BIN, ['bypass', 'backend', backendSel.value]).then(function() {
 					backendSel.disabled = false;
-					setTimeout(refreshSteerCard, 1000);
-					setTimeout(refreshSteerCard, 4000);
+					setTimeout(refreshRouteCard, 1000);
+					setTimeout(refreshRouteCard, 4000);
 				}).catch(function() { backendSel.disabled = false; status.textContent = '✗ ошибка backend'; });
 			});
 
@@ -2490,20 +2490,20 @@ return view.extend({
 				status.textContent = want ? '⏳ Включаю исключение...' : '⏳ Снимаю исключение...';
 				fs.exec(HELPER_BIN, ['bypass', want ? 'enable' : 'disable']).then(function() {
 					toggle.disabled = false;
-					setTimeout(refreshSteerCard, 1000);
-					setTimeout(refreshSteerCard, 3500);
-					setTimeout(refreshSteerCard, 7000);
+					setTimeout(refreshRouteCard, 1000);
+					setTimeout(refreshRouteCard, 3500);
+					setTimeout(refreshRouteCard, 7000);
 					ui.addNotification(null, E('p', {}, want ? 'Домены службы исключены из туннелей' : 'Туннели снова забирают домены службы'), 'info');
 				}).catch(function() { toggle.disabled = false; status.textContent = '✗ ошибка'; });
 			});
 
 			var domainList = E('div', {
-				id: 'bcw-steer-domains',
+				id: 'bcw-route-domains',
 				style: 'display:none; margin-top:8px; max-height:180px; overflow:auto; font:11px/1.5 ui-monospace, monospace; color:#abb2bf; background:#0c1016; border:1px solid var(--bcw-border-divider); border-radius:6px; padding:8px;'
 			}, '');
 			var showBtn = E('button', {
 				class: 'bcw-btn-secondary',
-				id: 'bcw-steer-show',
+				id: 'bcw-route-show',
 				style: 'margin-top:8px; font-size:12px; padding:4px 10px;'
 			}, 'Показать домены');
 			showBtn.addEventListener('click', function() {
@@ -2525,7 +2525,7 @@ return view.extend({
 
 			var rebuildBtn = E('button', {
 				class: 'bcw-btn-secondary',
-				id: 'bcw-steer-rebuild',
+				id: 'bcw-route-rebuild',
 				style: 'margin-top:8px; margin-left:6px; font-size:12px; padding:4px 10px;'
 			}, '↻ Пересобрать набор');
 			rebuildBtn.addEventListener('click', function() {
@@ -2533,15 +2533,15 @@ return view.extend({
 				status.textContent = '⏳ Пересобираю набор IP...';
 				fs.exec(HELPER_BIN, ['bypass', 'rebuild']).then(function() {
 					rebuildBtn.disabled = false;
-					setTimeout(refreshSteerCard, 1000);
-					setTimeout(refreshSteerCard, 5000);
+					setTimeout(refreshRouteCard, 1000);
+					setTimeout(refreshRouteCard, 5000);
 					ui.addNotification(null, E('p', {}, 'Набор IP пересобран'), 'info');
 				}).catch(function() { rebuildBtn.disabled = false; });
 			});
 
 			var auditBtn = E('button', {
 				class: 'bcw-btn-secondary',
-				id: 'bcw-steer-audit',
+				id: 'bcw-route-audit',
 				style: 'margin-top:8px; margin-left:6px; font-size:12px; padding:4px 10px;'
 			}, '▶ Проверить YouTube');
 			auditBtn.addEventListener('click', function() {
@@ -2559,7 +2559,7 @@ return view.extend({
 				}).catch(function() { auditBtn.disabled = false; status.textContent = '✗ ошибка проверки'; });
 			});
 
-			var card = E('div', { class: 'bcw-card', id: 'bcw-steer-card', style: 'padding: 14px; margin-top: 16px; display: none;' }, [
+			var card = E('div', { class: 'bcw-card', id: 'bcw-route-card', style: 'padding: 14px; margin-top: 16px; display: none;' }, [
 				title,
 				E('div', { style: 'font-size:12px; color:var(--bcw-text-title); margin-bottom:6px;' }, [
 					E('span', {}, 'Маршрут: '),
@@ -2573,8 +2573,8 @@ return view.extend({
 				E('div', {}, [showBtn, rebuildBtn, auditBtn]),
 				domainList
 			]);
-			setTimeout(refreshSteerCard, 1200);
-			setInterval(refreshSteerCard, 15000);
+			setTimeout(refreshRouteCard, 1200);
+			setInterval(refreshRouteCard, 15000);
 			return card;
 		}
 

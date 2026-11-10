@@ -1053,7 +1053,8 @@ cmd_start() {
             [ "$xray_stopped" = "1" ] && /etc/init.d/xray start >/dev/null 2>&1
             [ "$openclash_stopped" = "1" ] && /etc/init.d/openclash start >/dev/null 2>&1
             [ "$passwall_stopped" = "1" ] && /etc/init.d/passwall start >/dev/null 2>&1
-            [ "$steer_stopped" = "1" ] && /etc/init.d/steer start >/dev/null 2>&1
+            # Служба, чей список исключений мы ведём: имя не зашито, берём из спеки.
+            [ "$orc_stopped" = "1" ] && [ -n "$orc_svc" ] && /etc/init.d/"$orc_svc" start >/dev/null 2>&1
 
             # Restore DPI service if not running — или если исчезла таблица nft:
             # сканер сносит inet zapret2wizard, но процессы nfqws2 при этом
@@ -1124,13 +1125,16 @@ cmd_start() {
             passwall_stopped=1
         fi
 
-        # steer заворачивает домены в туннель: на время замера он должен быть
-        # выключен, иначе «работающая» стратегия — это туннель, а не обход.
-        local steer_stopped=0
-        if [ -x /etc/init.d/steer ] && /etc/init.d/steer status 2>/dev/null | grep -qiE 'running|active'; then
-            echo "[blockcheckw-helper] steer is running. Temporarily suspending..." >> "$LOG_FILE"
-            /etc/init.d/steer stop >/dev/null 2>&1
-            steer_stopped=1
+        # Служба маршрутизации заворачивает домены в туннель: на время замера её
+        # надо выключить, иначе «работающая» стратегия — это туннель, а не обход.
+        # Какая именно служба — узнаём из найденной спеки, имя не зашито.
+        local orc_stopped=0 orc_svc
+        orc_svc=$(route_list_service 2>/dev/null)
+        if [ -n "$orc_svc" ] && [ -x "/etc/init.d/$orc_svc" ] \
+            && "/etc/init.d/$orc_svc" status 2>/dev/null | grep -qiE 'running|active'; then
+            echo "[blockcheckw-helper] $orc_svc is running. Temporarily suspending..." >> "$LOG_FILE"
+            "/etc/init.d/$orc_svc" stop >/dev/null 2>&1
+            orc_stopped=1
         fi
 
         # Flush DNS cache in case Fake-IP pool (198.18.x.x) was cached by dnsmasq
@@ -3443,18 +3447,18 @@ cmd_doctor() {
         add_check "наши движки" 0 "ни один экземпляр nfqws2 не запущен" "Перезапустите службу и проверьте лог: logread | grep -i nfqws | tail -20"
     fi
 
-    # Прямой маршрут: steer (родные исключения) или nft-return.
+    # Прямой маршрут: списковые исключения или nft-return.
     local rj rbackend rtargets rrules rdom
     rj=$(route_status 2>/dev/null)
     rbackend=$(printf '%s' "$rj" | sed -n 's/.*"backend":"\([^"]*\)".*/\1/p')
     rtargets=$(printf '%s' "$rj" | sed -n 's/.*"targets":\([0-9]*\).*/\1/p')
     rrules=$(printf '%s' "$rj" | sed -n 's/.*"rules":\([0-9]*\).*/\1/p')
     rdom=$(printf '%s' "$rj" | sed -n 's/.*"domains":\([0-9]*\).*/\1/p')
-    if [ "$rbackend" = "steer" ]; then
+    if [ "$rbackend" = "list" ]; then
         if [ "${rrules:-0}" -ge 1 ]; then
-            add_check "обход туннелей" 1 "steer: ${rdom:-0} доменов напрямую" ""
+            add_check "обход туннелей" 1 "списковые исключения: ${rdom:-0} доменов напрямую" ""
         else
-            add_check "обход туннелей" 0 "steer: список исключений не применён" "blockcheckw-helper bypass enable"
+            add_check "обход туннелей" 0 "список исключений не применён" "blockcheckw-helper bypass enable"
         fi
     elif [ "${rtargets:-0}" -gt 0 ]; then
         if [ "${rrules:-0}" -ge "${rtargets:-0}" ]; then
@@ -3462,13 +3466,18 @@ cmd_doctor() {
         else
             add_check "обход туннелей" 0 "nft: правил ${rrules} из ${rtargets} цепочек" "blockcheckw-helper bypass enable"
         fi
-    elif route_steer_available; then
-        # Маршрут выключен. Ругаемся, только если steer действительно
-        # заворачивает домены службы в туннель — иначе это осознанный выбор.
-        if route_steer_explain youtube.com >/dev/null 2>&1; then
-            add_check "обход туннелей" 1 "steer: YouTube идёт напрямую" ""
+    elif route_list_available; then
+        # Маршрут выключен. Ругаемся только если служба умеет объяснять
+        # решение (route_list_verify) и говорит «в туннель»; иначе это
+        # осознанный выбор, и судить не по чему.
+        if [ -n "$(_rt_uci_get zapret2wizard.main.route_list_verify)" ]; then
+            if route_list_verify_domain youtube.com >/dev/null 2>&1; then
+                add_check "обход туннелей" 1 "домены службы идут напрямую" ""
+            else
+                add_check "обход туннелей" 0 "домены службы уходят в туннель" "blockcheckw-helper bypass enable"
+            fi
         else
-            add_check "обход туннелей" 0 "steer: домены службы уходят в туннель" "blockcheckw-helper bypass enable"
+            add_check "обход туннелей" 1 "прямой маршрут выключен (bypass enable — включить)" ""
         fi
     elif [ "$(route_nft_targets 2>/dev/null | wc -l)" -gt 0 ]; then
         add_check "обход туннелей" 0 "nft: туннель есть, правил нет" "blockcheckw-helper bypass enable"
@@ -4015,18 +4024,19 @@ cmd_evolve_import() {
     rm -f "$tmp"
 }
 
-# ---- Прямой маршрут: вывод трафика службы из туннелей (steer и другие) ----
+# ---- Прямой маршрут: вывод трафика службы из туннелей любого типа ----
 #
-# Если оркестратор (steer, mihomo, sing-box, v2rayA, кастомный nft) заворачивает
-# домены службы в туннель, DPI-обход простаивает, а YouTube получает то
-# российский, то зарубежный адрес и теряет регион.
+# Если оркестратор туннеля (mihomo, sing-box, v2rayA, свой nft-скрипт — любой)
+# заворачивает домены службы в туннель, DPI-обход простаивает, а YouTube
+# получает то российский, то зарубежный адрес и теряет регион.
 #
 # Два независимых исполнения, оба локальные, без сторонних служб:
 #
-#   1) steer (Zapret Manager) — родной список исключений
-#      /etc/zm-steer/user/exclude.lst. Исключаем ДОМЕНЫ, а не IP: работают
+#   1) списковые исключения — служба маршрутизации сама хранит список доменов
+#      «напрямую», и мы пишем в него. Исключаем ДОМЕНЫ, а не IP: работают
 #      IPv4, IPv6, QUIC и клиенты с DoH. Ничего не патчим в nft, поэтому
-#      перезапуск steer и reload firewall ничего не ломают.
+#      перезапуск службы и reload firewall ничего не ломают. Имя службы и
+#      путь к списку не зашиты: автоопределение по спеке или настройки UCI.
 #
 #   2) Любой nft-оркестратор — наборы bcw_route4/bcw_route6 и правило return
 #      ДО маркировки в base-цепочке. Правило ставится не в начало цепочки,
@@ -4059,10 +4069,6 @@ RT_LOCK="/var/run/bcw_route.lock"
 RT_CRON="/etc/crontabs/root"
 RT_LEGACY_STATE="/etc/zapret2wizard/bypass_state.txt"
 
-RT_STEER_SPEC="/etc/steer/spec.json"
-RT_STEER_USER="/etc/zm-steer/user"
-RT_STEER_EXCL="$RT_STEER_USER/exclude.lst"
-RT_STEER_PFX="$RT_STEER_USER/exclude.pfx"
 RT_MB="# >>> zapret2wizard direct (managed)"
 RT_ME="# <<< zapret2wizard direct (managed)"
 
@@ -4084,7 +4090,7 @@ _rt_uci_set() {
     uci -q commit zapret2wizard 2>/dev/null || true
 }
 
-# Прямой маршрут — осознанное включение: он правит чужие списки (steer) и
+# Прямой маршрут — осознанное включение: он правит чужие списки и
 # nft-таблицы оркестратора, поэтому сам по себе не включается ни при старте,
 # ни по cron. Включается командой bypass enable или галочкой в карточке LuCI.
 route_is_enabled() {
@@ -4331,36 +4337,154 @@ route_refresh_ips_detached() {
     ( /usr/bin/blockcheckw-helper route_refresh >/dev/null 2>&1 & )
 }
 
-# ---------------------------------------------------------------- steer ---
+# ------------------------------------------------ исключения списком ---
+#
+# У службы маршрутизации (оркестратора туннеля) почти всегда есть свой список
+# доменов, которые не нужно заворачивать. Писать в него правильнее, чем лезть
+# в nft: список переживает reload firewall, работает для IPv4, IPv6, QUIC и
+# DoH, и его видно в интерфейсе самой службы.
+#
+# Имя службы здесь не зашито — служб много и они меняются. Список ищется так:
+#   1) явные настройки UCI: route_list_spec, route_list_file, route_list_pfx;
+#   2) автоопределение: /etc/<служба>/spec.json, где перечислены
+#      "domains_file"/"prefixes_file" — так описывают свои списки
+#      распространённые оркестраторы.
+# Перечитать конфигурацию: route_list_reload; иначе /etc/init.d/<служба> reload,
+# где <служба> — каталог спеки. Проверка решения: route_list_verify
+# (shell-команда, {} заменяется на домен); если не задана — проверяем, что
+# домен попал в список.
 
-route_steer_excl_path() {
-    local p=""
-    if [ -f "$RT_STEER_SPEC" ]; then
-        p=$(tr -d '\n' < "$RT_STEER_SPEC" 2>/dev/null \
-            | sed -n 's/.*"zm_excl"[^}]*"domains_file"[[:space:]]*:[[:space:]]*\[[[:space:]]*"\([^"]*\)".*/\1/p')
-        [ -n "$p" ] || p=$(tr -d '\n' < "$RT_STEER_SPEC" 2>/dev/null \
-            | sed -n 's/.*"zm_excl"[^}]*"domains_file"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
-    fi
-    [ -n "$p" ] || p="$RT_STEER_EXCL"
-    printf '%s\n' "$p"
+route_list_spec() {
+    local s
+    s=$(_rt_uci_get zapret2wizard.main.route_list_spec)
+    if [ -n "$s" ] && [ -f "$s" ]; then printf '%s\n' "$s"; return 0; fi
+    for s in /etc/*/spec.json; do
+        [ -f "$s" ] || continue
+        tr -d '\n' < "$s" 2>/dev/null | grep -q '"domains_file"' \
+            && { printf '%s\n' "$s"; return 0; }
+    done
+    return 1
 }
 
-route_steer_pfx_path() {
-    local p=""
-    if [ -f "$RT_STEER_SPEC" ]; then
-        p=$(tr -d '\n' < "$RT_STEER_SPEC" 2>/dev/null \
-            | sed -n 's/.*"zm_excl"[^}]*"prefixes_file"[[:space:]]*:[[:space:]]*\[[[:space:]]*"\([^"]*\)".*/\1/p')
-        [ -n "$p" ] || p=$(tr -d '\n' < "$RT_STEER_SPEC" 2>/dev/null \
-            | sed -n 's/.*"zm_excl"[^}]*"prefixes_file"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
-    fi
-    [ -n "$p" ] || p="$RT_STEER_PFX"
-    printf '%s\n' "$p"
+# Все пути из JSON-спеки для ключа: и массивы, и одиночные строки.
+# Спека описывает несколько списков сразу, поэтому нужно именно ВСЕ
+# вхождения ключа, а не последнее.
+_rt_spec_paths() {
+    local spec="$1" key="$2" line
+    [ -f "$spec" ] || return 0
+    line=$(tr -d '\n' < "$spec" 2>/dev/null)
+    printf '%s\n' "$line" \
+        | grep -o "\"$key\"[[:space:]]*:[[:space:]]*\[[^]]*\]" \
+        | sed 's/^\[//; s/\]$//; s/.*\[//' | tr ',' '\n' | tr -d '"\t ' | grep -v '^$'
+    printf '%s\n' "$line" \
+        | grep -o "\"$key\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" \
+        | sed 's/.*:[[:space:]]*"//; s/"$//' | grep -v '^$'
 }
 
-route_steer_available() {
-    [ -f "$RT_STEER_SPEC" ] || return 1
-    [ -d "$RT_STEER_USER" ] || return 1
-    grep -q '"zm_excl"' "$RT_STEER_SPEC" 2>/dev/null || return 1
+# Насколько путь похож на список исключений. Писать в произвольный список
+# службы нельзя: там могут быть её собственные сервисные домены. Поэтому
+# выбираем по смыслу, а если ничего не подходит — честно отдаём nft.
+#   4 — в файле уже лежит наш блок (обновление);
+#   2 — имя про исключения (exclude/direct) или каталог пользователя;
+#   0 — прочее.
+_rt_list_score() {
+    local f="$1" s=0
+    grep -qF "$RT_MB" "$f" 2>/dev/null && s=$((s + 4))
+    case "$(basename "$f")" in
+        *exclude*|*direct*|*bypass*) s=$((s + 2)) ;;
+    esac
+    case "$f" in
+        */user/*|*/user_*/*) s=$((s + 2)) ;;
+    esac
+    printf '%s\n' "$s"
+}
+
+# Лучший кандидат: максимум очков, при равенстве — первый. Пусто, если
+# максимум меньше 2 (значит, это не список исключений).
+_rt_list_pick() {
+    local key="$1" spec f best="" best_s=0 s
+    spec=$(route_list_spec) || return 0
+    for f in $(_rt_spec_paths "$spec" "$key"); do
+        s=$(_rt_list_score "$f")
+        if [ "$s" -gt "$best_s" ]; then best_s=$s; best=$f; fi
+    done
+    [ "$best_s" -ge 2 ] && printf '%s\n' "$best"
+    return 0
+}
+
+# Две строки: список доменов и (необязательно) список префиксов.
+route_list_files() {
+    local file pfx
+    file=$(_rt_uci_get zapret2wizard.main.route_list_file)
+    pfx=$(_rt_uci_get zapret2wizard.main.route_list_pfx)
+    [ -n "$file" ] || file=$(_rt_list_pick domains_file)
+    [ -n "$pfx" ] || pfx=$(_rt_list_pick prefixes_file)
+    [ -n "$file" ] || return 1
+    printf '%s\n%s\n' "$file" "$pfx"
+}
+
+# Имя службы, которой принадлежит найденная спека: /etc/<служба>/spec.json.
+# Нужно, чтобы перечитать конфигурацию и на время замера приостановить именно
+# её, не зная заранее, что это за служба.
+route_list_service() {
+    local spec
+    spec=$(route_list_spec) || return 1
+    [ -n "$spec" ] || return 1
+    basename "$(dirname "$spec")"
+}
+
+route_list_excl_path() { route_list_files 2>/dev/null | sed -n 1p; }
+route_list_pfx_path() { route_list_files 2>/dev/null | sed -n 2p; }
+route_list_available() { [ -n "$(route_list_excl_path)" ]; }
+
+# Дополнительно закреплять IP в списке префиксов (нужно редким приложениям,
+# которые ходят по IP). Новое имя, старое читаем для совместимости.
+route_list_ips_on() {
+    [ "$(_rt_uci_get zapret2wizard.main.route_list_ips)" = "1" ]
+}
+
+route_list_reload_now() {
+    local cmd svc spec
+    cmd=$(_rt_uci_get zapret2wizard.main.route_list_reload)
+    if [ -n "$cmd" ]; then
+        if command -v timeout >/dev/null 2>&1; then
+            timeout 25 sh -c "$cmd" >/dev/null 2>&1 && return 0
+        else
+            sh -c "$cmd" >/dev/null 2>&1 && return 0
+        fi
+        _rt_log "list: reload failed: $cmd"
+        return 1
+    fi
+    spec=$(route_list_spec) || return 0
+    svc=$(basename "$(dirname "$spec")")
+    if [ -x "/etc/init.d/$svc" ]; then
+        if command -v timeout >/dev/null 2>&1; then
+            timeout 25 "/etc/init.d/$svc" reload >/dev/null 2>&1 && return 0
+        else
+            "/etc/init.d/$svc" reload >/dev/null 2>&1 && return 0
+        fi
+    fi
+    command -v "$svc" >/dev/null 2>&1 && "$svc" reload >/dev/null 2>&1
+    return 0
+}
+
+route_list_reload_bg() { ( route_list_reload_now ) >/dev/null 2>&1 & }
+
+# 0 — домен идёт напрямую, 1 — нет. Без настроенной проверки считаем
+# выполненным попадание домена (или его родителя) в список.
+route_list_verify_domain() {
+    local cmd d="$1"
+    cmd=$(_rt_uci_get zapret2wizard.main.route_list_verify)
+    if [ -n "$cmd" ]; then
+        cmd=$(printf '%s' "$cmd" | sed "s|{}|$d|g")
+        if command -v timeout >/dev/null 2>&1; then
+            timeout 10 sh -c "$cmd" >/dev/null 2>&1 && return 0
+        else
+            sh -c "$cmd" >/dev/null 2>&1 && return 0
+        fi
+        return 1
+    fi
+    _rt_domain_covered "$d"
 }
 
 _rt_block_strip() {
@@ -4395,76 +4519,6 @@ _rt_block_write() {
     chmod 644 "$file" 2>/dev/null || true
 }
 
-route_steer_reload_now() {
-    if command -v steer >/dev/null 2>&1; then
-        if command -v timeout >/dev/null 2>&1; then
-            timeout 25 steer reload >/dev/null 2>&1 && return 0
-        else
-            steer reload >/dev/null 2>&1 && return 0
-        fi
-    fi
-    [ -x /etc/init.d/steer ] && /etc/init.d/steer reload >/dev/null 2>&1
-    return 0
-}
-
-route_steer_reload_bg() { ( route_steer_reload_now ) >/dev/null 2>&1 & }
-
-route_steer_explain() {
-    command -v steer >/dev/null 2>&1 || return 2
-    local out
-    if command -v timeout >/dev/null 2>&1; then
-        out=$(timeout 8 steer explain "$1" 2>/dev/null) || return 2
-    else
-        out=$(steer explain "$1" 2>/dev/null) || return 2
-    fi
-    case "$out" in
-        *zm_direct*|*'"out":"direct"'*|*'"out": "direct"'*|*"-> direct"*) return 0 ;;
-        *zm_vpn*|*tunnel*) return 1 ;;
-    esac
-    return 2
-}
-
-route_steer_apply() {
-    local excl pfx pfxsrc
-    excl=$(route_steer_excl_path)
-    [ -n "$excl" ] || return 1
-    mkdir -p "$(dirname "$excl")" 2>/dev/null || true
-    [ -f "$excl.bcw.bak" ] || cp -f "$excl" "$excl.bcw.bak" 2>/dev/null || true
-    _rt_block_write "$excl" "$RT_DOMAINS" || return 1
-    if [ "$(_rt_uci_get zapret2wizard.main.route_steer_ips)" = "1" ]; then
-        [ -s "$RT_IPS4" ] || route_refresh_ips
-        pfx=$(route_steer_pfx_path)
-        pfxsrc="/tmp/bcw_pfx.$$"
-        awk '{ if ($0 ~ /\//) print; else print $0 "/32" }' "$RT_IPS4" 2>/dev/null > "$pfxsrc"
-        awk '{ if ($0 ~ /\//) print; else print $0 "/128" }' "$RT_IPS6" 2>/dev/null >> "$pfxsrc"
-        [ -n "$pfx" ] && _rt_block_write "$pfx" "$pfxsrc"
-        rm -f "$pfxsrc"
-    else
-        pfx=$(route_steer_pfx_path)
-        if [ -f "$pfx" ] && grep -qF "$RT_MB" "$pfx" 2>/dev/null; then
-            _rt_block_strip "$pfx" > "$pfx.bcw.$$" && mv -f "$pfx.bcw.$$" "$pfx"
-        fi
-    fi
-    _rt_log "steer: $(wc -l < "$RT_DOMAINS" 2>/dev/null) domains -> $excl"
-    echo steer > "$RT_BACKEND_FILE"
-    route_steer_reload_bg
-    return 0
-}
-
-route_steer_remove() {
-    local excl pfx changed=0
-    excl=$(route_steer_excl_path)
-    pfx=$(route_steer_pfx_path)
-    if [ -f "$excl" ] && grep -qF "$RT_MB" "$excl" 2>/dev/null; then
-        _rt_block_strip "$excl" > "$excl.bcw.$$" && mv -f "$excl.bcw.$$" "$excl" && changed=1
-    fi
-    if [ -f "$pfx" ] && grep -qF "$RT_MB" "$pfx" 2>/dev/null; then
-        _rt_block_strip "$pfx" > "$pfx.bcw.$$" && mv -f "$pfx.bcw.$$" "$pfx" && changed=1
-    fi
-    [ "$changed" = "1" ] && route_steer_reload_bg
-    return 0
-}
-
 _rt_block_sig() {
     [ -f "$1" ] || { echo none; return 0; }
     awk -v b="$RT_MB" -v e="$RT_ME" '
@@ -4474,13 +4528,52 @@ _rt_block_sig() {
     ' "$1" 2>/dev/null | cksum 2>/dev/null | awk '{print $1"-"$2}'
 }
 
-route_steer_applied() {
+route_list_apply() {
+    local files excl pfx pfxsrc
+    files=$(route_list_files) || return 1
+    excl=$(printf '%s\n' "$files" | sed -n 1p)
+    pfx=$(printf '%s\n' "$files" | sed -n 2p)
+    [ -n "$excl" ] || return 1
+    mkdir -p "$(dirname "$excl")" 2>/dev/null || true
+    [ -f "$excl.bcw.bak" ] || cp -f "$excl" "$excl.bcw.bak" 2>/dev/null || true
+    _rt_block_write "$excl" "$RT_DOMAINS" || return 1
+    if route_list_ips_on && [ -n "$pfx" ]; then
+        [ -s "$RT_IPS4" ] || route_refresh_ips
+        pfxsrc="/tmp/bcw_pfx.$$"
+        awk '{ if ($0 ~ /\//) print; else print $0 "/32" }' "$RT_IPS4" 2>/dev/null > "$pfxsrc"
+        awk '{ if ($0 ~ /\//) print; else print $0 "/128" }' "$RT_IPS6" 2>/dev/null >> "$pfxsrc"
+        _rt_block_write "$pfx" "$pfxsrc"
+        rm -f "$pfxsrc"
+    elif [ -n "$pfx" ] && [ -f "$pfx" ] && grep -qF "$RT_MB" "$pfx" 2>/dev/null; then
+        _rt_block_strip "$pfx" > "$pfx.bcw.$$" && mv -f "$pfx.bcw.$$" "$pfx"
+    fi
+    _rt_log "list: $(wc -l < "$RT_DOMAINS" 2>/dev/null) domains -> $excl"
+    echo list > "$RT_BACKEND_FILE"
+    route_list_reload_bg
+    return 0
+}
+
+route_list_remove() {
+    local excl pfx changed=0
+    excl=$(route_list_excl_path)
+    pfx=$(route_list_pfx_path)
+    if [ -n "$excl" ] && [ -f "$excl" ] && grep -qF "$RT_MB" "$excl" 2>/dev/null; then
+        _rt_block_strip "$excl" > "$excl.bcw.$$" && mv -f "$excl.bcw.$$" "$excl" && changed=1
+    fi
+    if [ -n "$pfx" ] && [ -f "$pfx" ] && grep -qF "$RT_MB" "$pfx" 2>/dev/null; then
+        _rt_block_strip "$pfx" > "$pfx.bcw.$$" && mv -f "$pfx.bcw.$$" "$pfx" && changed=1
+    fi
+    [ "$changed" = "1" ] && route_list_reload_bg
+    return 0
+}
+
+route_list_applied() {
     local excl pfx
-    excl=$(route_steer_excl_path)
-    [ -f "$excl" ] && grep -qF "$RT_MB" "$excl" 2>/dev/null || return 1
-    pfx=$(route_steer_pfx_path)
-    if [ "$(_rt_uci_get zapret2wizard.main.route_steer_ips)" != "1" ] \
-        && [ -f "$pfx" ] && grep -qF "$RT_MB" "$pfx" 2>/dev/null; then
+    excl=$(route_list_excl_path)
+    [ -n "$excl" ] && [ -f "$excl" ] && grep -qF "$RT_MB" "$excl" 2>/dev/null || return 1
+    pfx=$(route_list_pfx_path)
+    if ! route_list_ips_on && [ -n "$pfx" ] && [ -f "$pfx" ] \
+        && grep -qF "$RT_MB" "$pfx" 2>/dev/null; then
         return 1
     fi
     [ "$(_rt_block_sig "$excl")" = "$(cksum < "$RT_DOMAINS" 2>/dev/null | awk '{print $1"-"$2}')" ]
@@ -4722,10 +4815,10 @@ route_detect_backend() {
     local want
     want=$(_rt_uci_get zapret2wizard.main.route_backend)
     case "$want" in
-        steer) route_steer_available && { echo steer; return 0; } ;;
         nft) echo nft; return 0 ;;
+        list) route_list_available && { echo list; return 0; } ;;
     esac
-    if route_steer_available; then echo steer; else echo nft; fi
+    if route_list_available; then echo list; else echo nft; fi
 }
 
 route_enable() {
@@ -4734,18 +4827,18 @@ route_enable() {
     route_collect_domains >/dev/null
     route_collect_static_ips
     backend=$(route_detect_backend)
-    if [ "$backend" = "steer" ]; then
-        if route_steer_applied || route_steer_apply; then
+    if [ "$backend" = "list" ]; then
+        if route_list_applied || route_list_apply; then
             route_nft_unsync
-            echo steer > "$RT_BACKEND_FILE"
+            echo list > "$RT_BACKEND_FILE"
         else
             backend=nft
         fi
     fi
     if [ "$backend" = "nft" ]; then
-        # если пользователь явно выбрал nft — снимаем наш блок из steer,
+        # если пользователь явно выбрал nft — снимаем наш блок из списка,
         # чтобы не было двух источников правды
-        route_steer_remove
+        route_list_remove
         route_nft_ok || route_nft_apply
         echo nft > "$RT_BACKEND_FILE"
         if [ -s "$RT_STATE" ] && { [ ! -s "$RT_IPS4" ] || [ -n "$(find "$RT_IPS4" -mmin +360 2>/dev/null)" ]; }; then
@@ -4762,7 +4855,7 @@ route_disable() {
         kill "$(cat "$RT_WATCH_PID" 2>/dev/null)" 2>/dev/null || true
         rm -f "$RT_WATCH_PID"
     fi
-    route_steer_remove
+    route_list_remove
     route_nft_unsync
     echo none > "$RT_BACKEND_FILE"
 }
@@ -4807,7 +4900,7 @@ _rt_migrate_legacy() {
     # снести свой bypass_state.txt): старая cron-строка "enable" и старые
     # nft-правила bcw-bypass. Плюс сам файл состояния и наш блок в exclude.lst.
     if [ -f "$RT_LEGACY_STATE" ] \
-        || grep -qF "$RT_MB" "$(route_steer_excl_path)" 2>/dev/null \
+        || grep -qF "$RT_MB" "$(route_list_excl_path)" 2>/dev/null \
         || grep -q 'bypass_sync enable' "$RT_CRON" 2>/dev/null \
         || nft list ruleset 2>/dev/null | grep -q 'bcw-bypass'; then
         _rt_uci_set zapret2wizard.main.route_enabled=1
@@ -4829,12 +4922,12 @@ _rt_fix_cron() {
     _rt_log "cron: bypass_sync enable -> sync"
 }
 
-# Есть ли куда применить маршрут: родные исключения steer или таблицы
+# Есть ли куда применить маршрут: списковые исключения или таблицы
 # оркестратора с маркировкой. Нужно карточке LuCI: маршрут бывает выключен,
 # но включить его должно быть можно, а не только из консоли.
 route_available() {
     local cache="/tmp/bcw_route_detect"
-    route_steer_available && return 0
+    route_list_available && return 0
     [ -s "$RT_IPS4" ] && return 0
     if [ -f "$cache" ] && [ -z "$(find "$cache" -mmin +2 2>/dev/null)" ]; then
         [ -s "$cache" ] && return 0
@@ -4861,12 +4954,12 @@ route_status() {
         *) avail=1 ;;
     esac
     case "$backend" in
-        steer)
-            excluded=$(_rt_block_count "$(route_steer_excl_path)")
+        list)
+            excluded=$(_rt_block_count "$(route_list_excl_path)")
             targets=1
             [ "$excluded" -gt 0 ] && rules=1
-            members=$(_rt_block_count "$(route_steer_pfx_path)")
-            detail="steer: domains direct, no nft hacks"
+            members=$(_rt_block_count "$(route_list_pfx_path)")
+            detail="list: domains in native exclusion list"
             if [ -f "$RT_VERIFY" ] && [ -z "$(find "$RT_VERIFY" -mmin +60 2>/dev/null)" ]; then
                 grep -q '"ok":true' "$RT_VERIFY" 2>/dev/null && verified=true
             fi
@@ -4906,13 +4999,13 @@ route_verify() {
     fi
     case "$backend" in
         none) ok=0; total=1; detail="route disabled" ;;
-        steer)
+        list)
             for d in www.youtube.com googlevideo.com youtubei.googleapis.com discord.com; do
                 _rt_domain_covered "$d" || continue
                 total=$((total + 1))
-                route_steer_explain "$d" && ok=$((ok + 1))
+                route_list_verify_domain "$d" && ok=$((ok + 1))
             done
-            detail="steer explain: $ok/$total direct"
+            detail="list: $ok/$total direct"
             ;;
         nft)
             for d in www.youtube.com googlevideo.com youtubei.googleapis.com; do
@@ -4938,11 +5031,20 @@ route_verify() {
     cat "$RT_VERIFY"
 }
 
+# Куда пойдёт домен. Если служба умеет объяснять решение — команда из
+# route_list_verify ({} = домен); иначе показываем, есть ли домен в списке.
 route_explain() {
-    if command -v steer >/dev/null 2>&1; then
-        steer explain "${1:-www.youtube.com}" 2>&1
+    local d="${1:-www.youtube.com}" cmd
+    cmd=$(_rt_uci_get zapret2wizard.main.route_list_verify)
+    if [ -n "$cmd" ]; then
+        cmd=$(printf '%s' "$cmd" | sed "s|{}|$d|g")
+        sh -c "$cmd" 2>&1
+        return 0
+    fi
+    if _rt_domain_covered "$d"; then
+        printf '{"domain":"%s","out":"direct"}\n' "$d"
     else
-        echo '{"error":"steer not installed"}'
+        printf '{"domain":"%s","out":"unknown"}\n' "$d"
     fi
 }
 
@@ -5022,12 +5124,12 @@ cmd_route_watch() {
         backend=$(cat "$RT_BACKEND_FILE" 2>/dev/null)
         n=$((n + 1))
         case "$backend" in
-            steer)
-                grep -qF "$RT_MB" "$(route_steer_excl_path)" 2>/dev/null \
-                    || route_steer_apply
-                spec_sum=$(md5sum "$RT_STEER_SPEC" 2>/dev/null | awk '{print $1}')
+            list)
+                grep -qF "$RT_MB" "$(route_list_excl_path)" 2>/dev/null \
+                    || route_list_apply
+                spec_sum=$(md5sum "$(route_list_spec 2>/dev/null)" 2>/dev/null | awk '{print $1}')
                 if [ -n "$spec_sum" ] && [ "$spec_sum" != "$last_sum" ]; then
-                    [ -n "$last_sum" ] && route_steer_apply
+                    [ -n "$last_sum" ] && route_list_apply
                     last_sum="$spec_sum"
                 fi
                 [ $((n % 30)) = 0 ] && route_verify >/dev/null 2>&1
@@ -5104,7 +5206,7 @@ cmd_bypass() {
         backend)
             shift
             case "${1:-}" in
-                auto|steer|nft)
+                auto|list|nft)
                     _rt_uci_set "zapret2wizard.main.route_backend=$1"
                     route_enable
                     printf '{"backend":"%s","active":"%s"}\n' "$1" "$(cat "$RT_BACKEND_FILE" 2>/dev/null)"
@@ -5118,7 +5220,7 @@ cmd_bypass() {
     esac
 }
 
-cmd_steer_sync() { cmd_bypass "$@"; }
+# ---- конец блока прямого маршрута ----
 
 # Полные аргументы генома (для копирования).
 cmd_genome_args() {
@@ -6531,7 +6633,7 @@ optimize_dns) cmd_optimize_dns ;;
     catalog_fetch) shift; cmd_catalog_fetch "$@" ;;
     catalog_export) cmd_catalog_export ;;
     health_tick) cmd_health_tick ;;
-    steer_sync|bypass_sync) shift; cmd_bypass "$@" ;;
+    bypass_sync) shift; cmd_bypass "$@" ;;
     bypass|route) shift; cmd_bypass "$@" ;;
     bypass_warm|route_refresh) route_refresh_ips ;;
     bypass_watch|route_watch) cmd_route_watch ;;

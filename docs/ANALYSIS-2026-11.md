@@ -10,9 +10,9 @@
   исходники каждого репозитория.
 * Для `bol-van/zapret` дополнительно разобран `docs/manual.md` (zapret2
   v1.0.7): список Lua-desync функций, оркестраторы, маркеры, fooling.
-* Для steer разобраны `spec-v2.md`, `ctl.md` и `explain`-команда, потому что
-  именно steer, а не ZeroBlock, маршрутизирует трафик на роутере
-  пользователя.
+* Для оркестраторов разобраны формат спеки (`spec-v2.md`), `ctl.md` и
+  `explain`-команда: именно они, а не ZeroBlock, маршрутизируют трафик на
+  роутере пользователя.
 * Проверка идей — синтаксис `busybox ash`, shellcheck, unit-тест nft-движка
   в отдельном network namespace (вставка правила до `mark set`, IPv4/IPv6,
   очистка), сборка bundle 0.19.0.
@@ -23,14 +23,14 @@
 |---|---|---|---|
 | `bol-van/zapret` | канонический zapret1/zapret2, `nfqws2` + Lua | полный набор desync-функций, `circular`, маркеры позиций, fooling | `circular` для YouTube, эталонные комбинации, `oob`/`tcpseg`/`syndata` в корпусе, blob’ы из файлов |
 | `remittor/zapret-openwrt` | OpenWrt-пакет zapret1 + LuCI | `custom.d`-хуки, миграция конфига, DWC-проверка домена, per-daemon логи | идея пользовательских хуков и проверки домена (в `youtube_audit`), структура conffile |
-| `StressOzz/Zapret-Manager` | панель + steer + автоподбор | Yv01–Yv35, `steer` исключения, `steer explain`, провайдерские рекомендации | родные исключения steer, Yv-связки в подборе, проверка решения |
+| `StressOzz/Zapret-Manager` | панель + оркестратор + автоподбор | Yv01–Yv35, списки исключений, `explain`, провайдерские рекомендации | списковые исключения, Yv-связки в подборе, проверка решения |
 | `Flowseal/zapret-discord-youtube` | Windows-набор `.bat` | `list-google.txt`, Yv01: `multisplit pos=1 seqovl=681` + `ip_id=zero` | точный Yv01-профиль, список доменов YouTube, fake QUIC как ориентир |
 | `hufrea/byedpi` | C-прокси с desync | `--auto` (триггеры, кэш по IP, реконнект), `oob`/`disoob`/`tlsrec` | идея per-host fallback (circular), OOB в корпусе; `tlsrec` отмечен как пробел |
 | `DPITrickster/ByeDPI-OpenWrt` | OpenWrt-обвязка byedpi | procd/respawn, `cmd_opts` как escape hatch, list-опции | `script` как escape hatch уже был; учтены list-опции и IPv6-ограничение |
 | `IndeecFOX/zapret4rocket` | Entware/Keenetic-скрипт | проверка блока на 16 КБ, подбор по провайдеру, policy routing | 16-КБ тест (`tcp16`), провайдерский каталог; телеметрию не берём |
 | `hyperion-cs/dpi-checkers` | Go- чекер DPI | cidr-whitelist, SNI-подмена, l4-25 (POST 64 КБ), «siberian», DNS hijack/DoH | классификация в `youtube_audit`/`doctor`; полный порт не делали |
 | `Leadaxe/LxBox` | Android-клиент (sing-box fork) | TLS fragment/record_fragment, mixed-case SNI, urltest, DNS-группы | идеи health-check и mixed-case SNI; это не роутер, код не переносим |
-| `splify2/steer` (контекст) | ядро маршрутизации | `zm_excl`, `domains_file`, `steer explain`, `reload` | основной backend прямого маршрута |
+| Оркестраторы туннеля (класс) | ядро маршрутизации | спека со списками, `domains_file`/`prefixes_file`, `reload`, `explain` | списковые исключения: автоопределение по спеке, UCI-настройки, проверка решения |
 
 ## Подробно по репозиториям
 
@@ -79,25 +79,26 @@ LuCI-страницы `service/settings/tools/diagnost/updater`.
 `youtube_audit`), отношение к конфигу как к conffile. Полный `custom.d` не
 делали — в службе уже есть `script` и `route_extra`.
 
-### 3. StressOzz/Zapret-Manager (и steer)
+### 3. StressOzz/Zapret-Manager (панель с оркестратором)
 
-Самый важный проект для нашей задачи, потому что именно его `steer`
-маршрутизирует трафик у пользователя.
+Самый важный проект для нашей задачи, потому что маршрутизацию у
+пользователя делает оркестратор из этой панели.
 
 * `Strategies.md` — v1–v10 (split2/seqovl, fake+multisplit, hostfakesplit,
   fake+fakeddisorder, игры, Discord);
 * `Strategies_For_Youtube.md` и `files/StrYoutube` — Yv01–Yv35;
-* `readme.md` — вкладки Steer: «Подключение», «Сервисы», «Устройства»,
+* `readme.md` — вкладки оркестратора: «Подключение», «Сервисы», «Устройства»,
   **«Исключения»**, «Настройки»; исключения всегда идут напрямую и главнее
-  всех секций; `steer explain` показывает, куда пойдёт запрос;
+  всех секций; `explain` показывает, куда пойдёт запрос;
 * `docs/autobypass.md` — автоматический подбор.
 
-Ключевое открытие: **не нужно патчить nft steer**. У steer есть родной
-список исключений, который панель сама поддерживает. Наш прежний код лез в
-чужие цепочки и снимал правила при reload; это работало нестабильно.
+Ключевое открытие: **не нужно патчить nft оркестратора**. У него есть
+родной список исключений, который панель сама поддерживает. Наш прежний код
+лез в чужие цепочки и снимал правила при reload; это работало нестабильно,
+и привязываться к одной службе тоже нельзя — их много и они разные.
 
-Взято: steer-native исключения (backend №1), Yv-связки, `steer explain` как
-проверка, отказ от «голого» nft там, где есть steer.
+Взято: списковые исключения как механизм (исполнение №1), Yv-связки,
+`explain` как проверка решения, отказ от «голого» nft там, где есть список.
 
 ### 4. Flowseal/zapret-discord-youtube
 
@@ -174,11 +175,11 @@ AnyTLS; urltest/least_test/round_robin, DNS-группы, FakeIP, debug API.
 Взято: идеи health-check и mixed-case SNI (последнее — как кандидат в Lua).
 Код не переносим: другая платформа и ядро.
 
-### 10. steer (splify2/steer) — контекст
+### 10. Оркестраторы туннеля — контекст
 
 `spec-v2.md`: списки `domains_file`/`prefixes_file`/`srs`, правила
 `to`/`out`/`resolve`, порядок правил, `on_fail: direct`. `ctl.md`:
-`steer explain <домен>`, `steer reload`, `status`, `apply`.
+`explain <домен>`, `reload`, `status`, `apply`.
 
 Именно это позволило сделать исключения без nft-хаков: пишем домены в
 `exclude.lst`, правило `zm_excl` уже первое, `reload` перечитывает файлы.
@@ -214,12 +215,12 @@ AnyTLS; urltest/least_test/round_robin, DNS-группы, FakeIP, debug API.
   оркестратора сохраняются. Проверено в netns: правило стоит между
   `iifname` и `meta mark set`.
 * **IPv6** для nft-исполнения: `bcw_route6`, `ip6 daddr`, AAAA-резолв.
-* **Проверка решения steer** через `steer explain`, а не «правило есть —
-  значит работает».
+* **Проверка решения** командой самого оркестратора (`route_list_verify`),
+  а не «правило есть — значит работает».
 * **`youtube_audit`** — четыре точки (веб, превью, API, CDN) + маршрут, с
   конкретной подсказкой (`fix_ytapi`, `rescan_youtube`, `route_enable`).
-* **Подбор не врёт**: steer временно выключается, иначе «рабочая» стратегия
-  — это туннель, а не обход.
+* **Подбор не врёт**: служба-владелец списка временно выключается, иначе
+  «рабочая» стратегия — это туннель, а не обход.
 * **Сторож без полного `nft list ruleset` каждые 8 секунд** — меньше CPU на
   слабых роутерах.
 * **Маршрут включается только явно.** `route_enabled` (галочка в карточке
@@ -230,7 +231,7 @@ AnyTLS; urltest/least_test/round_robin, DNS-группы, FakeIP, debug API.
   не было) включает маршрут один раз, если остался любой признак старого
   поведения: nft-правила `bcw-bypass`, старая cron-строка, `bypass_state.txt`
   или блок в `exclude.lst`.
-* **Селектор backend в карточке LuCI** — авто / steer / nft. Переключение
+* **Селектор исполнения в карточке LuCI** — авто / список / nft. Переключение
   снимает ставший лишним блок из `exclude.lst` или nft-правила, чтобы не
   было двух источников правды; карточка остаётся доступной и при выключенном
   маршруте (`available` в `bypass status`), иначе галочку было бы не вернуть.
@@ -248,10 +249,10 @@ AnyTLS; urltest/least_test/round_robin, DNS-группы, FakeIP, debug API.
 ## Проверка
 
 * `busybox ash -n` для helper, init, uci2config — без ошибок.
-* Unit-тест в `unshare -n`: таблица `inet steer` с `prerouting_mark` и
+* Unit-тест в `unshare -n`: таблица `inet tnl` с `prerouting_mark` и
   `ingress_mark`; проверено, что `bcw-route` стоит до `mark set`, IPv4 и
   IPv6 элементы на месте, `bypass disable` удаляет правила и наборы.
-* Steer-тест: управляемый блок добавляется, чужая запись `mybank.ru`
+* Тест списковых исключений: управляемый блок добавляется, чужая запись `mybank.ru`
   сохраняется, `disable` снимает только блок.
 * Bundle 0.19.0 собирается, helper/config/version внутри; `.ipk` собирается
   из того же дерева (`packaging/build-ipk.sh`), `control`/`conffiles` на месте,
@@ -274,4 +275,3 @@ AnyTLS; urltest/least_test/round_robin, DNS-группы, FakeIP, debug API.
 * https://github.com/IndeecFOX/zapret4rocket
 * https://github.com/hyperion-cs/dpi-checkers
 * https://github.com/Leadaxe/LxBox
-* https://github.com/splify2/steer

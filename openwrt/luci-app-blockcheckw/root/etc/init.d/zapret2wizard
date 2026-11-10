@@ -390,7 +390,7 @@ start_service() {
 	# Снимок таблицы: по нему восстанавливаем правила, не поднимая procd
 	nft list table inet zapret2wizard > /etc/zapret2wizard/fw.nft 2>/dev/null || true
 
-	# Исключаем из steer то, что обрабатывает наша служба:
+	# Исключаем из туннеля то, что обрабатывает наша служба:
 	# трафик должен идти напрямую и попадать в zapret2wizard, а не в туннель.
 	if [ -x /usr/bin/blockcheckw-helper ]; then
 		touch /var/run/bcw_bypass.run
@@ -471,7 +471,7 @@ start_service() {
 
 stop_service() {
 	logger -t zapret2wizard "Stopping Zapret2Wizard service and firewall..."
-	# возвращаем steer его трафик (но не во время подбора: там нужен
+	# возвращаем домены в туннель (но не во время подбора: там нужен
 	# чистый прямой маршрут, иначе замеры идут через туннель)
 	if [ -x /usr/bin/blockcheckw-helper ] && [ ! -f /tmp/bcw_scan_paused ] \
 		&& [ ! -d /var/run/bcw_scan.lock ]; then

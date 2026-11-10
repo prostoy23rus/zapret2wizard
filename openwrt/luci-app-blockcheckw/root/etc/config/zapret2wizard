@@ -9,12 +9,19 @@ config zapret2wizard 'main'
 	option flowoffload 'donttouch'
 	option mode_filter 'none'
 	option quic_mode 'auto'
-	# Прямой маршрут (steer/nft): по умолчанию выключен, включается
+	# Прямой маршрут (список/nft): по умолчанию выключен, включается
 	# галочкой в карточке LuCI или командой bypass enable.
 	option route_enabled '0'
 	option route_backend 'auto'
 	option route_services ''
-	option route_steer_ips '0'
+	# Списковые исключения: пусто — автоопределение по /etc/*/spec.json,
+	# иначе явные пути и команды под любую службу маршрутизации.
+	option route_list_spec ''
+	option route_list_file ''
+	option route_list_pfx ''
+	option route_list_reload ''
+	option route_list_verify ''
+	option route_list_ips '0'
 	option route_extra ''
 	option route_exclude ''
 	option desync_mark '0x40000000'
