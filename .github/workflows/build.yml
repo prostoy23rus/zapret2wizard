@@ -77,11 +77,23 @@ jobs:
         with:
           python-version: "3.12"
 
+      # actions/download-artifact@v4 падает целиком, если сервис артефактов
+      # моргнул (так умер релиз 0.18.84: артефакт есть, скачивание — failure).
+      # gh умеет то же самое, но мы можем повторить попытку.
       - name: Download scanner
-        uses: actions/download-artifact@v4
-        with:
-          name: scanner-${{ matrix.openwrt_arch }}
-          path: out
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in 1 2 3; do
+            if gh run download "$GITHUB_RUN_ID" -n "scanner-${{ matrix.openwrt_arch }}" -D out; then
+              ls -l out
+              exit 0
+            fi
+            echo "скачивание не удалось (попытка $i), пауза"
+            sleep $((i * 10))
+          done
+          echo "::error::не удалось скачать scanner-${{ matrix.openwrt_arch }} за 3 попытки"
+          exit 1
 
       - name: Build apk-tools (mkpkg)
         run: |
