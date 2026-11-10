@@ -1623,6 +1623,11 @@ EOF
             fi
 
             if [ "$apply_ok" = "1" ]; then
+                # Приложение YouTube использует отдельный SNI youtubei.googleapis.com;
+                # если он закрыт — добавляем отдельный профиль YTApi (проверено на МТС).
+                case "$target" in
+                    preset_youtube|youtube) cmd_fix_ytapi >/dev/null 2>&1 || true ;;
+                esac
                 apply_info=",\"auto_applied\":true,\"tried_candidates\":$tried,\"circular_used\":$circular_used,\"circular_members\":$circular_members"
                 [ -n "$stab_single" ] && apply_info="$apply_info,\"stability_single\":\"$stab_single\""
                 [ -n "$stab_circ" ] && apply_info="$apply_info,\"stability_circular\":\"$stab_circ\""
@@ -3177,6 +3182,55 @@ cmd_kmods_status() {
     fi
     local logt=$(tail -n 2 /tmp/bcw_kmods.log 2>/dev/null | tr '\n' ' ' | tr -d '"')
     printf '{"running":%d,"nfnetlink_queue":%d,"nft_queue":%d,"log":"%s"}\n' "$running" "$nfq" "$nftq" "$logt"
+}
+
+# Приложение YouTube ходит в youtubei.googleapis.com, который МТС блокирует
+# отдельным SNI. Если этот хост не открывается, добавляем отдельную секцию
+# YTApi со своим desync и исключаем хост из основной секции.
+cmd_fix_ytapi() {
+    local hl_dir=/etc/zapret2wizard/ipset
+    local hl="$hl_dir/zapret_hosts_ytapi.txt"
+    local main_sec="BlockcheckW_YouTube"
+    printf 'youtubei.googleapis.com\n' > "$hl" 2>/dev/null || return 1
+    uci -q set zapret2wizard.hl_ytapi=hostlist
+    uci -q set zapret2wizard.hl_ytapi.path="$hl"
+    uci -q delete zapret2wizard.$main_sec.hostlist_exclude
+    uci -q add_list zapret2wizard.$main_sec.hostlist_exclude=list_hosts_user_exclude
+    uci -q add_list zapret2wizard.$main_sec.hostlist_exclude=hl_ytapi
+    local cand y w
+    for cand in \
+        'hostfakesplit:host=www.google.com:tcp_ts=-600000' \
+        'hostfakesplit:host=gosuslugi.ru:tcp_ts=-600000' \
+        'multisplit:pos=1,sniext+1:seqovl=1'; do
+        uci -q set zapret2wizard.YTApi=strategy
+        uci -q set zapret2wizard.YTApi.enabled=1
+        uci -q set zapret2wizard.YTApi.port=443
+        uci -q set zapret2wizard.YTApi.protocol=tcp
+        uci -q delete zapret2wizard.YTApi.filter_l3
+        uci -q delete zapret2wizard.YTApi.filter_l7
+        uci -q delete zapret2wizard.YTApi.hostlist
+        uci -q add_list zapret2wizard.YTApi.filter_l3=ipv4
+        uci -q add_list zapret2wizard.YTApi.filter_l7=tls
+        uci -q add_list zapret2wizard.YTApi.hostlist=hl_ytapi
+        uci -q set zapret2wizard.YTApi.script="--lua-desync=$cand"
+        uci -q commit zapret2wizard
+        /usr/share/zapret2wizard/uci2config >/dev/null 2>&1 || true
+        /etc/init.d/zapret2wizard restart >/dev/null 2>&1 || true
+        sleep 3
+        y=$(curl -4 -s -o /dev/null -m 7 -w '%{http_code}' https://youtubei.googleapis.com/ 2>/dev/null)
+        w=$(curl -4 -s -o /dev/null -m 7 -w '%{http_code}' https://www.youtube.com/ 2>/dev/null)
+        logger -t zapret2wizard "YTApi $cand: api=$y www=$w"
+        if [ "$y" != "000" ] && [ "$y" != "" ]; then
+            echo "{\"success\":true,\"api\":\"$y\",\"www\":\"$w\",\"strategy\":\"$cand\"}"
+            return 0
+        fi
+    done
+    uci -q set zapret2wizard.YTApi.enabled=0
+    uci -q commit zapret2wizard
+    /usr/share/zapret2wizard/uci2config >/dev/null 2>&1 || true
+    /etc/init.d/zapret2wizard restart >/dev/null 2>&1 || true
+    echo '{"success":false,"error":"youtubei остался закрыт"}'
+    return 1
 }
 
 cmd_doctor() {
@@ -5484,6 +5538,7 @@ kmods_modprobe) cmd_kmods_modprobe ;;
 kmods_install_bg) cmd_kmods_install_bg ;;
 kmods_status) cmd_kmods_status ;;
 kmods_resolve) shift; _kmods_fetch_official "$@" dry ;;
+fix_ytapi) cmd_fix_ytapi ;;
     install_engine) cmd_install_engine ;;
     selftest) shift; cmd_selftest "$@" ;;
     class) shift; cmd_class "$@" ;;

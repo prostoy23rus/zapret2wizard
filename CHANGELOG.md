@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.18.81] (2026-11-10)
+
+### YouTube-приложение: отдельный SNI `youtubei.googleapis.com`
+
+На МТС (AS25513) браузер и ТВ работали, а приложение нет. Причина: приложение ходит в `youtubei.googleapis.com`, и этот SNI блокируется отдельно — обычный профиль для `www.youtube.com` его не спасал.
+
+* добавлена секция `YTApi` со своим hostlist (`youtubei.googleapis.com`) и desync; основной профиль исключает этот хост через `hostlist_exclude`;
+* после поиска/применения стратегии для YouTube helper сам подбирает рабочую технику для API (`hostfakesplit:host=www.google.com` или `gosuslugi.ru`), проверяет `youtubei` и `www` и оставляет рабочую;
+* ручная команда: `blockcheckw-helper fix_ytapi`.
+
+Проверено на живом роутере: `www.youtube.com` — 200, `youtubei.googleapis.com` — 405 (доступен), приложение после этого открывается.
+
 ## [0.18.80] (2026-11-10)
 
 ### Ложный «blocked/000» в selftest и нулевая стабильность

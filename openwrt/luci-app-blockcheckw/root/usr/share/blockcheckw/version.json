@@ -1,11 +1,12 @@
 {
-  "version": "0.18.80",
+  "version": "0.18.81",
   "release_date": "2026-11-09",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "selftest и проверка стабильности больше не видят ложный 000: метрики печатаются перед JSON, а не после",
-    "Исправлено на живом RouteRich 25.12.6: selftest показывает реальные байты и optimal",
-    "Диагностика kmods_status/kmods_resolve и автоустановка kmod — без изменений"
+    "Приложение YouTube: отдельный профиль YTApi для youtubei.googleapis.com (МТС блокирует этот SNI отдельно)",
+    "После поиска стратегия для API-хоста подбирается и проверяется автоматически; основной профиль исключает этот хост",
+    "Новая команда blockcheckw-helper fix_ytapi для ручного ремонта",
+    "Проверено на МТС/RouteRich 25.12.6: youtubei=405, www.youtube.com=200 одновременно"
   ]
 }
