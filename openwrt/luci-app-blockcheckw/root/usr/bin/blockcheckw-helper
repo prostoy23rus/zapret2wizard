@@ -4054,6 +4054,11 @@ RT_LOG="/tmp/bcw_route.log"
 RT_VERIFY="/tmp/bcw_route_verify.json"
 RT_LOCK="/var/run/bcw_route.lock"
 
+# Внешнее состояние: пути вынесены в переменные, чтобы unit-тесты не лезли
+# в crontab и /etc живого роутера.
+RT_CRON="/etc/crontabs/root"
+RT_LEGACY_STATE="/etc/zapret2wizard/bypass_state.txt"
+
 RT_STEER_SPEC="/etc/steer/spec.json"
 RT_STEER_USER="/etc/zm-steer/user"
 RT_STEER_EXCL="$RT_STEER_USER/exclude.lst"
@@ -4690,7 +4695,7 @@ EOF
 }
 
 route_cleanup_legacy() {
-    local old="/etc/zapret2wizard/bypass_state.txt" fam tbl ch h
+    local old="$RT_LEGACY_STATE" fam tbl ch h
     if [ -f "$old" ]; then
         while read -r fam tbl ch; do
             case "$fam" in iptables|"") continue ;; esac
@@ -4798,8 +4803,13 @@ route_nft_stats() {
 # поведение: включаем маршрут один раз, дальше решает пользователь.
 _rt_migrate_legacy() {
     [ -n "$(_rt_uci_get zapret2wizard.main.route_enabled)" ] && return 0
-    if [ -f /etc/zapret2wizard/bypass_state.txt ] \
-        || grep -qF "$RT_MB" "$(route_steer_excl_path)" 2>/dev/null; then
+    # Сигналы, которые переживают удаление старого пакета (prerm успевает
+    # снести свой bypass_state.txt): старая cron-строка "enable" и старые
+    # nft-правила bcw-bypass. Плюс сам файл состояния и наш блок в exclude.lst.
+    if [ -f "$RT_LEGACY_STATE" ] \
+        || grep -qF "$RT_MB" "$(route_steer_excl_path)" 2>/dev/null \
+        || grep -q 'bypass_sync enable' "$RT_CRON" 2>/dev/null \
+        || nft list ruleset 2>/dev/null | grep -q 'bcw-bypass'; then
         _rt_uci_set zapret2wizard.main.route_enabled=1
         _rt_log "migrated from 0.18.x: route_enabled=1"
     fi
@@ -4809,7 +4819,7 @@ _rt_migrate_legacy() {
 # она включала маршрут принудительно и отменяла выключение в UI. Переписываем
 # на "sync" (уважает route_enabled), не трогая остальной crontab.
 _rt_fix_cron() {
-    local f="/etc/crontabs/root"
+    local f="$RT_CRON"
     [ -f "$f" ] || return 0
     grep -q 'bypass_sync enable' "$f" 2>/dev/null || return 0
     awk '/bypass_sync enable/ { sub(/bypass_sync enable/, "bypass_sync sync") } { print }' \

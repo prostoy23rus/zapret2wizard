@@ -26,6 +26,7 @@ RT_DIR="$T/route"; RT_LOG="$T/log"; RT_VERIFY="$T/verify"
 RT_WATCH_PID="$T/pid"; RT_WATCH_RUN="$T/run"; RT_LOCK="$T/lock"
 RT_STEER_SPEC="$T/spec.json"; RT_STEER_USER="$T/user"
 RT_STEER_EXCL="$T/user/exclude.lst"; RT_STEER_PFX="$T/user/exclude.pfx"
+RT_CRON="$T/crontab"; RT_LEGACY_STATE="$T/legacy_state.txt"
 
 cat > "$RT_STEER_SPEC" <<EOF
 {"lists":{"zm_excl":{"domains_file":["$T/user/exclude.lst"],"prefixes_file":["$T/user/exclude.pfx"]}},"rules":[{"name":"Исключения","to":"zm_excl","out":"zm_direct"}]}
@@ -146,5 +147,26 @@ printf '%s\nyoutube.com\n%s\n' "$RT_MB" "$RT_ME" > "$RT_STEER_EXCL"
 cmd_bypass sync >/dev/null 2>&1
 grep -q 'main.route_enabled=1' "$T/sets" \
     || fail "legacy install must keep the route enabled"
+
+# --- миграция по старой cron-строке (её ставил 0.18.x, prerm её не удаляет) ---
+TEST_ROUTE_ENABLED=
+: > "$T/sets"
+printf '%s\n' "$RT_MB" "$RT_ME" > "$RT_STEER_EXCL"   # блок уже снят disable'ом
+printf '*/2 * * * * /usr/bin/blockcheckw-helper bypass_sync enable >/dev/null 2>&1 # bcw-bypass\n' > "$RT_CRON"
+cmd_bypass sync >/dev/null 2>&1
+grep -q 'main.route_enabled=1' "$T/sets" \
+    || fail "old cron line must trigger the migration"
+grep -q 'bypass_sync enable' "$RT_CRON" && fail "old cron line must be rewritten"
+grep -q 'bypass_sync sync' "$RT_CRON" || fail "cron line must become sync"
+
+# без нашего сигнала миграция не срабатывает: чистый crontab не трогаем
+TEST_ROUTE_ENABLED=
+: > "$T/sets"
+: > "$RT_STEER_EXCL"
+rm -f "$RT_LEGACY_STATE"
+printf '0 3 * * * /usr/bin/keepalive\n' > "$RT_CRON"
+cmd_bypass sync >/dev/null 2>&1
+grep -q 'main.route_enabled=1' "$T/sets" && fail "migration must not fire without a signal"
+grep -q 'keepalive' "$RT_CRON" || fail "foreign cron line must survive"
 
 echo "OK: route engine"
