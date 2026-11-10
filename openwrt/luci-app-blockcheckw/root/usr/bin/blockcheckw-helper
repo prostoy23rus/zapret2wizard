@@ -10,6 +10,7 @@ PID_FILE="/var/run/blockcheckw.pid"
 LOG_FILE="/tmp/blockcheckw_run.log"
 OUTPUT_VANILLA="/tmp/blockcheckw_vanilla.txt"
 OUTPUT_SCAN="/tmp/blockcheckw_scan.json"
+RESULTS_DIR="/tmp/bcw_results"
 OUTPUT_CIRCULAR="/tmp/blockcheckw_circular.txt"
 TURBO_FILE="/tmp/blockcheckw_turbo.txt"
 PRESETS_FILE="/usr/share/blockcheckw/zapret2_presets.json"
@@ -454,7 +455,7 @@ write_status() {
     local phase="$3"
     local extra_raw="$4"
 
-    lua - "$STATUS_FILE" "$LOG_FILE" "$OUTPUT_CIRCULAR" "$OUTPUT_SCAN" "$status" "$percent" "$phase" "$extra_raw" << 'EOF'
+    lua - "$STATUS_FILE" "$LOG_FILE" "$OUTPUT_CIRCULAR" "$OUTPUT_SCAN" "$status" "$percent" "$phase" "$extra_raw" "${SCAN_TARGET:-}" << 'EOF'
 local json = require("luci.jsonc")
 local status_file = arg[1]
 local log_file = arg[2]
@@ -464,6 +465,7 @@ local status = arg[5] or "idle"
 local percent = tonumber(arg[6]) or 0
 local phase = arg[7] or ""
 local extra_raw = arg[8] or ""
+local scan_target = arg[9] or ""
 
 local log_tail = ""
 local lf = io.open(log_file, "r")
@@ -524,7 +526,8 @@ local obj = {
     log = log_tail,
     circular = circular,
     isp = isp,
-    block_type = block_type
+    block_type = block_type,
+    target = scan_target
 }
 
 if extra_raw and extra_raw:match("^%s*,") then
@@ -937,6 +940,23 @@ generate_adaptive_corpus() {
 EOF
 }
 
+# Результаты подбора храним по цели: у каждого сервиса свой список, и при
+# переключении в интерфейсе показывается именно он.
+save_results() {
+    local t="${1:-}" js="${2:-[]}"
+    [ -n "$t" ] || return 0
+    mkdir -p "$RESULTS_DIR" 2>/dev/null || true
+    printf '{"target":"%s","ts":%s,"strategies":%s}\n' "$t" "$(date +%s)" "$js" \
+        > "$RESULTS_DIR/$t.json" 2>/dev/null || true
+}
+
+cmd_results() {
+    local t="${1:-}" f
+    [ -n "$t" ] || { echo '{"target":"","strategies":[]}'; return 0; }
+    f="$RESULTS_DIR/$t.json"
+    if [ -f "$f" ]; then cat "$f"; else printf '{"target":"%s","strategies":[]}\n' "$t"; fi
+}
+
 cmd_start() {
     local target="youtube"
     local domain=""
@@ -1028,6 +1048,7 @@ cmd_start() {
 
     rm -f "$OUTPUT_VANILLA" "$OUTPUT_SCAN" "$OUTPUT_CIRCULAR" "$TURBO_FILE" "$LOG_FILE" /tmp/blockcheckw_apply_result.json
     echo "" > "$LOG_FILE"
+    SCAN_TARGET="$target"
 
     ensure_all_hostlists
     ensure_preset_hostlist "$target" "$domain"
@@ -1407,11 +1428,35 @@ if sf then
 end
 if not base_data.strategies then base_data.strategies = {} end
 
+-- Сканер возвращает один и тот же профиль по нескольку раз (по раундам и
+-- протоколам), а merge только добавлял новое, не схлопывая сам base. Из-за
+-- этого в отчёте было 76 записей при 58 реально разных: список выглядел
+-- раздутым, circular получал дубликаты. Схлопываем всё, что уже есть, и
+-- заодно собираем протоколы одного и того же args в одну строку.
 local seen = {}
-for _, s in ipairs(base_data.strategies) do
-    local a = (type(s) == "table" and s.args) or s
-    if a and a ~= "" then seen[a] = true end
+local order = {}
+local function norm_proto(p)
+    if not p then return nil end
+    p = p:gsub("^HTTPS/", "")
+    p = p:gsub("^%s+", ""):gsub("%s+$", "")
+    if p == "" then return nil end
+    return p
 end
+local function add(s)
+    local a = (type(s) == "table" and s.args) or s
+    if not a or a == "" then return end
+    local key = a:gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
+    local p = (type(s) == "table") and norm_proto(s.protocol) or nil
+    if not seen[key] then
+        seen[key] = { entry = s, protos = {} }
+        if p then seen[key].protos[p] = true end
+        table.insert(order, key)
+    elseif p then
+        seen[key].protos[p] = true
+    end
+end
+
+for _, s in ipairs(base_data.strategies) do add(s) end
 
 local function add_from_file(path)
     if not path or path == "" then return end
@@ -1421,19 +1466,12 @@ local function add_from_file(path)
     f:close()
     local parsed = json.parse(content)
     if parsed and parsed.strategies then
-        for _, s in ipairs(parsed.strategies) do
-            local a = (type(s) == "table" and s.args) or s
-            if a and a ~= "" and not seen[a] then
-                seen[a] = true
-                table.insert(base_data.strategies, s)
-            end
-        end
+        for _, s in ipairs(parsed.strategies) do add(s) end
     else
         for line in content:gmatch("[^\r\n]+") do
             local clean = line:match("^%s*(%-%-[^\r\n]+)")
-            if clean and not clean:match("^%-%-%s*#") and not seen[clean] then
-                seen[clean] = true
-                table.insert(base_data.strategies, { args = clean, protocol = "HTTPS/TLS1.3", coverage = 1 })
+            if clean and not clean:match("^%-%-%s*#") then
+                add({ args = clean, protocol = "HTTPS/TLS1.3", coverage = 1 })
             end
         end
     end
@@ -1442,8 +1480,22 @@ end
 add_from_file(p_file)
 add_from_file(a_file)
 
-base_data.working = #base_data.strategies
-base_data.outcome = (#base_data.strategies > 0) and "found" or "not_found"
+local merged = {}
+for _, key in ipairs(order) do
+    local rec = seen[key]
+    local entry = rec.entry
+    if type(entry) == "table" then
+        local protos = {}
+        for p in pairs(rec.protos) do table.insert(protos, p) end
+        table.sort(protos)
+        if #protos > 0 then entry.protocol = table.concat(protos, " + ") end
+    end
+    table.insert(merged, entry)
+end
+
+base_data.strategies = merged
+base_data.working = #merged
+base_data.outcome = (#merged > 0) and "found" or "not_found"
 
 local out_f = io.open(scan_file, "w")
 if out_f then
@@ -1703,6 +1755,7 @@ EOF
                     final_msg="$final_msg (применена, но полный тест не пройден)"
                 fi
             fi
+            save_results "$target" "$strats_json"
             write_status "done" 100 "$final_msg" ",\"strategies\":$strats_json,\"scan_found\":$found_count,\"tried\":$found_count$apply_info"
             echo "[blockcheckw-helper] Finished successfully. Found $found_count working strategies." >> "$LOG_FILE"
             history_add "scan_done" "$(metric_target_key "$target")" "Найдено рабочих стратегий: $found_count"
@@ -1730,9 +1783,11 @@ EOF
                 _svc_running || _svc_start_bg
                 local cur_test=$(cmd_test "$target" "" 2>/dev/null | tail -n 1)
                 if printf '%s' "$cur_test" | grep -q '"all_ok":true'; then
+                    save_results "$target" "[]"
                     write_status "done" 100 "Новых стратегий не найдено — текущая конфигурация уже работает" ",\"strategies\":[],\"current_ok\":true"
                     echo "[blockcheckw-helper] 0 новых, текущая стратегия рабочая" >> "$LOG_FILE"
                 else
+                    save_results "$target" "[]"
                     write_status "done" 100 "Поиск завершен. Ничего не подошло, попробуйте глубокий скан." ",\"strategies\":[],\"current_ok\":false"
                     echo "[blockcheckw-helper] Scan completed with 0 matches." >> "$LOG_FILE"
                 fi
@@ -4936,8 +4991,13 @@ route_nft_stats() {
 # установка 0.19.0 приносит route_enabled=0 явно и остаётся выключенной.
 _rt_migrate_legacy() {
     [ -n "$(_rt_uci_get zapret2wizard.main.route_enabled)" ] && return 0
-    _rt_uci_set zapret2wizard.main.route_enabled=1
-    _rt_log "migrated: route_enabled=1 (конфиг без переключателя)"
+    # Версии до 0.19.0 не имели переключателя, и раньше считалось, что они
+    # «всегда применяли исключения». На практике это не так: на MTS+zeroblock
+    # старых правил не было, а автовключение маршрута увело YouTube из
+    # работающего туннеля напрямую — и он перестал открываться. Поэтому после
+    # обновления маршрут остаётся ВЫКЛЮЧЕННЫМ, включается только явно.
+    _rt_uci_set zapret2wizard.main.route_enabled=0
+    _rt_log "migrated: route_enabled=0 (после обновления включается вручную)"
 }
 
 # Старые установки держат в /etc/crontabs/root строку "bypass_sync enable":
@@ -5121,13 +5181,32 @@ cmd_youtube_audit() {
     done
     rj=$(route_verify 2>/dev/null)
     [ -n "$rj" ] || rj='{"ok":false}'
-    echo "$rj" | grep -q '"ok":true' || advice="route_enable"
+    local route_ok=false advice_text="всё в порядке"
+    if route_is_enabled; then
+        echo "$rj" | grep -q '"ok":true' && route_ok=true
+    else
+        # Маршрут выключен осознанно — подтверждать нечего, не пугаем жёлтым.
+        route_ok=true
+    fi
+    # Отдельно «YouTube отвечает» и «маршрут подтверждён»: 4/4 при неподтверждённом
+    # маршруте — это предупреждение, а не ошибка, и код совета нельзя показывать
+    # пользователю сырым.
+    case "$advice" in
+        ok)
+            if [ "$route_ok" != "true" ]; then
+                advice="route_enable"
+                advice_text="прямой маршрут не подтверждён — домены могут идти через туннель; пересоберите набор"
+            fi
+            ;;
+        fix_ytapi) advice_text="API YouTube не открывается — примените профиль YTApi" ;;
+        rescan_youtube) advice_text="CDN YouTube не отвечает — запустите подбор заново" ;;
+    esac
     qm=$(_rt_uci_get zapret2wizard.main.quic_mode); [ -n "$qm" ] || qm=auto
     qr=$(_rt_uci_get firewall.reject_quic.enabled); [ -n "$qr" ] || qr=?
     ok=false
-    [ "$score" -ge 3 ] && [ "$advice" = "ok" ] && ok=true
-    printf '{"ok":%s,"score":%s,"total":%s,"advice":"%s","checks":[%s],"quic":{"mode":"%s","reject":%s},"route":%s}\n' \
-        "$ok" "$score" "$total" "$advice" "$checks" "$qm" "$qr" "$rj"
+    [ "$score" -ge "$total" ] && ok=true
+    printf '{"ok":%s,"score":%s,"total":%s,"advice":"%s","advice_text":"%s","route_ok":%s,"checks":[%s],"quic":{"mode":"%s","reject":%s},"route":%s}\n' \
+        "$ok" "$score" "$total" "$advice" "$advice_text" "$route_ok" "$checks" "$qm" "$qr" "$rj"
 }
 
 route_watch_start() {
@@ -6674,6 +6753,7 @@ optimize_dns) cmd_optimize_dns ;;
     route_status) route_status ;;
     route_explain) shift; route_explain "$@" ;;
     youtube_audit) shift; cmd_youtube_audit "$@" ;;
+    results) shift; cmd_results "$@" ;;
     ensure_hostlists_bg) cmd_ensure_hostlists_bg ;;
     service) shift; cmd_service "$@" ;;
     svc_heal) _svc_heal ;;

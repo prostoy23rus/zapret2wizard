@@ -1827,7 +1827,7 @@ return view.extend({
 		}, [
 			E('div', { style: 'display: flex; align-items: center; gap: 10px; flex-wrap: wrap;' }, [
 				E('span', { class: 'bcw-spoiler-arrow', style: 'display: inline-block; transition: all 0.2s; font-size: 13px; color: #61afef;' }, '▶'),
-				E('h3', { class: 'bcw-card-title', style: 'margin: 0;' }, 'Найденные рабочие стратегии (100% проверено)'),
+				E('h3', { class: 'bcw-card-title', style: 'margin: 0;' }, 'Найденные рабочие стратегии'),
 				E('span', { class: 'badge cbi-color-blue bcw-strats-count-badge', style: 'font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: bold;' }, '0 шт.')
 			]),
 			E('div', { style: 'display: flex; align-items: center; gap: 8px;' }, [
@@ -2561,10 +2561,19 @@ return view.extend({
 					try { d = JSON.parse(res.stdout); } catch (e) {}
 					if (!d) { auditOut.textContent = '✗ Не удалось разобрать ответ'; return; }
 					// отдельная строка: периодическое обновление карточки её не трогает
-					auditOut.textContent = d.ok
-						? '✓ YouTube: OK (' + d.score + '/' + d.total + '), маршрут ' + ((d.route && d.route.backend) || '?')
-						: '✗ YouTube: ' + (d.advice || 'проблема') + ' (' + d.score + '/' + d.total + ')';
-					auditOut.style.color = d.ok ? '#98c379' : '#e06c75';
+					var adv = d.advice_text || d.advice || 'проблема';
+					if (d.ok && (!d.advice || d.advice === 'ok')) {
+						auditOut.textContent = '✓ YouTube: OK (' + d.score + '/' + d.total + '), маршрут ' + ((d.route && d.route.backend) || '?');
+						auditOut.style.color = '#98c379';
+					} else if (d.ok) {
+						// Проверки прошли, но маршрут не подтверждён — это предупреждение,
+						// а не ошибка; код совета (route_enable) пользователю не показываем.
+						auditOut.textContent = '⚠ YouTube отвечает (' + d.score + '/' + d.total + '): ' + adv;
+						auditOut.style.color = '#e5c07b';
+					} else {
+						auditOut.textContent = '✗ YouTube: ' + adv + ' (' + d.score + '/' + d.total + ')';
+						auditOut.style.color = '#e06c75';
+					}
 				}).catch(function() {
 					auditBtn.disabled = false;
 					auditOut.textContent = '✗ ошибка проверки';
@@ -3129,10 +3138,7 @@ return view.extend({
 
 			updateSummaryBox();
 			updateActiveStrategyDisplay();
-		}
-
-		function switchApplyMode(isAuto) {
-			autoApply = isAuto;
+			loadResultsForTarget(targetId);
 		}
 
 		function switchCircularMode(isCirc) {
@@ -3330,14 +3336,7 @@ return view.extend({
 
 				E('div', { style: 'font-size: 13px; line-height: 1.5; color: #abb2bf;' }, [
 					E('strong', { style: 'color: #e5e9f0; display: block; margin-bottom: 6px;' }, '👉 Чтобы активировать обход:'),
-					E('p', {}, 'В таблице результатов ниже выберите нужную стратегию и нажмите зелёную кнопку:'),
-					E('div', { style: 'margin: 10px 0; display: flex; justify-content: center;' }, [
-						E('span', {
-							class: 'cbi-button cbi-button-positive',
-							style: 'pointer-events: none; padding: 4px 14px; font-weight: bold; font-size: 12px;'
-						}, '✓ Применить в Zapret2')
-					]),
-					E('p', { style: 'font-size: 12px; color: #98c379;' }, 'После нажатия роутер сам запишет её в Zapret2 и перезапустит службу.')
+					E('p', {}, 'Ниже — что нашлось при подборе. Применить нужный вариант можно через ✎ у строки сервиса: вставьте аргументы в поле стратегии.'),
 				])
 			];
 
@@ -3622,10 +3621,47 @@ return view.extend({
 				lastCircular = st.circular;
 			}
 
-			if (st.strategies && st.strategies.length > 0) {
+			// Список принадлежит той цели, для которой шёл подбор: иначе при
+			// переключении YouTube/Discord показывались бы чужие результаты.
+			if (st.strategies && st.strategies.length > 0 && (!st.target || st.target === currentTarget)) {
 				lastResults = st.strategies;
 				renderStrategyCards(st.strategies);
+				resultsTargetLoaded = currentTarget;
 			}
+		}
+
+		// Свой список для каждой цели: берём сохранённый результат из службы.
+		var resultsTargetLoaded = null;
+		function loadResultsForTarget(target) {
+			if (!target || target === 'test_strategy') return;
+			resultsTargetLoaded = target;
+			fs.exec(HELPER_BIN, ['results', target]).then(function(res) {
+				var d = null;
+				try { d = JSON.parse(res.stdout); } catch (e) {}
+				if (resultsTargetLoaded !== target) return; // цель уже переключили
+				var list = (d && Array.isArray(d.strategies)) ? d.strategies : [];
+				lastResults = list;
+				if (list.length > 0) {
+					renderStrategyCards(list);
+				} else {
+					uniqueStrategiesCount = 0;
+					strategiesListEl.innerHTML = '';
+					resultsCard.style.display = 'none';
+				}
+			}).catch(function() {});
+		}
+
+		function pluralRu(n, one, few, many) {
+			var a = Math.abs(n) % 100, b = a % 10;
+			if (a > 10 && a < 20) return many;
+			if (b > 1 && b < 5) return few;
+			if (b === 1) return one;
+			return many;
+		}
+
+		function stratFamilyOf(args) {
+			var m = /--lua-desync=([a-z_]+)/.exec(args || '');
+			return m ? m[1] : 'прочее';
 		}
 
 		function renderStrategyCards(strategies) {
@@ -3635,6 +3671,7 @@ return view.extend({
 			// Deduplicate strategies and collect supported protocols
 			var uniqueStrats = [];
 			var seen = {};
+			var families = {};
 
 			(strategies || []).forEach(function(strat) {
 				var sText = (typeof strat === 'string') ? strat : (strat.args || JSON.stringify(strat));
@@ -3654,6 +3691,7 @@ return view.extend({
 						}
 					}
 					seen[sText] = item;
+					families[stratFamilyOf(sText)] = true;
 					uniqueStrats.push(item);
 				} else {
 					if (typeof strat === 'object') {
@@ -3672,10 +3710,13 @@ return view.extend({
 				}
 			});
 
+			var familyCount = Object.keys(families).length;
 			uniqueStrategiesCount = uniqueStrats.length;
 			var resultsTitle = resultsCard.querySelector('.bcw-card-title');
 			if (resultsTitle) {
-				resultsTitle.textContent = 'Найденные рабочие стратегии (' + uniqueStrategiesCount + ' уникальных, 100% проверено)';
+				resultsTitle.textContent = 'Найденные рабочие стратегии (' + uniqueStrategiesCount + ' ' +
+					pluralRu(uniqueStrategiesCount, 'вариант', 'варианта', 'вариантов') + ', ' + familyCount + ' ' +
+					pluralRu(familyCount, 'приём', 'приёма', 'приёмов') + ')';
 			}
 			var badgeEl = resultsCard.querySelector('.bcw-strats-count-badge');
 			if (badgeEl) {
@@ -3698,13 +3739,9 @@ return view.extend({
 						E('div', { style: 'display: flex; align-items: center; gap: 8px; flex-wrap: wrap;' }, [
 							E('span', { class: 'badge cbi-color-green', style: 'font-weight: bold;' }, '#' + (idx + 1) + ' 100% Работает'),
 							protoBadgeText ? E('span', { class: 'badge cbi-color-blue', style: 'font-weight: 600;' }, '🌐 ' + protoBadgeText) : '',
-							E('strong', { style: 'color: #61afef; font-size: 12.5px;' }, 'Одиночная стратегия')
+							E('strong', { style: 'color: #61afef; font-size: 12.5px;' }, 'Одиночная стратегия'),
+							E('span', { class: 'badge bcw-strat-family', style: 'background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); color: #98c379; font-size: 11px; font-weight: 600;' }, stratFamilyOf(sText)),
 						]),
-						E('button', {
-							class: 'bcw-btn-sm cbi-button cbi-button-positive bcw-strat-apply-btn',
-							style: 'height: 32px; padding: 0 14px; font-weight: bold; font-size: 12px; display: inline-flex; align-items: center; justify-content: center; gap: 4px;',
-							click: function() { applyStrategy(sText, false); }
-						}, '✓ Применить в Zapret2')
 					]),
 					E('pre', {
 						class: 'bcw-code-box',
@@ -3712,51 +3749,6 @@ return view.extend({
 					}, sText)
 				]);
 				strategiesListEl.appendChild(card);
-			});
-		}
-
-		function applyStrategy(scriptText, isCirc) {
-			bcwShowModal('Применение стратегии', [
-				E('p', { class: 'spinning' }, 'Запись в конфигурацию Zapret2 и перезапуск службы...')
-			]);
-
-			fs.write('/tmp/blockcheckw_apply_temp.txt', scriptText).then(function() {
-				return fs.exec(HELPER_BIN, ['apply', '--target', currentTarget, '--file', '/tmp/blockcheckw_apply_temp.txt']);
-			}).then(function(res) {
-				ui.hideModal();
-				var parsed = null;
-				try {
-					parsed = JSON.parse(res.stdout);
-				} catch(e) {}
-
-				if (parsed && parsed.success) {
-					var secName = parsed.section || 'новая запись';
-					getZapretInfo().then(function(info) {
-						zapretServicesData = info.services || {};
-						zapretAllStrategies = info.all_strategies || [];
-						updateSummaryBox();
-						updateActiveStrategyDisplay();
-						if (zapretBadgeEl) {
-							zapretBadgeEl.className = 'bcw-header-item ' + ((info.zapret2_running === 'running') ? 'badge cbi-color-green' : 'badge cbi-color-red');
-							zapretBadgeEl.textContent = (info.zapret2_running === 'running') ? '✓ Zapret2Wizard активен' : '✗ Zapret2Wizard остановлен';
-						}
-					});
-					refreshLogs();
-					lastAppliedResult = parsed;
-
-					showStrategyAppliedModal({
-						section: secName,
-						isAuto: false,
-						applyResult: parsed,
-						connected: parsed.connected,
-						httpCode: parsed.http_code
-					});
-				} else {
-					ui.addNotification(null, E('p', {}, 'Ошибка применения: ' + (parsed ? parsed.error : res.stderr)), 'danger');
-				}
-			}).catch(function(err) {
-				ui.hideModal();
-				ui.addNotification(null, E('p', {}, 'Ошибка применения: ' + err), 'danger');
 			});
 		}
 
@@ -4578,6 +4570,12 @@ return view.extend({
 		} else if (statusData.status === 'done' && (statusData.isp || statusData.block_type)) {
 			monitorCard.style.display = 'block';
 			updateProgressUI(statusData);
+		}
+
+		// Список найденных стратегий свой для каждой цели: при открытии страницы
+		// показываем сохранённый результат именно для выбранного сервиса.
+		if (!statusData.target || statusData.target !== currentTarget) {
+			loadResultsForTarget(currentTarget);
 		}
 
 		return container;
