@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.18.84] (2026-11-10)
+
+### Задержка Shorts: медленный desync именно для API-хоста
+
+Замеры `adb` + `YT.mlplayer` на живом телефоне (OnePlus 15):
+
+| Сценарий | Время до `onPreparing` |
+|---|---|
+| без обхода | **0.49 с** |
+| обход + API `hostfakesplit:host=www.google.com` | **4.29 с** |
+| обход + API `hostfakesplit:host=gosuslugi.ru` | **2.20 с** |
+
+То есть задержка не в DNS и не в видео-хостах, а в стратегии desync для `youtubei.googleapis.com`: fake-пакет с SNI `www.google.com` дольше «раскачивает» API-запрос Shorts. Без обхода API на некоторых сетях вообще недоступен (`yti=000`), поэтому просто выключить его нельзя.
+
+* `fix_ytapi` теперь пробует `hostfakesplit:host=gosuslugi.ru` первым — это на ~2 с быстрее при открытии Shorts;
+* на домашнем роутере выставлена эта пара: main `multidisorder:pos=1,midsld` + API `hostfakesplit:gosuslugi`, `www=200`, `yti=405`.
+
 ## [0.18.83] (2026-11-10)
 
 ### Задержка Shorts: медленный DNS видео-хостов и политика QUIC

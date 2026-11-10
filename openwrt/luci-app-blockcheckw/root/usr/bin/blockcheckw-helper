@@ -3251,9 +3251,11 @@ cmd_fix_ytapi() {
     uci -q add_list zapret2wizard.$main_sec.hostlist_exclude=list_hosts_user_exclude
     uci -q add_list zapret2wizard.$main_sec.hostlist_exclude=hl_ytapi
     local cand y w
+    # gosuslugi первым: на живом тесте Shorts с ним открывались за ~2.2 c,
+    # а с host=www.google.com — за ~4.3 c (fake-пакет дольше держит API).
     for cand in \
-        'hostfakesplit:host=www.google.com:tcp_ts=-600000' \
         'hostfakesplit:host=gosuslugi.ru:tcp_ts=-600000' \
+        'hostfakesplit:host=www.google.com:tcp_ts=-600000' \
         'multisplit:pos=1,sniext+1:seqovl=1'; do
         uci -q set zapret2wizard.YTApi=strategy
         uci -q set zapret2wizard.YTApi.enabled=1

@@ -1,13 +1,12 @@
 {
-  "version": "0.18.83",
+  "version": "0.18.84",
   "release_date": "2026-11-09",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "DNS-оптимизация: уникальные rr*.googlevideo.com/ytimg/ggpht идут через DoH (5053), а не через медленный failsafe (1-1.4 c)",
-    "Кэш dnsmasq поднят до 2000; на живом RouteRich DNS видео-хостов ускорился с ~1.3 c до ~60 мс",
-    "QUIC-политика auto: пробник Version Negotiation решает, разрешать UDP/443 или резать с быстрым ICMP",
-    "icmp_ratelimit=0 при reject, чтобы fallback QUIC→TCP не ждал секунды",
-    "Всё применяется автоматически при старте службы"
+    "Shorts: найден источник задержки — desync для API-хоста youtubei; выбран более быстрый вариант hostfakesplit:host=gosuslugi.ru",
+    "fix_ytapi теперь пробует gosuslugi первым: открытие Shorts ~2.2 c вместо ~4.3 c при host=www.google.com",
+    "Подтверждено: без обхода Shorts открываются за 0.5 c, с обходом и медленным API-профилем — 4.3 c; разница в стратегии API",
+    "Напоминание: DNS видео-хостов и QUIC-политика из 0.18.83 остаются"
   ]
 }
