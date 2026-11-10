@@ -46,6 +46,13 @@ tar -xf "$INNER" -C "$WORK/root"
 PAYLOAD="$WORK/root/payload"
 [ -d "$PAYLOAD" ] || { echo "нет каталога payload после распаковки" >&2; exit 1; }
 
+# apk mkpkg может сохранить режим 0644 — выставляем явно, иначе uci2config
+# не запускается и стратегии не пересобираются (баг 0.18.81 на 25.12).
+chmod 755 "$PAYLOAD/usr/bin/blockcheckw-helper" "$PAYLOAD/usr/share/zapret2wizard/uci2config" \
+         "$PAYLOAD/etc/init.d/zapret2wizard" "$PAYLOAD/usr/bin/circular-builder.lua" 2>/dev/null || true
+[ -f "$PAYLOAD/usr/bin/blockcheckw" ] && chmod 755 "$PAYLOAD/usr/bin/blockcheckw" || true
+[ -f "$PAYLOAD/etc/hotplug.d/firewall/90-zapret2wizard-bypass" ] && chmod 755 "$PAYLOAD/etc/hotplug.d/firewall/90-zapret2wizard-bypass" || true
+
 # conffiles: конфиг со стратегиями не должен затираться при обновлении
 mkdir -p "$PAYLOAD/lib/apk/packages"
 echo "/etc/config/zapret2wizard" > "$PAYLOAD/lib/apk/packages/$PKGNAME.conffiles"
@@ -55,6 +62,8 @@ cat > "$WORK/post-install" <<'EOF'
 rm -rf /tmp/luci-indexcache* /tmp/luci-modulecache* 2>/dev/null || true
 ( /etc/init.d/rpcd restart >/dev/null 2>&1 </dev/null & )
 ( /etc/init.d/uhttpd restart >/dev/null 2>&1 </dev/null & )
+chmod 755 /usr/bin/blockcheckw-helper /usr/share/zapret2wizard/uci2config \
+         /etc/init.d/zapret2wizard /usr/bin/circular-builder.lua 2>/dev/null || true
 /usr/bin/blockcheckw-helper kmods_modprobe >/dev/null 2>&1 || true
 /etc/init.d/zapret2wizard enable >/dev/null 2>&1 || true
 /usr/bin/blockcheckw-helper cron_install >/dev/null 2>&1 || true

@@ -335,6 +335,9 @@ start_service() {
 	# modprobe подтянет их, если пакет kmod уже установлен.
 	modprobe nfnetlink_queue 2>/dev/null || true
 	modprobe nft_queue 2>/dev/null || true
+	# uci2config обязан быть исполняемым: иначе стратегии применяются в UCI,
+	# но config не пересобирается и движок работает по старому профилю.
+	[ -x /usr/share/zapret2wizard/uci2config ] || chmod 755 /usr/share/zapret2wizard/uci2config 2>/dev/null || true
 	kill_foreign_engines
 
 	local uci_pkg="zapret2wizard"

@@ -53,6 +53,8 @@ cat > "$CTRL/postinst" <<'EOF'
 rm -rf /tmp/luci-indexcache* /tmp/luci-modulecache* 2>/dev/null || true
 # busybox без timeout: перезапуск в фоне, но с закрытыми унаследованными fd —
 # иначе ребёнок держит блокировку opkg и следующая установка не возьмёт lock.
+chmod 755 /usr/bin/blockcheckw-helper /usr/share/zapret2wizard/uci2config \
+         /etc/init.d/zapret2wizard /usr/bin/circular-builder.lua 2>/dev/null || true
 /usr/bin/blockcheckw-helper kmods_modprobe >/dev/null 2>&1 || true
 /etc/init.d/zapret2wizard enable >/dev/null 2>&1 || true
 ( exec 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&-; /etc/init.d/rpcd restart >/dev/null 2>&1; /etc/init.d/uhttpd restart >/dev/null 2>&1; /etc/init.d/zapret2wizard restart >/dev/null 2>&1 ) </dev/null >/dev/null 2>&1 &
