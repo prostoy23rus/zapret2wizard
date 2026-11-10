@@ -4928,23 +4928,16 @@ route_nft_stats() {
     printf '%s %s %s %s\n' "$rules" "$members" "$packets" "$bytes"
 }
 
-# 0.18.x не имел переключателя: исключения из туннеля применялись всегда.
-# При обновлении conffile не перезаписывается, поэтому option route_enabled
-# может отсутствовать. Если от старой версии осталось её состояние (набор
-# bypass_state.txt) или наш блок уже лежит в exclude.lst — сохраняем прежнее
-# поведение: включаем маршрут один раз, дальше решает пользователь.
+# Версии до 0.19.0 не имели переключателя: исключения из туннеля применялись
+# всегда. При обновлении conffile не перезаписывается, поэтому option
+# route_enabled в нём отсутствует — это и есть надёжный признак обновления.
+# На остатки старой версии (bypass_state.txt, nft-правила bcw-bypass)
+# полагаться нельзя: prerm старого пакета успевает их удалить. Свежая
+# установка 0.19.0 приносит route_enabled=0 явно и остаётся выключенной.
 _rt_migrate_legacy() {
     [ -n "$(_rt_uci_get zapret2wizard.main.route_enabled)" ] && return 0
-    # Сигналы, которые переживают удаление старого пакета (prerm успевает
-    # снести свой bypass_state.txt): старая cron-строка "enable" и старые
-    # nft-правила bcw-bypass. Плюс сам файл состояния и наш блок в exclude.lst.
-    if [ -f "$RT_LEGACY_STATE" ] \
-        || grep -qF "$RT_MB" "$(route_list_excl_path)" 2>/dev/null \
-        || grep -q 'bypass_sync enable' "$RT_CRON" 2>/dev/null \
-        || nft list ruleset 2>/dev/null | grep -q 'bcw-bypass'; then
-        _rt_uci_set zapret2wizard.main.route_enabled=1
-        _rt_log "migrated from 0.18.x: route_enabled=1"
-    fi
+    _rt_uci_set zapret2wizard.main.route_enabled=1
+    _rt_log "migrated: route_enabled=1 (конфиг без переключателя)"
 }
 
 # Старые установки держат в /etc/crontabs/root строку "bypass_sync enable":

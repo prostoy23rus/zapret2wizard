@@ -51,10 +51,11 @@ chmod +x "$T/bin/svc"
 PATH="$T/bin:$PATH"; export PATH
 
 EXCL="$T/svc/exclude.lst"
+echo 1 > "$T/route_enabled"   # опция есть и включена; удаление файла = опции нет
 
 uci() {
     case "$*" in
-        "-q get zapret2wizard.main.route_enabled") echo "${TEST_ROUTE_ENABLED-1}" ;;
+        "-q get zapret2wizard.main.route_enabled") if [ -f "$T/route_enabled" ]; then cat "$T/route_enabled"; fi ;;
         "-q get zapret2wizard.main.route_backend") echo "${TEST_BACKEND:-nft}" ;;
         "-q get zapret2wizard.main.route_services") echo youtube ;;
         "-q get zapret2wizard.main.route_list_spec") echo "${TEST_LIST_SPEC-$T/svc/spec.json}" ;;
@@ -71,6 +72,8 @@ uci() {
         "-q get zapret2wizard.list_hosts_youtube.path") echo /etc/zapret2wizard/ipset/zapret_hosts_youtube.txt ;;
         "-q get zapret2wizard.BlockcheckW_YouTube.hostlist_exclude") echo list_hosts_user_exclude ;;
         "-q get zapret2wizard.list_hosts_user_exclude.path") echo "$T/user_exclude.txt" ;;
+        *route_enabled=1*) echo 1 > "$T/route_enabled"; echo "$*" >> "$T/sets" ;;
+        *route_enabled=0*) echo 0 > "$T/route_enabled"; echo "$*" >> "$T/sets" ;;
         *" set "*) echo "$*" >> "$T/sets" ;;
         *) echo "" ;;
     esac
@@ -106,6 +109,13 @@ $(nft -a list chain inet tnl prerouting_mark)
 EOF
 nft get element inet tnl bcw_route4 '{ 1.2.3.4 }' >/dev/null 2>&1 || fail "ipv4 set"
 nft get element inet tnl bcw_route6 '{ 2a00:1450::1 }' >/dev/null 2>&1 || fail "ipv6 set"
+
+# --- уборка правил прежней версии (bcw-bypass) ---
+printf 'inet tnl prerouting_mark\n' > "$RT_LEGACY_STATE"
+nft add rule inet tnl prerouting_mark ip daddr @s4 counter return comment "bcw-bypass"
+route_nft_apply
+nft list chain inet tnl prerouting_mark | grep -q 'bcw-bypass' && fail "legacy rule must be removed"
+[ -f "$RT_LEGACY_STATE" ] && fail "legacy state file must be removed"
 
 route_disable
 [ -z "$(nft list chain inet tnl prerouting_mark 2>/dev/null | grep bcw-route)" ] || fail "leftover rule"
@@ -181,7 +191,7 @@ TEST_BACKEND=nft
 
 # --- гейт включения: маршрут не включается сам, только явной командой ---
 TEST_BACKEND=list
-TEST_ROUTE_ENABLED=0
+echo 0 > "$T/route_enabled"
 : > "$T/sets"
 case "$(cmd_bypass sync)" in
     *'"bypass":"disabled"'*) ;;
@@ -195,7 +205,7 @@ case "$(cmd_bypass enable)" in
 esac
 grep -q 'main.route_enabled=1' "$T/sets" || fail "enable must persist route_enabled=1"
 grep -qF "$RT_MB" "$EXCL" || fail "enable must apply block"
-TEST_ROUTE_ENABLED=1
+echo 1 > "$T/route_enabled"
 
 # временная остановка службы снимает правила, но не выключает маршрут
 : > "$T/sets"
@@ -203,31 +213,24 @@ cmd_bypass disable keep >/dev/null
 grep -q 'route_enabled=0' "$T/sets" && fail "keep must not disable the UCI switch"
 grep -qF "$RT_MB" "$EXCL" && fail "keep must remove the block"
 
-# --- миграция с прежней версии: переключателя не было, блок уже стоит ---
-TEST_ROUTE_ENABLED=
+# --- миграция с версии без переключателя: опции нет в конфиге ---
+rm -f "$T/route_enabled"
 : > "$T/sets"
-printf '%s\nyoutube.com\n%s\n' "$RT_MB" "$RT_ME" > "$EXCL"
 cmd_bypass sync >/dev/null 2>&1
-grep -q 'main.route_enabled=1' "$T/sets" || fail "legacy install must keep the route enabled"
+grep -q 'main.route_enabled=1' "$T/sets" \
+    || fail "install without the switch must enable the route once"
+grep -qF "$RT_MB" "$EXCL" || fail "migration must apply the block"
 
-# --- миграция по старой cron-строке (её ставила прежняя версия) ---
-TEST_ROUTE_ENABLED=
-: > "$T/sets"
-printf '%s\n' "$RT_MB" "$RT_ME" > "$EXCL"   # блок уже снят disable'ом
+# --- свежая установка: опция есть и равна 0 (проверено в гейте выше) ---
+
+# --- старая cron-строка переписывается на sync, чужие строки целы ---
+echo 1 > "$T/route_enabled"
 printf '*/2 * * * * /usr/bin/blockcheckw-helper bypass_sync enable >/dev/null 2>&1 # bcw-bypass\n' > "$RT_CRON"
 cmd_bypass sync >/dev/null 2>&1
-grep -q 'main.route_enabled=1' "$T/sets" || fail "old cron line must trigger the migration"
 grep -q 'bypass_sync enable' "$RT_CRON" && fail "old cron line must be rewritten"
 grep -q 'bypass_sync sync' "$RT_CRON" || fail "cron line must become sync"
-
-# без нашего сигнала миграция не срабатывает: чистый crontab не трогаем
-TEST_ROUTE_ENABLED=
-: > "$T/sets"
-: > "$EXCL"
-rm -f "$RT_LEGACY_STATE"
-printf '0 3 * * * /usr/bin/keepalive\n' > "$RT_CRON"
+printf '0 3 * * * /usr/bin/keepalive\n' >> "$RT_CRON"
 cmd_bypass sync >/dev/null 2>&1
-grep -q 'main.route_enabled=1' "$T/sets" && fail "migration must not fire without a signal"
 grep -q 'keepalive' "$RT_CRON" || fail "foreign cron line must survive"
 
 echo "OK: route engine"
