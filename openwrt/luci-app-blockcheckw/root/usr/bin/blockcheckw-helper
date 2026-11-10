@@ -4067,6 +4067,7 @@ RT_LOCK="/var/run/bcw_route.lock"
 # Внешнее состояние: пути вынесены в переменные, чтобы unit-тесты не лезли
 # в crontab и /etc живого роутера.
 RT_CRON="/etc/crontabs/root"
+RT_SPEC_DIR="/etc"
 RT_LEGACY_STATE="/etc/zapret2wizard/bypass_state.txt"
 
 RT_MB="# >>> zapret2wizard direct (managed)"
@@ -4354,16 +4355,29 @@ route_refresh_ips_detached() {
 # (shell-команда, {} заменяется на домен); если не задана — проверяем, что
 # домен попал в список.
 
-route_list_spec() {
+# Все спеки, которые вообще могут описывать списки.
+_rt_spec_candidates() {
     local s
     s=$(_rt_uci_get zapret2wizard.main.route_list_spec)
     if [ -n "$s" ] && [ -f "$s" ]; then printf '%s\n' "$s"; return 0; fi
-    for s in /etc/*/spec.json; do
+    for s in "$RT_SPEC_DIR"/*/spec.json; do
         [ -f "$s" ] || continue
-        tr -d '\n' < "$s" 2>/dev/null | grep -q '"domains_file"' \
-            && { printf '%s\n' "$s"; return 0; }
+        tr -d '\n' < "$s" 2>/dev/null | grep -q '"domains_file"' && printf '%s\n' "$s"
     done
-    return 1
+}
+
+# Спека, которой принадлежит выбранный список: по ней узнаём имя службы
+# (reload, пауза на время подбора). Если список задан вручную, а спеки нет —
+# служба неизвестна, и это нормально.
+route_list_spec() {
+    local s best file
+    s=$(_rt_uci_get zapret2wizard.main.route_list_spec)
+    [ -n "$s" ] && [ -f "$s" ] && { printf '%s\n' "$s"; return 0; }
+    file=$(_rt_uci_get zapret2wizard.main.route_list_file)
+    [ -z "$file" ] || return 1
+    best=$(_rt_list_best domains_file)
+    [ -n "$best" ] && { printf '%s\n' "${best%%	*}"; return 0; }
+    _rt_spec_candidates | head -n 1
 }
 
 # Все пути из JSON-спеки для ключа: и массивы, и одиночные строки.
@@ -4401,24 +4415,49 @@ _rt_list_score() {
 
 # Лучший кандидат: максимум очков, при равенстве — первый. Пусто, если
 # максимум меньше 2 (значит, это не список исключений).
-_rt_list_pick() {
-    local key="$1" spec f best="" best_s=0 s
-    spec=$(route_list_spec) || return 0
+# Лучший кандидат внутри одной спеки: максимум очков, при равенстве — первый.
+_rt_list_best_in() {
+    local spec="$1" key="$2" f s bs=0 bf=""
     for f in $(_rt_spec_paths "$spec" "$key"); do
         s=$(_rt_list_score "$f")
-        if [ "$s" -gt "$best_s" ]; then best_s=$s; best=$f; fi
+        [ "$s" -gt "$bs" ] && { bs=$s; bf=$f; }
     done
-    [ "$best_s" -ge 2 ] && printf '%s\n' "$best"
+    [ "$bs" -ge 2 ] && printf '%s\n' "$bf"
+    return 0
+}
+
+# Лучшая пара «спека + список» по всем найденным спекам: "спека<TAB>путь".
+# Так выбирается список исключений, а не первый попавшийся, даже если на
+# роутере несколько оркестраторов.
+_rt_list_best() {
+    local key="$1" spec f s bs=0 bf="" bspec=""
+    for spec in $(_rt_spec_candidates); do
+        f=$(_rt_list_best_in "$spec" "$key")
+        [ -n "$f" ] || continue
+        s=$(_rt_list_score "$f")
+        [ "$s" -gt "$bs" ] && { bs=$s; bf=$f; bspec=$spec; }
+    done
+    [ -n "$bf" ] && printf '%s\t%s\n' "$bspec" "$bf"
     return 0
 }
 
 # Две строки: список доменов и (необязательно) список префиксов.
+# Две строки: список доменов и (необязательно) список префиксов.
 route_list_files() {
-    local file pfx
+    local file pfx best spec
     file=$(_rt_uci_get zapret2wizard.main.route_list_file)
     pfx=$(_rt_uci_get zapret2wizard.main.route_list_pfx)
-    [ -n "$file" ] || file=$(_rt_list_pick domains_file)
-    [ -n "$pfx" ] || pfx=$(_rt_list_pick prefixes_file)
+    if [ -z "$file" ]; then
+        best=$(_rt_list_best domains_file)
+        file=$(printf '%s' "$best" | cut -f2)
+        spec=$(printf '%s' "$best" | cut -f1)
+    else
+        spec=$(_rt_uci_get zapret2wizard.main.route_list_spec)
+    fi
+    if [ -z "$pfx" ] && [ -n "$spec" ]; then
+        pfx=$(_rt_list_best_in "$spec" prefixes_file)
+    fi
+    [ -n "$pfx" ] || pfx=$(_rt_list_best prefixes_file | cut -f2)
     [ -n "$file" ] || return 1
     printf '%s\n%s\n' "$file" "$pfx"
 }
@@ -4943,7 +4982,7 @@ route_available() {
 
 route_status() {
     local backend enabled domains targets=0 rules=0 members=0 packets=0 bytes=0
-    local excluded=0 verified=false detail="no tunnel" pref avail=0
+    local excluded=0 verified=false detail="no tunnel" pref avail=0 listfile=""
     backend=$(cat "$RT_BACKEND_FILE" 2>/dev/null); [ -n "$backend" ] || backend=none
     pref=$(_rt_uci_get zapret2wizard.main.route_backend); [ -n "$pref" ] || pref=auto
     route_is_enabled && enabled=1 || enabled=0
@@ -4974,8 +5013,9 @@ route_status() {
     # Если маршрут выключен в UCI, галочка в UI должна быть снята,
     # даже если старые правила ещё не успели удалить.
     [ "$enabled" = "0" ] && rules=0
-    printf '{"backend":"%s","pref":"%s","enabled":%s,"available":%s,"targets":%s,"rules":%s,"members":%s,"packets":%s,"bytes":%s,"domains":%s,"excluded":%s,"verified":%s,"detail":"%s"}\n' \
-        "$backend" "$pref" "$enabled" "$avail" "$targets" "$rules" "$members" "$packets" "$bytes" "$domains" "$excluded" "$verified" "$detail"
+    [ "$backend" = "list" ] && listfile=$(route_list_excl_path)
+    printf '{"backend":"%s","pref":"%s","list":"%s","enabled":%s,"available":%s,"targets":%s,"rules":%s,"members":%s,"packets":%s,"bytes":%s,"domains":%s,"excluded":%s,"verified":%s,"detail":"%s"}\n' \
+        "$backend" "$pref" "$listfile" "$enabled" "$avail" "$targets" "$rules" "$members" "$packets" "$bytes" "$domains" "$excluded" "$verified" "$detail"
 }
 
 route_domains_json() {

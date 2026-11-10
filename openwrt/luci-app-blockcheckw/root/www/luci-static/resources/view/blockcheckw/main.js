@@ -2444,8 +2444,10 @@ return view.extend({
 				if (status) {
 					if (st.rules) {
 						if (st.backend === 'list') {
+							var lst = st.list ? ' · ' + String(st.list).split('/').pop() : '';
 							status.textContent = 'Прямой маршрут: доменов ' + (st.excluded || st.domains || 0) +
-								(st.verified ? ' · проверено' : ' · применено');
+								(st.verified ? ' · проверено' : ' · применено') + lst;
+							if (st.list) status.title = 'Список исключений: ' + st.list;
 						} else {
 							status.textContent = 'Исключено из туннелей: ' + (st.packets || 0) + ' пакетов · доменов ' +
 								(st.domains || 0) + ' · IP ' + (st.members || 0);

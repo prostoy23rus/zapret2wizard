@@ -27,6 +27,7 @@ RT_IPS4="$T/ips4"; RT_IPS6="$T/ips6"; RT_STATIC4="$T/s4"; RT_STATIC6="$T/s6"
 RT_DIR="$T/route"; RT_LOG="$T/log"; RT_VERIFY="$T/verify"
 RT_WATCH_PID="$T/pid"; RT_WATCH_RUN="$T/run"; RT_LOCK="$T/lock"
 RT_CRON="$T/crontab"; RT_LEGACY_STATE="$T/legacy_state.txt"
+RT_SPEC_DIR="$T/etc"
 
 # Служба маршрутизации: спека описывает свои списки доменов и префиксов —
 # ровно так это делают оркестраторы, имя службы нигде не зашито.
@@ -111,14 +112,13 @@ route_disable
 
 # --- списковое исполнение: выбран именно список исключений ---
 TEST_BACKEND=list
-[ "$(route_list_excl_path)" = "$T/svc/exclude.lst" ] || fail "wrong list picked: $(route_list_excl_path)"
-[ "$(route_list_pfx_path)" = "$T/svc/exclude.pfx" ] || fail "wrong pfx picked"
 route_enable
 grep -qF "$RT_MB" "$EXCL" || fail "list block"
 grep -qx mybank.ru "$EXCL" || fail "list user entry"
 grep -qx youtube.com "$EXCL" || fail "list youtube"
 grep -qx google.com "$EXCL" && fail "google.com leaked"
 [ "$(cat "$RT_BACKEND_FILE")" = "list" ] || fail "backend file"
+route_status | grep -q "\"list\":\"$EXCL\"" || fail "status must report the list file"
 route_verify | grep -q '"ok":true' || fail "verify"
 route_explain youtube.com | grep -q 'direct' || fail "explain"
 
@@ -135,6 +135,23 @@ grep -qF "$RT_MB" "$EXCL" || fail "list block after switch back"
 route_disable
 grep -qF "$RT_MB" "$EXCL" && fail "list block not removed"
 grep -qx mybank.ru "$EXCL" || fail "list user entry removed"
+
+# --- несколько оркестраторов: берём спеку со списком исключений, а не первую ---
+mkdir -p "$T/etc/svcA" "$T/etc/svc"
+printf '{"version":2,"lists":{"x":{"domains_file":["/opt/a/service_only.lst"]}}}\n'     > "$T/etc/svcA/spec.json"
+cat > "$T/etc/svc/spec.json" <<EOF
+{"version":2,"lists":{"svc_other":{"domains_file":["/opt/svc/lists/svc_other.lst"]},"direct":{"domains_file":["$T/etc/svc/exclude.lst"],"prefixes_file":["$T/etc/svc/exclude.pfx"]}}}
+EOF
+: > "$T/etc/svc/exclude.lst"
+: > "$T/etc/svc/exclude.pfx"
+TEST_LIST_SPEC=""
+RT_SPEC_DIR="$T/etc"
+[ "$(route_list_excl_path)" = "$T/etc/svc/exclude.lst" ] \
+    || fail "wrong list picked: $(route_list_excl_path)"
+[ "$(route_list_spec)" = "$T/etc/svc/spec.json" ] || fail "wrong spec picked"
+[ "$(route_list_pfx_path)" = "$T/etc/svc/exclude.pfx" ] || fail "wrong pfx picked"
+TEST_LIST_SPEC="$T/svc/spec.json"
+RT_SPEC_DIR="/etc"
 
 # --- спека без списка исключений: пишем правила nft, а не чужой список ---
 cat > "$T/svc/spec2.json" <<EOF
