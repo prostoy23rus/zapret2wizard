@@ -298,6 +298,10 @@ start_service() {
 	# QUIC: если UDP/443 реально проходит — не режем его, приложение не ждёт
 	# fallback; если нет — reject + без ICMP-лимита, чтобы падение на TCP было быстрым.
 	[ -x /usr/bin/blockcheckw-helper ] && BCW_QUIC_NO_RESTART=1 /usr/bin/blockcheckw-helper quic_mode >/dev/null 2>&1 || true
+	# YTApi: если YouTube-стратегия включена, а API закрыт и профиля YTApi
+	# нет — создаём его в фоне (fix_ytapi сам перезапускает службу, lock
+	# в helper не даёт зациклиться).
+	[ -x /usr/bin/blockcheckw-helper ] && ( /usr/bin/blockcheckw-helper ensure_ytapi >/dev/null 2>&1 & ) || true
 
 	local uci_pkg="zapret2wizard"
 	[ -f /etc/config/zapret2wizard ] || uci_pkg="zapret2"

@@ -3563,21 +3563,47 @@ cmd_fix_ytapi() {
         uci -q commit zapret2wizard
         /usr/share/zapret2wizard/uci2config >/dev/null 2>&1 || true
         /etc/init.d/zapret2wizard restart >/dev/null 2>&1 || true
-        sleep 3
-        y=$(curl -4 -s -o /dev/null -m 7 -w '%{http_code}' https://youtubei.googleapis.com/ 2>/dev/null)
-        w=$(curl -4 -s -o /dev/null -m 7 -w '%{http_code}' https://www.youtube.com/ 2>/dev/null)
+        wait_dpi_ready 15
+        # После restart движок поднимается не мгновенно: одна проба 000
+        # ничего не доказывает. Проверяем несколько раз, прежде чем
+        # объявить кандидата нерабочим (из-за этого API ошибочно отключался).
+        y=000; w=""
+        for _try in 1 2 3 4 5; do
+            y=$(curl -4 -s -o /dev/null -m 7 -w '%{http_code}' https://youtubei.googleapis.com/ 2>/dev/null)
+            w=$(curl -4 -s -o /dev/null -m 7 -w '%{http_code}' https://www.youtube.com/ 2>/dev/null)
+            [ "$y" != "000" ] && [ -n "$y" ] && break
+            sleep 2
+        done
         logger -t zapret2wizard "YTApi $cand: api=$y www=$w"
-        if [ "$y" != "000" ] && [ "$y" != "" ]; then
+        if [ "$y" != "000" ] && [ -n "$y" ]; then
             echo "{\"success\":true,\"api\":\"$y\",\"www\":\"$w\",\"strategy\":\"$cand\"}"
             return 0
         fi
     done
+    # Не смогли подобрать — снимаем исключение, чтобы youtubei снова
+    # обрабатывался основной стратегией, а не оставался без обхода.
+    uci -q del_list zapret2wizard.$main_sec.hostlist_exclude=hl_ytapi 2>/dev/null || true
     uci -q set zapret2wizard.YTApi.enabled=0
     uci -q commit zapret2wizard
     /usr/share/zapret2wizard/uci2config >/dev/null 2>&1 || true
     /etc/init.d/zapret2wizard restart >/dev/null 2>&1 || true
     echo '{"success":false,"error":"youtubei остался закрыт"}'
     return 1
+}
+
+# При старте службы: если YouTube-стратегия включена, а API закрыт и профиля
+# YTApi нет — создаём его. Lock защищает от рекурсии (fix_ytapi перезапускает
+# службу, а restart снова вызывает ensure_ytapi).
+cmd_ensure_ytapi() {
+    local code
+    [ -f /tmp/bcw_ytapi.lock ] && return 0
+    uci -q get zapret2wizard.BlockcheckW_YouTube.enabled 2>/dev/null | grep -q '^1$' || return 0
+    code=$(curl -4 -s -o /dev/null -m 6 -w '%{http_code}' https://youtubei.googleapis.com/ 2>/dev/null)
+    [ "$code" = "000" ] || return 0
+    : > /tmp/bcw_ytapi.lock
+    cmd_fix_ytapi >/dev/null 2>&1 || true
+    rm -f /tmp/bcw_ytapi.lock
+    return 0
 }
 
 cmd_doctor() {
@@ -5642,6 +5668,7 @@ kmods_install_bg) cmd_kmods_install_bg ;;
 kmods_status) cmd_kmods_status ;;
 kmods_resolve) shift; _kmods_fetch_official "$@" dry ;;
 fix_ytapi) cmd_fix_ytapi ;;
+ensure_ytapi) cmd_ensure_ytapi ;;
 quic_probe) cmd_quic_probe && echo ok || echo fail ;;
 quic_mode) shift; cmd_quic_mode "$@" ;;
 optimize_dns) cmd_optimize_dns ;;
