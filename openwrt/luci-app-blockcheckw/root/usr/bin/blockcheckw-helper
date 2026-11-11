@@ -1027,7 +1027,7 @@ scan_preflight() {
     if [ -n "$miss" ]; then
         echo "[blockcheckw-helper] scan preflight failed:$miss" >> "$LOG_FILE" 2>/dev/null || true
         write_status "error" 0 "Проверка перед подбором не прошла:$miss$hint" ",\"strategies\":[]"
-        printf '{"error":"Проверка перед подбором не прошла:%s"}\n' "$miss"
+        printf '{"error":"Проверка перед подбором не прошла:%s%s"}\n' "$miss" "$hint"
         return 1
     fi
     return 0
