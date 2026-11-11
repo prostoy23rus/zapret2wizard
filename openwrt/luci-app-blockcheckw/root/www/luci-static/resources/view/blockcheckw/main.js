@@ -1898,7 +1898,7 @@ return view.extend({
 
 		var logTabButtons = {};
 		var logTabs = [
-			{ id: 'scanner', title: '⚡ Лог BlockcheckW' },
+			{ id: 'scanner', title: '⚡ Лог Zapret2Wizard' },
 			{ id: 'zapret2', title: '🛡️ Системный лог Zapret2' },
 			{ id: 'daemons', title: '⚙️ Демоны nfqws2' }
 		];
@@ -4337,7 +4337,7 @@ return view.extend({
 
 		function doUninstallService() {
 			bcwShowModal('Удаление службы...', [
-				E('p', { class: 'spinning' }, 'Удаление файлов BlockcheckW и сброс кэша роутера...')
+				E('p', { class: 'spinning' }, 'Удаление файлов Zapret2Wizard и сброс кэша роутера...')
 			]);
 
 			fs.exec(HELPER_BIN, ['uninstall']).then(function(res) {

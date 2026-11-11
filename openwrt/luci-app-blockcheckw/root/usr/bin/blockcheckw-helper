@@ -5055,7 +5055,7 @@ EOF
 
     /tmp/bcw_uninstall_exec.sh </dev/null >/dev/null 2>&1 &
 
-    echo '{"success":true,"message":"Служба BlockcheckW и веб-интерфейс LuCI успешно удалены с роутера"}'
+    echo '{"success":true,"message":"Служба Zapret2Wizard и веб-интерфейс LuCI успешно удалены с роутера"}'
 }
 
 cmd_diag() {

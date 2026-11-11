@@ -99,7 +99,7 @@ echo -e "Репозиторий: ${BLUE}https://github.com/${REPO_OWNER}/${REPO_
 # Проверка режима деинсталляции
 if [ "$1" = "--uninstall" ] || [ "$1" = "-u" ] || [ "$1" = "uninstall" ]; then
     shift
-    echo -e "${YELLOW}ℹ${NC} Запуск деинсталлятора BlockcheckW..."
+    echo -e "${YELLOW}ℹ${NC} Запуск деинсталлятора Zapret2Wizard..."
     if [ -f "$(dirname "$0")/uninstall.sh" ]; then
         exec sh "$(dirname "$0")/uninstall.sh" "$@"
     else
@@ -262,7 +262,7 @@ mkdir -p "$TMP_DIR"
 cd "$TMP_DIR"
 
 BIN_NAME="blockcheckw-linux-${ARCH}.tar.gz"
-echo -e "${BLUE}ℹ${NC} Скачивание ядра BlockcheckW для архитектуры ${BOLD}${ARCH}${NC}..."
+echo -e "${BLUE}ℹ${NC} Скачивание сканера поиска стратегий для архитектуры ${BOLD}${ARCH}${NC}..."
 
 DOWNLOAD_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/latest/download/${BIN_NAME}"
 UPSTREAM_URL="https://github.com/${UPSTREAM_OWNER}/blockcheckw/releases/latest/download/${BIN_NAME}"
@@ -611,10 +611,10 @@ fi
 ROUTER_IP=$(uci get network.lan.ipaddr 2>/dev/null || echo "192.168.1.1")
 
 echo -e "\n${GREEN}${BOLD}==============================================================================${NC}"
-echo -e "${GREEN}${BOLD}        BlockcheckW и LuCI интерфейс успешно установлены!                     ${NC}"
+echo -e "${GREEN}${BOLD}        Zapret2Wizard и LuCI интерфейс успешно установлены!                    ${NC}"
 echo -e "${GREEN}${BOLD}==============================================================================${NC}\n"
 echo -e "Теперь веб-интерфейс доступен в меню роутера:"
-echo -e "  🌐 ${BOLD}Службы${NC} ➔ ${BOLD}BlockcheckW (Поиск стратегий)${NC}"
+echo -e "  🌐 ${BOLD}Службы${NC} ➔ ${BOLD}Zapret2Wizard (поиск стратегий)${NC}"
 echo -e "  🔗 Ссылка: ${CYAN}http://${ROUTER_IP}/cgi-bin/luci/admin/services/blockcheckw${NC}\n"
 echo -e "В будущем вы сможете обновлять службу в 1 клик прямо из веб-интерфейса LuCI"
 echo -e "с помощью кнопки ${BOLD}[ 🔄 Проверить обновление ]${NC}."

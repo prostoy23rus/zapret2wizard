@@ -1,6 +1,6 @@
 {
 	"luci-app-blockcheckw": {
-		"description": "Grant access to BlockcheckW automated scanner and Zapret2 integration",
+		"description": "Grant access to Zapret2Wizard automated scanner and Zapret2 integration",
 		"read": {
 			"ubus": {
 				"file": [
