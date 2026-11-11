@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.20.0] (2026-11-12)
+
+### Instagram: DNS и рабочие IP
+
+Стратегии находились, но сайт не открывался по двум причинам, не связанным
+с DPI-обходом:
+
+1. Провайдер отдаёт NXDOMAIN на instagram.com — клиент не может даже
+   разрезолвить имя;
+2. часть IP Instagram блокируется на уровне сети (31.13.72.174 и др. не
+   отвечают ни с каким SNI), DPI-обход такие адреса не спасает.
+
+* заблокированные домены (instagram.com, cdninstagram.com, discord.com,
+  twitch.tv, x.com) резолвятся через локальный DoH; если штатный
+  https-dns-proxy сам фильтрует домен, поднимается второй instance на
+  cloudflare (127.0.0.1:5055) и домен переключается на него;
+* перед подбором и при старте службы проверяются IP Instagram, рабочий
+  закрепляется для www.instagram.com и instagram.com через dnsmasq
+  address= (51.13.71.174 и др.);
+* проверено: www.instagram.com 302, instagram.com 301, i.instagram.com 404,
+  graph.instagram.com 400, scontent.cdninstagram.com 204.
+
 ## [0.19.9] (2026-11-12)
 
 ### Установщик сам ставит зависимости

@@ -1,11 +1,12 @@
 {
-  "version": "0.19.9",
+  "version": "0.20.0",
   "release_date": "2026-11-12",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "Установщик сам доставляет зависимости: kmod-nfnetlink-queue и kmod-nft-queue (через blockcheckw-helper kmods_install, затем напрямую opkg/apk с update), а также nftables",
-    "Модули и nftables проверяются после установки; если фид прошивки не содержит подходящих kmod, установка останавливается с точной командой",
-    "Раньше проверка модулей стояла до вызова kmods_install и могла выйти с ошибкой, хотя пакеты было чем поставить"
+    "DNS-блокировка провайдера больше не мешает обходу: заблокированные домены (instagram.com, cdninstagram.com, discord.com, twitch.tv, x.com) резолвятся через локальный DoH-прокси",
+    "Если штатный DoH сам фильтрует домен, служба поднимает второй резолвер на cloudflare (127.0.0.1:5055) и переключает домен на него",
+    "Часть IP Instagram блокируется на уровне сети (не DPI): служба проверяет адреса и закрепляет рабочий IP для www.instagram.com и instagram.com через dnsmasq address=",
+    "Проверено на Rostelecom: www.instagram.com 302, instagram.com 301, i.instagram.com 404, graph.instagram.com 400, scontent.cdninstagram.com 204"
   ]
 }

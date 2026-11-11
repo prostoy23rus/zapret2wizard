@@ -988,7 +988,12 @@ scan_dns_mode() {
     esac
     out=$(nslookup "$d" 2>&1)
     case "$out" in
-        *"can't find"*|*NXDOMAIN*|*SERVFAIL*|"") echo doh ;;
+        *"can't find"*|*NXDOMAIN*|*SERVFAIL*|"")
+            # Заодно чиним DNS для клиентов: иначе DPI-обход есть, а сайт
+            # всё равно не открывается — провайдер отдаёт NXDOMAIN.
+            dns_doh_ensure "$(dns_doh_base "$d")"
+            echo doh
+            ;;
         *) echo auto ;;
     esac
 }
@@ -3302,6 +3307,108 @@ cmd_kmods_status() {
 # DNS-оптимизация: уникальные rr*.googlevideo.com идут через DoH-прокси
 # (dns-failsafe сначала ждёт медленный upstream ~1 c, из-за чего Shorts
 # стартуют с задержкой). Трогаем только если DoH реально слушает 5053.
+# Направить домен в локальный DoH-прокси (https-dns-proxy на 127.0.0.1#5053).
+# Провайдер отдаёт NXDOMAIN на заблокированные домены, и без этой записи
+# клиенты не могут даже открыть сайт, хотя DPI-обход уже настроен.
+# Второй DoH-резолвер (cloudflare) на 5055: штатный https-dns-proxy может
+# сам фильтровать домены (xbox-dns.ru отдавал NXDOMAIN на instagram.com).
+dns_doh_cloudflare_port() {
+    netstat -ln 2>/dev/null | grep -q '127.0.0.1:5055' && { echo 5055; return 0; }
+    command -v https-dns-proxy >/dev/null 2>&1 || return 1
+    uci -q get https-dns-proxy.config >/dev/null 2>&1 || return 1
+    if ! uci -q get 'https-dns-proxy.@https-dns-proxy[1]' >/dev/null 2>&1; then
+        uci add https-dns-proxy https-dns-proxy >/dev/null 2>&1 || return 1
+        uci set 'https-dns-proxy.@https-dns-proxy[1].resolver_url=https://cloudflare-dns.com/dns-query' 2>/dev/null || return 1
+        uci set 'https-dns-proxy.@https-dns-proxy[1].listen_port=5055' 2>/dev/null || return 1
+        uci commit https-dns-proxy 2>/dev/null || return 1
+        /etc/init.d/https-dns-proxy restart >/dev/null 2>&1 || true
+        sleep 2
+    fi
+    netstat -ln 2>/dev/null | grep -q '127.0.0.1:5055' && echo 5055
+}
+
+dns_doh_ensure() {
+    local dom="$1" port=5053 out
+    [ -n "$dom" ] || return 0
+    case "$dom" in *[!a-zA-Z0-9.-]*) return 0 ;; esac
+    uci -q get dhcp.@dnsmasq[0] >/dev/null 2>&1 || return 0
+    netstat -ln 2>/dev/null | grep -q '127.0.0.1:5053' || return 0
+    if uci -q get dhcp.@dnsmasq[0].server 2>/dev/null | grep -q "/$dom/"; then return 0; fi
+    uci add_list dhcp.@dnsmasq[0].server="/$dom/127.0.0.1#5053" 2>/dev/null || return 0
+    uci commit dhcp 2>/dev/null || return 0
+    /etc/init.d/dnsmasq reload >/dev/null 2>&1 || /etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
+    # Если штатный DoH сам фильтрует домен — переключаем на cloudflare.
+    out=$(nslookup -type=a "$dom" 127.0.0.1 2>&1)
+    case "$out" in
+        *"can't find"*|*NXDOMAIN*|*SERVFAIL*)
+            local alt
+            alt=$(dns_doh_cloudflare_port)
+            if [ -n "$alt" ]; then
+                uci del_list dhcp.@dnsmasq[0].server="/$dom/127.0.0.1#5053" 2>/dev/null || true
+                uci add_list dhcp.@dnsmasq[0].server="/$dom/127.0.0.1#$alt" 2>/dev/null || true
+                uci commit dhcp 2>/dev/null || true
+                /etc/init.d/dnsmasq reload >/dev/null 2>&1 || /etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
+                port="$alt"
+            fi
+            ;;
+    esac
+    echo "[blockcheckw-helper] DNS: $dom через DoH (127.0.0.1#$port)" >> "$LOG_FILE" 2>/dev/null || true
+}
+
+dns_doh_base() {
+    echo "$1" | awk -F. '{ if (NF > 2) print $(NF-1) "." $NF; else print $0 }'
+}
+
+# Часть IP Instagram заблокирована на уровне сети: DNS (через DoH) отдаёт
+# такой адрес, и сайт висит, хотя DPI-обход работает. Проверяем адреса и
+# закрепляем рабочий для www.instagram.com через host-record dnsmasq.
+dns_pin_host() {
+    local host="$1" ip="$2" cur e new=""
+    # OpenWrt dnsmasq не поддерживает host-record через uci, а address= —
+    # поддерживает: /www.instagram.com/1.2.3.4 отвечает A и для поддоменов.
+    cur=$(uci -q get dhcp.@dnsmasq[0].address 2>/dev/null)
+    for e in $cur; do
+        case "$e" in "/$host/"*) ;; *) new="$new $e" ;; esac
+    done
+    uci -q delete dhcp.@dnsmasq[0].address 2>/dev/null
+    for e in $new; do
+        uci add_list dhcp.@dnsmasq[0].address="$e" 2>/dev/null || true
+    done
+    uci add_list dhcp.@dnsmasq[0].address="/$host/$ip" 2>/dev/null || return 1
+    uci commit dhcp 2>/dev/null || return 1
+    /etc/init.d/dnsmasq restart >/dev/null 2>&1 || /etc/init.d/dnsmasq reload >/dev/null 2>&1 || true
+    echo "[blockcheckw-helper] DNS: $host закреплён за рабочим IP $ip" >> "$LOG_FILE" 2>/dev/null || true
+}
+
+dns_ip_works() {
+    local host="$1" ip="$2" code
+    code=$(curl -4 -sk -o /dev/null -m 6 -w '%{http_code}' --resolve "$host:443:$ip" "https://$host/" 2>/dev/null)
+    case "$code" in 2*|3*) return 0 ;; *) return 1 ;; esac
+}
+
+dns_fix_instagram() {
+    uci -q get zapret2wizard.BlockcheckW_Instagram.enabled 2>/dev/null | grep -q '^1$' || return 0
+    local host code ip ips h
+    for host in www.instagram.com instagram.com; do
+        code=$(curl -4 -sk -o /dev/null -m 6 -w '%{http_code}' "https://$host/" 2>/dev/null)
+        case "$code" in 2*|3*) continue ;; esac
+        ips=""
+        for h in instagram.com i.instagram.com; do
+            ips="$ips $(curl -sk -m 6 -H 'accept: application/dns-json' "https://cloudflare-dns.com/dns-query?name=$h&type=A" 2>/dev/null | sed -n 's/.*"data":"\([0-9.]*\)".*/\1/p')"
+        done
+        ips="$ips 31.13.71.174 157.240.241.174 157.240.205.63 31.13.72.53"
+        for ip in $ips; do
+            case "$ip" in *[!0-9.]*|"") continue ;; esac
+            if dns_ip_works "$host" "$ip"; then
+                dns_pin_host "$host" "$ip"
+                break
+            fi
+        done
+        [ -n "$ip" ] || echo "[blockcheckw-helper] DNS: рабочий IP для $host не найден" >> "$LOG_FILE" 2>/dev/null || true
+    done
+    return 0
+}
+
 cmd_optimize_dns() {
     local changed=0 entry dom cs
     uci -q get dhcp.@dnsmasq[0] >/dev/null 2>&1 || return 0
@@ -3313,12 +3420,26 @@ cmd_optimize_dns() {
             changed=1
         fi
     done
+    # Домены, которые провайдер режет по DNS (NXDOMAIN): без DoH-записи
+    # клиент не откроет их даже с рабочей стратегией.
+    for dom in instagram.com cdninstagram.com discord.com twitch.tv x.com; do
+        out=$(nslookup "$dom" 127.0.0.1 2>&1)
+        case "$out" in
+            *"can't find"*|*NXDOMAIN*|*SERVFAIL*|*"no address"*)
+                if ! uci -q get dhcp.@dnsmasq[0].server 2>/dev/null | grep -q "/$dom/"; then
+                    uci add_list dhcp.@dnsmasq[0].server="/$dom/127.0.0.1#5053"
+                    changed=1
+                fi
+                ;;
+        esac
+    done
     cs=$(uci -q get dhcp.@dnsmasq[0].cachesize 2>/dev/null)
     case "$cs" in ''|*[!0-9]*) uci set dhcp.@dnsmasq[0].cachesize='2000'; changed=1 ;; *) [ "$cs" -lt 1000 ] && { uci set dhcp.@dnsmasq[0].cachesize='2000'; changed=1; } ;; esac
     if [ "$changed" = "1" ]; then
         uci commit dhcp
         /etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
     fi
+    dns_fix_instagram >/dev/null 2>&1 || true
     echo "{\"changed\":$changed}"
 }
 
