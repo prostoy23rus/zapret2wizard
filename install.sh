@@ -21,6 +21,18 @@ REPO_OWNER="prostoy23rus"
 REPO_NAME="zapret2wizard"
 UPSTREAM_OWNER="rcd27"
 
+# Один коммит на всю установку: ветка main в CDN кэшируется до 12 часов,
+# из-за чего часть файлов приезжала старой версии (version.json 0.19.1 при
+# helper 0.19.2). Пин на SHA убирает и рассинхрон, и устаревший кэш.
+BCW_SHA=""
+resolve_sha() {
+    [ -n "$BCW_SHA" ] && return 0
+    BCW_SHA=$(curl -fsSL -k --connect-timeout 4 -m 10 \
+        "https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/commits/main" 2>/dev/null \
+        | sed -n 's/.*"sha": *"\([0-9a-f]\{40\}\)".*/\1/p' | head -n1)
+    [ -n "$BCW_SHA" ] || BCW_SHA="main"
+}
+
 # Multi-mirror downloader function (GitHub Raw + jsDelivr Global CDN + Fastly + GHProxy)
 fetch_file() {
     local rel_path="$1"
@@ -29,6 +41,8 @@ fetch_file() {
     local tmp_file="${dest}.dl.$$"
 
     rm -f "$tmp_file"
+    resolve_sha
+    local ref="$BCW_SHA"
 
     _save_download() {
         if [ -s "$tmp_file" ]; then
@@ -46,25 +60,25 @@ fetch_file() {
 
     # 1. Обычный GitHub Raw (DNS провайдера). Пиннинг IP ниже — запасной путь,
     #    потому что у части провайдеров адреса GitHub недоступны.
-    curl -fsSL -k --connect-timeout 4 -m "$timeout" "https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main/$rel_path?$(date +%s)" -o "$tmp_file" 2>/dev/null
+    curl -fsSL -k --connect-timeout 4 -m "$timeout" "https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${ref}/$rel_path?$(date +%s)" -o "$tmp_file" 2>/dev/null
     _save_download && return 0
 
     # 1b. GitHub Raw с пиннингом IP
     for gh_ip in 185.199.108.133 185.199.111.133 185.199.109.133 185.199.110.133; do
-        curl -fsSL -k --connect-timeout 2 -m "$timeout" --resolve "raw.githubusercontent.com:443:$gh_ip" "https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main/$rel_path" -o "$tmp_file" 2>/dev/null
+        curl -fsSL -k --connect-timeout 2 -m "$timeout" --resolve "raw.githubusercontent.com:443:$gh_ip" "https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${ref}/$rel_path" -o "$tmp_file" 2>/dev/null
         _save_download && return 0
     done
 
     # 2. GHProxy Real-Time Mirror
-    curl -fsSL -k --connect-timeout 3 -m "$timeout" "https://ghproxy.net/https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main/$rel_path" -o "$tmp_file" 2>/dev/null
+    curl -fsSL -k --connect-timeout 3 -m "$timeout" "https://ghproxy.net/https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${ref}/$rel_path" -o "$tmp_file" 2>/dev/null
     _save_download && return 0
 
     # 3. jsDelivr Global CDN Fallback
-    curl -fsSL -k --connect-timeout "$timeout" "https://cdn.jsdelivr.net/gh/${REPO_OWNER}/${REPO_NAME}@main/$rel_path" -o "$tmp_file" 2>/dev/null
+    curl -fsSL -k --connect-timeout "$timeout" "https://cdn.jsdelivr.net/gh/${REPO_OWNER}/${REPO_NAME}@${ref}/$rel_path" -o "$tmp_file" 2>/dev/null
     _save_download && return 0
 
     # 4. Fastly jsDelivr CDN Fallback
-    curl -fsSL -k --connect-timeout "$timeout" "https://fastly.jsdelivr.net/gh/${REPO_OWNER}/${REPO_NAME}@main/$rel_path" -o "$tmp_file" 2>/dev/null
+    curl -fsSL -k --connect-timeout "$timeout" "https://fastly.jsdelivr.net/gh/${REPO_OWNER}/${REPO_NAME}@${ref}/$rel_path" -o "$tmp_file" 2>/dev/null
     _save_download && return 0
 
     rm -f "$tmp_file"
