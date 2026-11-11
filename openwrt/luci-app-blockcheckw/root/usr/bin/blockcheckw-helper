@@ -1019,7 +1019,9 @@ scan_tunnel_service() {
 # что именно чинить.
 scan_preflight() {
     local miss="" hint=""
+    ensure_lua_layout
     command -v nft >/dev/null 2>&1 || { miss="$miss nftables"; hint="$hint; установите пакет nftables"; }
+    [ -r /opt/zapret2/lua/zapret-lib.lua ] || { miss="$miss lua(zapret-lib.lua)"; hint="$hint; перезапустите службу или install.sh"; }
     if [ ! -x /usr/bin/nfqws2 ]; then
         miss="$miss nfqws2"; hint="$hint; переустановите службу или положите движок в /usr/bin/nfqws2"
     elif ! /usr/bin/nfqws2 --version >/dev/null 2>&1; then
@@ -3606,6 +3608,43 @@ cmd_ensure_ytapi() {
     return 0
 }
 
+# nfqws2 ищет Lua рядом с собой: /opt/zapret2/nfq2/nfqws2 → /opt/zapret2/lua.
+# Установщик кладёт файлы в /usr/share/zapret2wizard/lua, поэтому здесь
+# делаем раскладку /opt/zapret2/lua идемпотентно: симлинк на каталог, а если
+# там уже реальный каталог (остался от старой установки) — симлинки на файлы.
+LUA_SRC_DIR=/usr/share/zapret2wizard/lua
+ensure_lua_layout() {
+    local src="$LUA_SRC_DIR" f dst
+    [ -d "$src" ] || return 0
+    mkdir -p /opt/zapret2/nfq2 2>/dev/null || true
+    # Цель зависит от того, где лежит движок: /opt/zapret2/... → /opt/zapret2/lua
+    for dst in /opt/zapret2/lua; do
+        if [ -L "$dst" ]; then
+            [ "$(readlink "$dst")" = "$src" ] || ln -sfn "$src" "$dst" 2>/dev/null || true
+        elif [ -d "$dst" ]; then
+            for f in "$src"/*.lua; do
+                [ -f "$f" ] && ln -sf "$f" "$dst/$(basename "$f")" 2>/dev/null || true
+            done
+        else
+            ln -sfn "$src" "$dst" 2>/dev/null || true
+        fi
+    done
+    chmod 755 /opt /opt/zapret2 /opt/zapret2/nfq2 2>/dev/null || true
+    chmod 755 /usr/share/zapret2wizard /usr/share/zapret2wizard/lua 2>/dev/null || true
+    chmod 755 /opt/zapret2/lua 2>/dev/null || true
+    chmod 644 "$src"/*.lua 2>/dev/null || true
+}
+
+cmd_ensure_lua() {
+    ensure_lua_layout
+    if [ -r /opt/zapret2/lua/zapret-lib.lua ]; then
+        echo '{"ok":true,"path":"/opt/zapret2/lua"}'
+        return 0
+    fi
+    echo '{"ok":false,"error":"/opt/zapret2/lua/zapret-lib.lua недоступен"}'
+    return 1
+}
+
 cmd_doctor() {
     local ok=1
     local checks=""
@@ -3687,6 +3726,15 @@ cmd_doctor() {
         [ -x "$p" ] && { engine="$p"; break; }
     done
     if [ -n "$engine" ]; then add_check "движок nfqws2" 1 "$engine" ""; else add_check "движок nfqws2" 0 "бинарник не найден" "Переустановите службу: install.sh скачает nfqws2 под вашу архитектуру"; fi
+
+    # nfqws2 из /opt/zapret2/nfq2 ищет zapret-lib.lua в /opt/zapret2/lua.
+    # Без этого сканер падает на предполётной проверке (exit code 6).
+    ensure_lua_layout
+    if [ -r /opt/zapret2/lua/zapret-lib.lua ]; then
+        add_check "lua-библиотеки" 1 "/opt/zapret2/lua" ""
+    else
+        add_check "lua-библиотеки" 0 "нет /opt/zapret2/lua/zapret-lib.lua" "Перезапустите службу или выполните install.sh: nfqws2 не найдёт Lua"
+    fi
 
     if [ -x /usr/bin/blockcheckw ]; then add_check "сканер blockcheckw" 1 "$(/usr/bin/blockcheckw --version 2>/dev/null | head -1)" ""; else add_check "сканер blockcheckw" 0 "бинарник не найден" "Переустановите службу через install.sh"; fi
 
@@ -5669,6 +5717,7 @@ kmods_status) cmd_kmods_status ;;
 kmods_resolve) shift; _kmods_fetch_official "$@" dry ;;
 fix_ytapi) cmd_fix_ytapi ;;
 ensure_ytapi) cmd_ensure_ytapi ;;
+ensure_lua) cmd_ensure_lua ;;
 quic_probe) cmd_quic_probe && echo ok || echo fail ;;
 quic_mode) shift; cmd_quic_mode "$@" ;;
 optimize_dns) cmd_optimize_dns ;;

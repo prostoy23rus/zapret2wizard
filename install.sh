@@ -418,6 +418,23 @@ for lua_script in zapret-lib.lua zapret-antidpi.lua zapret-auto.lua zapret-obfs.
     fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/lua/$lua_script" "/usr/share/zapret2wizard/lua/$lua_script" 8 || true
 done
 
+# nfqws2 из /opt/zapret2/nfq2 ищет Lua в /opt/zapret2/lua. Раскладка нужна
+# сразу после установки: иначе сканер падает на предполётной проверке
+# "LUA file '/opt/zapret2/lua/zapret-lib.lua' not accessible".
+mkdir -p /opt/zapret2/nfq2 2>/dev/null || true
+if [ -L /opt/zapret2/lua ]; then
+    ln -sfn /usr/share/zapret2wizard/lua /opt/zapret2/lua 2>/dev/null || true
+elif [ -d /opt/zapret2/lua ]; then
+    for f in /usr/share/zapret2wizard/lua/*.lua; do
+        [ -f "$f" ] && ln -sf "$f" "/opt/zapret2/lua/$(basename "$f")" 2>/dev/null || true
+    done
+else
+    ln -sfn /usr/share/zapret2wizard/lua /opt/zapret2/lua 2>/dev/null || true
+fi
+chmod 755 /opt /opt/zapret2 /opt/zapret2/nfq2 /usr/share/zapret2wizard /usr/share/zapret2wizard/lua 2>/dev/null || true
+chmod 755 /opt/zapret2/lua 2>/dev/null || true
+chmod 644 /usr/share/zapret2wizard/lua/*.lua 2>/dev/null || true
+
 # Установка fake-блобов. Существующие файлы не трогаем, общий лимит — 45 секунд:
 # если GitHub недоступен, установка продолжается, а не висит.
 FAKES_DIR="/usr/share/zapret2wizard/fake"
