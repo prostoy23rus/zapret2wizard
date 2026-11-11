@@ -1009,6 +1009,30 @@ scan_tunnel_service() {
     echo "$dev"
 }
 
+# Проверка перед подбором: движок, модули ядра и nftables. Иначе сканер
+# вернёт общее «предполётная проверка не прошла», по которому непонятно,
+# что именно чинить.
+scan_preflight() {
+    local miss="" hint=""
+    command -v nft >/dev/null 2>&1 || { miss="$miss nftables"; hint="$hint; установите пакет nftables"; }
+    if [ ! -x /usr/bin/nfqws2 ]; then
+        miss="$miss nfqws2"; hint="$hint; переустановите службу или положите движок в /usr/bin/nfqws2"
+    elif ! /usr/bin/nfqws2 --version >/dev/null 2>&1; then
+        miss="$miss nfqws2(не запускается)"; hint="$hint; движок не для этой архитектуры"
+    fi
+    modprobe nfnetlink_queue 2>/dev/null || true
+    modprobe nft_queue 2>/dev/null || true
+    [ -d /sys/module/nfnetlink_queue ] || { miss="$miss модуль nfnetlink_queue"; hint="$hint; opkg install kmod-nfnetlink-queue"; }
+    [ -d /sys/module/nft_queue ] || { miss="$miss модуль nft_queue"; hint="$hint; opkg install kmod-nft-queue"; }
+    if [ -n "$miss" ]; then
+        echo "[blockcheckw-helper] scan preflight failed:$miss" >> "$LOG_FILE" 2>/dev/null || true
+        write_status "error" 0 "Проверка перед подбором не прошла:$miss$hint" ",\"strategies\":[]"
+        printf '{"error":"Проверка перед подбором не прошла:%s"}\n' "$miss"
+        return 1
+    fi
+    return 0
+}
+
 cmd_start() {
     local target="youtube"
     local domain=""
@@ -1035,6 +1059,10 @@ cmd_start() {
     if [ -n "$domain" ]; then
         domain=$(echo "$domain" | tr ',' ' ' | awk '{print $1}')
     fi
+
+    # Раньше сканер падал с общим «предполётная проверка не прошла»: проверяем
+    # движок, модули и nftables сами и говорим, что именно поставить.
+    scan_preflight || return 1
 
     # Clean up stale lock if no scanner is actually running
     if ! pgrep -f blockcheckw >/dev/null 2>&1; then
@@ -1984,6 +2012,8 @@ cmd_start_bg() {
         echo '{"ok":false,"error":"Подбор уже выполняется"}'
         return 0
     fi
+    # Быстрая синхронная проверка: UI сразу получает понятную причину.
+    scan_preflight || return 1
 
     local quoted=""
     local a

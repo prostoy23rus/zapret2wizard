@@ -343,6 +343,13 @@ if [ ! -x /usr/bin/nfqws2 ]; then
         sleep 2
     done
 fi
+# Бинарник мог скачаться не для этой архитектуры: без запуска движка
+# подбор невозможен, поэтому проверяем, а не просто «файл есть».
+if [ -x /usr/bin/nfqws2 ] && ! /usr/bin/nfqws2 --version >/dev/null 2>&1; then
+    echo -e "${YELLOW}[WARN]${NC} /usr/bin/nfqws2 не запускается (не та архитектура?) — удаляю"
+    rm -f /usr/bin/nfqws2
+    NFQWS2_MISSING=1
+fi
 if [ -x /usr/bin/nfqws2 ]; then
     echo -e "${GREEN}✓${NC} Бинарник nfqws2 готов: ${BOLD}/usr/bin/nfqws2${NC}"
 else
@@ -522,6 +529,24 @@ if [ -n "$MISSING" ]; then
     exit 1
 fi
 chmod +x /etc/init.d/zapret2wizard /usr/share/zapret2wizard/uci2config /usr/bin/blockcheckw-helper 2>/dev/null || true
+
+# Без движка и модулей ядра подбор не работает: лучше остановиться с
+# понятным сообщением, чем оставить «установлено, но не сканирует».
+if [ "${NFQWS2_MISSING:-0}" = "1" ]; then
+    echo -e "${RED}[ERROR] Движок nfqws2 не установлен для архитектуры ${ARCH}.${NC}"
+    echo -e "${YELLOW}Проверьте /usr/bin/nfqws2 и повторите установку. Для ручной установки:${NC}"
+    echo -e "  curl -fsSL -k -o /tmp/nfq "https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main/openwrt/engine/nfqws2-linux-${ARCH}""
+    echo -e "  cp /tmp/nfq /usr/bin/nfqws2 && chmod +x /usr/bin/nfqws2"
+    exit 1
+fi
+modprobe nfnetlink_queue 2>/dev/null || true
+modprobe nft_queue 2>/dev/null || true
+if [ ! -d /sys/module/nfnetlink_queue ] || [ ! -d /sys/module/nft_queue ]; then
+    echo -e "${RED}[ERROR] Не загружаются модули nfqueue для ядра $(uname -r).${NC}"
+    echo -e "${YELLOW}Установите kmod-nfnetlink-queue и kmod-nft-queue из репозитория прошивки:${NC}"
+    echo -e "  opkg update && opkg install kmod-nfnetlink-queue kmod-nft-queue"
+    exit 1
+fi
 
 # Остановка и отключение старой службы zapret2 (полная изоляция)
 if [ -f /etc/init.d/zapret2 ]; then
