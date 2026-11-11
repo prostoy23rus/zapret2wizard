@@ -183,6 +183,14 @@ if [ "$ARCH" = "unknown" ]; then
 fi
 echo -e "${GREEN}✓${NC} Архитектура: ${BOLD}${ARCH}${NC} ($(uname -m))"
 
+# Пакетная архитектура нужна для запасного пути через бандл с релиза
+PKG_ARCH=""
+if command -v opkg >/dev/null 2>&1; then
+    PKG_ARCH=$(opkg print-architecture 2>/dev/null | awk '{print $2}' | grep -v 'all\|noarch' | head -n1)
+elif command -v apk >/dev/null 2>&1; then
+    PKG_ARCH=$(apk --print-arch 2>/dev/null)
+fi
+
 # 4. Проверка и установка зависимостей
 echo -e "${BLUE}ℹ${NC} Проверка системных зависимостей (curl, ca-certificates/ca-bundle, tar)..."
 
@@ -340,6 +348,18 @@ if [ -x /usr/bin/nfqws2 ] && [ ! -e /opt/zapret2/nfq2/nfqws2 ]; then
     ln -sf /usr/bin/nfqws2 /opt/zapret2/nfq2/nfqws2 2>/dev/null || true
 fi
 
+# Критичный файл: две попытки, ошибка не роняет скрипт, а копится в FAILED
+FAILED=""
+fetch_req() {
+    local rel="$1" dest="$2" tmo="${3:-8}"
+    if fetch_file "$rel" "$dest" "$tmo"; then return 0; fi
+    sleep 1
+    if fetch_file "$rel" "$dest" "$tmo"; then return 0; fi
+    echo -e "${YELLOW}[WARN]${NC} Не удалось скачать $rel"
+    FAILED="$FAILED $rel"
+    return 1
+}
+
 # 6. Скачивание и установка компонентов автономной службы и LuCI
 echo -e "${BLUE}ℹ${NC} Установка модулей Zapret2Wizard All-in-One..."
 
@@ -347,16 +367,16 @@ mkdir -p /usr/bin /usr/share/blockcheckw /usr/share/luci/menu.d /usr/share/rpcd/
 mkdir -p /usr/share/zapret2wizard/lua /usr/share/zapret2wizard/fake /usr/share/zapret2wizard/ipset /etc/zapret2wizard/ipset /etc/config /etc/init.d
 chmod 755 /www/luci-static/resources/view/blockcheckw /usr/share/blockcheckw /usr/share/zapret2wizard 2>/dev/null || true
 
-fetch_file "openwrt/luci-app-blockcheckw/root/usr/bin/blockcheckw-helper" /usr/bin/blockcheckw-helper 8
+fetch_req "openwrt/luci-app-blockcheckw/root/usr/bin/blockcheckw-helper" /usr/bin/blockcheckw-helper 8
 chmod +x /usr/bin/blockcheckw-helper 2>/dev/null || true
-fetch_file "openwrt/luci-app-blockcheckw/root/usr/bin/circular-builder.lua" /usr/bin/circular-builder.lua 8
-fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/uci2config" /usr/share/zapret2wizard/uci2config 8
+fetch_file "openwrt/luci-app-blockcheckw/root/usr/bin/circular-builder.lua" /usr/bin/circular-builder.lua 8 || true
+fetch_req "openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/uci2config" /usr/share/zapret2wizard/uci2config 8
 fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/evolve.lua" /usr/share/zapret2wizard/evolve.lua 8 || true
-fetch_file "strategies/zapret2_presets.json" /usr/share/blockcheckw/zapret2_presets.json 8
-fetch_file "openwrt/version.json" /usr/share/blockcheckw/version.json 8
+fetch_file "strategies/zapret2_presets.json" /usr/share/blockcheckw/zapret2_presets.json 8 || true
+fetch_req "openwrt/version.json" /usr/share/blockcheckw/version.json 8
 fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/luci/menu.d/luci-app-blockcheckw.json" /usr/share/luci/menu.d/luci-app-blockcheckw.json 8 || true
 fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/rpcd/acl.d/luci-app-blockcheckw.json" /usr/share/rpcd/acl.d/luci-app-blockcheckw.json 8 || true
-fetch_file "openwrt/luci-app-blockcheckw/root/www/luci-static/resources/view/blockcheckw/main.js" /www/luci-static/resources/view/blockcheckw/main.js 8
+fetch_req "openwrt/luci-app-blockcheckw/root/www/luci-static/resources/view/blockcheckw/main.js" /www/luci-static/resources/view/blockcheckw/main.js 8
 chmod 644 /www/luci-static/resources/view/blockcheckw/main.js 2>/dev/null || true
 
 # Ключевые файлы обязательны: без них интерфейс не запустится.
@@ -434,8 +454,8 @@ for ipset_file in zapret_hosts_youtube.txt zapret_hosts_discord.txt zapret_hosts
 done
 
 # Установка автономной службы /etc/init.d/zapret2wizard
-fetch_file "openwrt/luci-app-blockcheckw/root/etc/init.d/zapret2wizard" /etc/init.d/zapret2wizard 8
-chmod +x /etc/init.d/zapret2wizard /usr/share/zapret2wizard/uci2config /usr/bin/blockcheckw-helper /usr/bin/circular-builder.lua
+fetch_req "openwrt/luci-app-blockcheckw/root/etc/init.d/zapret2wizard" /etc/init.d/zapret2wizard 8
+chmod +x /etc/init.d/zapret2wizard /usr/share/zapret2wizard/uci2config /usr/bin/blockcheckw-helper /usr/bin/circular-builder.lua 2>/dev/null || true
 ln -sf /usr/bin/blockcheckw-helper /usr/bin/zapret2wizard 2>/dev/null || true
 
 # Настройка конфигурации zapret2wizard
@@ -444,8 +464,50 @@ if [ ! -f /etc/config/zapret2wizard ]; then
         echo -e "${BLUE}ℹ${NC} Миграция настроек из zapret2 в автономную конфигурацию zapret2wizard..."
         sed "s/config zapret2 'main'/config zapret2wizard 'main'/g; s|/opt/zapret2/ipset/|/etc/zapret2wizard/ipset/|g" /etc/config/zapret2 > /etc/config/zapret2wizard 2>/dev/null || true
     fi
-    [ -s /etc/config/zapret2wizard ] || fetch_file "openwrt/luci-app-blockcheckw/root/etc/config/zapret2wizard" /etc/config/zapret2wizard 8 || true
+    [ -s /etc/config/zapret2wizard ] || fetch_req "openwrt/luci-app-blockcheckw/root/etc/config/zapret2wizard" /etc/config/zapret2wizard 8 || true
 fi
+
+# 6.5. Проверка целостности: без этих файлов служба молча не поднимется.
+# Именно так ломался install.sh: обрыв загрузки init.d при set -e оставлял
+# бинарники без /etc/init.d и /etc/config, а скрипт завершался "успешно".
+MISSING=""
+for f in /usr/bin/blockcheckw-helper \
+         /www/luci-static/resources/view/blockcheckw/main.js \
+         /usr/share/zapret2wizard/uci2config \
+         /etc/init.d/zapret2wizard \
+         /etc/config/zapret2wizard; do
+    [ -s "$f" ] || MISSING="$MISSING $f"
+done
+if [ -n "$MISSING" ]; then
+    echo -e "${YELLOW}[WARN]${NC} Не хватает файлов:$MISSING"
+    echo -e "${BLUE}ℹ${NC} Пробую автономный бандл с GitHub Releases..."
+    VER=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([0-9][0-9.]*\)".*/\1/p' /usr/share/blockcheckw/version.json 2>/dev/null | head -n1)
+    if [ -n "$VER" ] && [ -n "$PKG_ARCH" ]; then
+        BTMP="/tmp/bcw_bundle.$$"
+        BURL="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/v${VER}/zapret2wizard-${VER}-${PKG_ARCH}-bundle.tar.gz"
+        rm -rf "$BTMP"; mkdir -p "$BTMP"
+        if curl -fsSL -k -m 240 "$BURL" -o "$BTMP/b.tgz" 2>/dev/null && tar -xzf "$BTMP/b.tgz" -C "$BTMP" 2>/dev/null; then
+            BSH=$(ls "$BTMP"/*/install.sh 2>/dev/null | head -n1)
+            if [ -n "$BSH" ]; then
+                ( cd "$(dirname "$BSH")" && SKIP_PREFLIGHT=1 sh install.sh ) || true
+            fi
+            rm -rf "$BTMP"
+            MISSING=""
+            for f in /usr/bin/blockcheckw-helper /www/luci-static/resources/view/blockcheckw/main.js /usr/share/zapret2wizard/uci2config /etc/init.d/zapret2wizard /etc/config/zapret2wizard; do
+                [ -s "$f" ] || MISSING="$MISSING $f"
+            done
+        else
+            rm -rf "$BTMP"
+            echo -e "${YELLOW}[WARN]${NC} Бандл скачать не удалось"
+        fi
+    fi
+fi
+if [ -n "$MISSING" ]; then
+    echo -e "${RED}[ERROR] Установка неполная — служба не запустится. Не хватает:$MISSING${NC}"
+    echo -e "${YELLOW}Поставьте пакет или бандл вручную:${NC} https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/latest"
+    exit 1
+fi
+chmod +x /etc/init.d/zapret2wizard /usr/share/zapret2wizard/uci2config /usr/bin/blockcheckw-helper 2>/dev/null || true
 
 # Остановка и отключение старой службы zapret2 (полная изоляция)
 if [ -f /etc/init.d/zapret2 ]; then

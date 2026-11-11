@@ -4041,7 +4041,13 @@ cmd_tunnel_check() {
 
 cmd_youtube_audit() {
     local score=0 total=0 checks="" name url code bytes sec ok advice="ok" advice_text="всё в порядке"
-    local qm qr
+    local qm qr i=0
+    # Сразу после restart/prepare движки поднимаются не мгновенно: без ожидания
+    # аудит честно получает 000 и пугает пользователя ложной ошибкой.
+    while [ "$i" -lt 10 ] && [ -z "$(our_engines)" ]; do
+        sleep 1
+        i=$((i + 1))
+    done
     for pair in \
         "www|https://www.youtube.com/" \
         "img|https://i.ytimg.com/vi/dQw4w9WgXcQ/default.jpg" \
@@ -4050,6 +4056,13 @@ cmd_youtube_audit() {
         name=${pair%%|*}; url=${pair#*|}
         set -- $(_yt_probe "$url")
         code="$1"; bytes="$2"; sec="$3"
+        # На медленном канале первый запрос может не уложиться в таймаут —
+        # повторяем один раз, прежде чем считать точку недоступной.
+        if [ "$code" = "000" ]; then
+            sleep 1
+            set -- $(_yt_probe "$url")
+            code="$1"; bytes="$2"; sec="$3"
+        fi
         total=$((total + 1))
         [ "$code" != "000" ] && score=$((score + 1))
         checks="${checks:+$checks,}{\"name\":\"$name\",\"code\":\"$code\",\"bytes\":${bytes:-0},\"time\":${sec:-0}}"
