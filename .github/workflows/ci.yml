@@ -61,9 +61,6 @@ jobs:
           sh tools/test_quic_mode.sh
           sh tools/test_netcheck.sh
 
-      - name: Route engine (netns)
-        run: sudo unshare -n sh tools/test_route_engine.sh
-
   # Экзотические цели собираются ТОЛЬКО в релизном воркфлоу, поэтому их поломка
   # всплывала уже после нарезки тега: v0.11.0 потерял mips, mipsel и ppc на
   # `AtomicU64` в зависимости — при зелёном CI на самом PR. Здесь они проверяются

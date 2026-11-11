@@ -893,7 +893,7 @@ return view.extend({
 
 		var btnDiagnostics = E('button', {
 			class: 'bcw-header-item bcw-header-btn',
-			title: 'Проверить состояние службы и bypass: служба, движок, nft, живая проверка',
+			title: 'Проверить состояние службы: служба, движок, nft, живая проверка',
 			click: function() { showDiagnosticsModal(); }
 		}, [
 			E('span', {}, '🩺'),
@@ -1119,12 +1119,9 @@ return view.extend({
 			var failed = (doctorInfo.checks || []).filter(function(c) { return c && !c.ok; });
 			if (!failed.length) { repairCard.style.display = 'none'; return; }
 
-			// Не все проверки одинаково критичны: «обход туннелей» — это замечание
-			// (трафик может идти через туннель), а не «служба не готова».
 			var CRITICAL_CHECKS = ['nftables', 'наши движки', 'движок nfqws2', 'служба', 'nft-таблица', 'конфигурация', 'автозапуск'];
 			var criticalFailed = failed.filter(function(c) { return CRITICAL_CHECKS.indexOf(c.name) >= 0; });
 			var onlyWarnings = criticalFailed.length === 0;
-			var bypassFailed = failed.some(function(c) { return c.name === 'обход туннелей'; });
 			repairCard.style.background = onlyWarnings ? 'rgba(255, 183, 77, 0.10)' : 'rgba(229, 96, 92, 0.10)';
 			repairCard.style.borderColor = onlyWarnings ? '#ffb74d' : '#e5605c';
 
@@ -1203,25 +1200,6 @@ return view.extend({
 						}).catch(function() { self.disabled = false; self.textContent = '✗ Ошибка вызова helper'; });
 					}
 				}, '🛠 Установить модули nfqueue'));
-			}
-
-			if (bypassFailed && !engineFailed) {
-				nodes.push(E('button', {
-					class: 'bcw-btn-launch',
-					style: 'margin-top: 10px; padding: 8px 16px; font-size: 13px;',
-					click: function() {
-						var self = this;
-						self.disabled = true;
-						self.textContent = '⏳ Переприменяю обход туннелей...';
-						fs.exec(HELPER_BIN, ['bypass', 'enable']).then(function() {
-							self.textContent = '✓ Готово, обновляю...';
-							setTimeout(function() { location.reload(); }, 1500);
-						}).catch(function() {
-							self.disabled = false;
-							self.textContent = '✗ Не удалось, смотрите /tmp/bcw_bypass.log';
-						});
-					}
-				}, '🔁 Переприменить обход туннелей'));
 			}
 
 			repairCard.innerHTML = '';
@@ -2075,7 +2053,7 @@ return view.extend({
 			dashRow.appendChild(dashLeft);
 			dashRow.appendChild(dashRight);
 			scanPanel.appendChild(dashRow);
-			dashRight.appendChild(buildRouteCard());
+			dashRight.appendChild(buildAuditCard());
 			// «Что применяется сейчас» и результаты — внутрь того же блока целей,
 			// чтобы это был один раздел, а не отдельная карточка
 			for (var ci = 2; ci < cards.length; ci++) {
@@ -2425,179 +2403,37 @@ return view.extend({
 			}).catch(function() {});
 		}
 
-		// -------- Прямой маршрут: переключатель исключения и счётчик --------
-		function refreshRouteCard() {
-			fs.exec(HELPER_BIN, ['bypass', 'status']).then(function(res) {
-				var st = null;
-				try { st = JSON.parse(res.stdout); } catch (e) {}
-				var card = document.getElementById('bcw-route-card');
-				var toggle = document.getElementById('bcw-route-toggle');
-				var backendSel = document.getElementById('bcw-route-backend');
-				var status = document.getElementById('bcw-route-status');
-				if (!card || !st) return;
-				// available: маршрут применим (список службы или таблицы с
-				// маркировкой), даже если сейчас выключен — иначе галочку не вернуть.
-				if (!st.targets && !st.available) { card.style.display = 'none'; return; }
-				card.style.display = '';
-				if (toggle) toggle.checked = !!st.rules;
-				if (backendSel && st.pref) backendSel.value = st.pref;
-				if (status) {
-					if (st.rules) {
-						if (st.backend === 'list') {
-							var lst = st.list ? ' · ' + String(st.list).split('/').pop() : '';
-							status.textContent = 'Прямой маршрут: доменов ' + (st.excluded || st.domains || 0) +
-								(st.verified ? ' · проверено' : ' · применено') + lst;
-							if (st.list) status.title = 'Список исключений: ' + st.list;
-						} else {
-							status.textContent = 'Исключено из туннелей: ' + (st.packets || 0) + ' пакетов · доменов ' +
-								(st.domains || 0) + ' · IP ' + (st.members || 0);
-						}
-						status.style.color = '#98c379';
-					} else {
-						status.textContent = st.backend === 'list'
-							? 'Выключено: служба снова забирает домены в туннель'
-							: 'Выключено: домены службы уходят в туннель';
-						status.style.color = '#abb2bf';
-					}
-				}
-			}).catch(function() {});
-		}
-
-		function buildRouteCard() {
-			var toggle = E('input', { type: 'checkbox', id: 'bcw-route-toggle', style: 'margin: 0 8px 0 0; vertical-align: middle;' });
-			var status = E('div', { id: 'bcw-route-status', style: 'font-size: 12px; color: #abb2bf; margin-top: 8px;' }, 'Загрузка...');
-			var title = E('div', { style: 'font-weight:bold;font-size:13px;margin-bottom:6px;' }, '🔀 Обход туннелей');
-
-			var backendSel = E('select', {
-				id: 'bcw-route-backend',
-				style: 'margin-top:8px; font-size:12px; padding:3px 6px;'
-			}, [
-				E('option', { value: 'auto' }, 'Авто: список службы, иначе nft'),
-				E('option', { value: 'list' }, 'Список исключений службы'),
-				E('option', { value: 'nft' }, 'Правило nft до маркировки')
-			]);
-			backendSel.addEventListener('change', function() {
-				backendSel.disabled = true;
-				status.textContent = '⏳ Переключаю backend...';
-				fs.exec(HELPER_BIN, ['bypass', 'backend', backendSel.value]).then(function() {
-					backendSel.disabled = false;
-					setTimeout(refreshRouteCard, 1000);
-					setTimeout(refreshRouteCard, 4000);
-				}).catch(function() { backendSel.disabled = false; status.textContent = '✗ ошибка backend'; });
-			});
-
-			toggle.addEventListener('change', function() {
-				var want = toggle.checked;
-				toggle.disabled = true;
-				status.textContent = want ? '⏳ Включаю исключение...' : '⏳ Снимаю исключение...';
-				fs.exec(HELPER_BIN, ['bypass', want ? 'enable' : 'disable']).then(function() {
-					toggle.disabled = false;
-					setTimeout(refreshRouteCard, 1000);
-					setTimeout(refreshRouteCard, 3500);
-					setTimeout(refreshRouteCard, 7000);
-					ui.addNotification(null, E('p', {}, want ? 'Домены службы исключены из туннелей' : 'Туннели снова забирают домены службы'), 'info');
-				}).catch(function() { toggle.disabled = false; status.textContent = '✗ ошибка'; });
-			});
-
-			var domainList = E('div', {
-				id: 'bcw-route-domains',
-				style: 'display:none; margin-top:8px; max-height:180px; overflow:auto; font:11px/1.5 ui-monospace, monospace; color:#abb2bf; background:#0c1016; border:1px solid var(--bcw-border-divider); border-radius:6px; padding:8px;'
-			}, '');
-			var showBtn = E('button', {
-				class: 'bcw-btn-secondary',
-				id: 'bcw-route-show',
-				style: 'margin-top:8px; font-size:12px; padding:4px 10px;'
-			}, 'Показать домены');
-			showBtn.addEventListener('click', function() {
-				if (domainList.style.display !== 'none') {
-					domainList.style.display = 'none';
-					showBtn.textContent = 'Показать домены';
-					return;
-				}
-				showBtn.textContent = '⏳ Загружаю...';
-				fs.exec(HELPER_BIN, ['bypass', 'domains']).then(function(res) {
-					var d = null;
-					try { d = JSON.parse(res.stdout); } catch (e) {}
-					if (!d || !d.domains) { showBtn.textContent = 'Показать домены'; return; }
-					domainList.textContent = d.domains.join('\n');
-					domainList.style.display = '';
-					showBtn.textContent = 'Скрыть домены (' + d.count + ')';
-				}).catch(function() { showBtn.textContent = 'Показать домены'; });
-			});
-
-			var rebuildBtn = E('button', {
-				class: 'bcw-btn-secondary',
-				id: 'bcw-route-rebuild',
-				style: 'margin-top:8px; margin-left:6px; font-size:12px; padding:4px 10px;'
-			}, '↻ Пересобрать набор');
-			rebuildBtn.addEventListener('click', function() {
-				rebuildBtn.disabled = true;
-				status.textContent = '⏳ Пересобираю набор IP...';
-				fs.exec(HELPER_BIN, ['bypass', 'rebuild']).then(function() {
-					rebuildBtn.disabled = false;
-					setTimeout(refreshRouteCard, 1000);
-					setTimeout(refreshRouteCard, 5000);
-					ui.addNotification(null, E('p', {}, 'Набор IP пересобран'), 'info');
-				}).catch(function() { rebuildBtn.disabled = false; });
-			});
-
+		// -------- Проверка YouTube: измерение без вмешательства --------
+		function buildAuditCard() {
+			var auditOut = E('div', { id: 'bcw-audit-out', style: 'font-size: 12.5px; margin-top: 10px; line-height: 1.5;' });
 			var auditBtn = E('button', {
-				class: 'bcw-btn-secondary',
-				id: 'bcw-route-audit',
-				style: 'margin-top:8px; margin-left:6px; font-size:12px; padding:4px 10px;'
-			}, '▶ Проверить YouTube');
-			var auditOut = E('div', {
-				id: 'bcw-route-audit-out',
-				style: 'font-size:12px; margin-top:6px; display:none;'
-			});
-			auditBtn.addEventListener('click', function() {
-				auditBtn.disabled = true;
-				auditOut.style.display = '';
-				auditOut.style.color = '#abb2bf';
-				auditOut.textContent = '⏳ Проверяю веб, превью, API и CDN...';
-				fs.exec(HELPER_BIN, ['youtube_audit']).then(function(res) {
-					auditBtn.disabled = false;
-					var d = null;
-					try { d = JSON.parse(res.stdout); } catch (e) {}
-					if (!d) { auditOut.textContent = '✗ Не удалось разобрать ответ'; return; }
-					// отдельная строка: периодическое обновление карточки её не трогает
-					var adv = d.advice_text || d.advice || 'проблема';
-					if (d.ok && (!d.advice || d.advice === 'ok')) {
-						auditOut.textContent = '✓ YouTube: OK (' + d.score + '/' + d.total + '), маршрут ' + ((d.route && d.route.backend) || '?');
-						auditOut.style.color = '#98c379';
-					} else if (d.ok) {
-						// Проверки прошли, но маршрут не подтверждён — это предупреждение,
-						// а не ошибка; код совета (route_enable) пользователю не показываем.
-						auditOut.textContent = '⚠ YouTube отвечает (' + d.score + '/' + d.total + '): ' + adv;
-						auditOut.style.color = '#e5c07b';
-					} else {
-						auditOut.textContent = '✗ YouTube: ' + adv + ' (' + d.score + '/' + d.total + ')';
+				class: 'bcw-btn-launch', id: 'bcw-audit-btn', style: 'padding: 8px 16px; font-size: 13px;',
+				click: function() {
+					var self = this;
+					self.disabled = true;
+					auditOut.textContent = '⏳ Проверяю YouTube (веб, превью, API, CDN)...';
+					auditOut.style.color = '#abb2bf';
+					fs.exec(HELPER_BIN, ['youtube_audit']).then(function(res) {
+						self.disabled = false;
+						var d = null;
+						try { d = JSON.parse(res.stdout); } catch (e) {}
+						if (!d) { auditOut.textContent = '✗ Не удалось получить ответ'; auditOut.style.color = '#e06c75'; return; }
+						auditOut.textContent = (d.ok ? '✓ ' : '⚠ ') + (d.advice_text || '') + ' (' + d.score + '/' + d.total + ')';
+						auditOut.style.color = d.ok ? '#98c379' : '#e5c07b';
+					}).catch(function() {
+						self.disabled = false;
+						auditOut.textContent = '✗ Ошибка проверки';
 						auditOut.style.color = '#e06c75';
-					}
-				}).catch(function() {
-					auditBtn.disabled = false;
-					auditOut.textContent = '✗ ошибка проверки';
-					auditOut.style.color = '#e06c75';
-				});
-			});
-
-			var card = E('div', { class: 'bcw-card', id: 'bcw-route-card', style: 'padding: 14px; margin-top: 16px; display: none;' }, [
-				title,
-				E('div', { style: 'font-size:12px; color:var(--bcw-text-title); margin-bottom:6px;' }, [
-					E('span', {}, 'Маршрут: '),
-					backendSel
-				]),
-				E('label', { style: 'font-size: 12.5px; color: var(--bcw-text-title); display:flex; align-items:flex-start; gap:2px; cursor:pointer;' }, [
-					toggle,
-					E('span', {}, 'Не отправлять в туннель домены, которые обслуживает служба')
-				]),
-				status,
-				auditOut,
-				E('div', {}, [showBtn, rebuildBtn, auditBtn]),
-				domainList
+					});
+				}
+			}, '▶ Проверить YouTube');
+			var card = E('div', { class: 'bcw-card', id: 'bcw-audit-card', style: 'padding: 14px; margin-top: 16px;' }, [
+				E('div', { style: 'font-weight:bold;font-size:13px;margin-bottom:6px;' }, '📺 Проверка YouTube'),
+				E('div', { style: 'font-size:12px;color:var(--bcw-text-muted);margin-bottom:8px;' },
+					'Проверяет веб, превью, API и CDN. Ничего не меняет и чужие службы не трогает.'),
+				auditBtn,
+				auditOut
 			]);
-			setTimeout(refreshRouteCard, 1200);
-			setInterval(refreshRouteCard, 15000);
 			return card;
 		}
 

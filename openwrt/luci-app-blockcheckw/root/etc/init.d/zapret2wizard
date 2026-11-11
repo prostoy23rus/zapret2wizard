@@ -251,11 +251,9 @@ prepare_environment() {
 	fi
 }
 
-# Чужие DPI-службы и движки не должны перехватывать наши очереди и метки.
-# Гасим известные конфликтующие службы и освобождаем очередь от посторонних
-# nfqws/nfqws2 (свои определяем по пути zapret2wizard в командной строке).
-# Осиротевшие процессы сканера держат тестовый движок на очереди 200 и мешают
-# службе: убираем их до старта.
+# Чужие DPI-службы и движки не трогаем: служба живёт в своей таблице и
+# своих очередях. Убираем только осиротевшие процессы НАШЕГО подбора —
+# они держат тестовый движок на очереди 200 и мешают старту.
 kill_orphan_scans() {
     # Подбор идёт прямо сейчас: его процессы не осиротевшие. Раньше guard
     # на каждом старте службы убивал активный подбор (а авто-применение
@@ -281,52 +279,8 @@ kill_orphan_scans() {
 }
 
 guard_conflicts() {
+    # Никого чужого не трогаем: только осиротевшие процессы нашего подбора.
     kill_orphan_scans
-	local svc
-	for svc in zapret2 zapret zapret-manager blockcheck; do
-		[ -x "/etc/init.d/$svc" ] || continue
-		if /etc/init.d/"$svc" running >/dev/null 2>&1; then
-			logger -t zapret2wizard "conflict: stopping $svc"
-			/etc/init.d/"$svc" stop >/dev/null 2>&1
-		fi
-		/etc/init.d/"$svc" disable >/dev/null 2>&1 || true
-	done
-
-	local c p cmd name
-	for c in /proc/[0-9]*/comm; do
-		[ -r "$c" ] || continue
-		name=$(cat "$c" 2>/dev/null)
-		case "$name" in
-			nfqws|nfqws2) ;;
-			*) continue ;;
-		esac
-		p=${c#/proc/}
-		p=${p%/comm}
-		cmd=$(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null)
-		case "$cmd" in
-			*zapret2wizard*) ;;
-			*)
-				logger -t zapret2wizard "conflict: freeing queue from foreign engine pid=$p"
-				kill -9 "$p" 2>/dev/null || true
-				;;
-		esac
-	done
-}
-
-# Убираем чужие nfqws2 (например, старый /opt/zapret2), иначе они держат очередь.
-kill_foreign_engines() {
-	local c name p cmd
-	for c in /proc/[0-9]*/comm; do
-		[ -r "$c" ] || continue
-		name=$(cat "$c" 2>/dev/null)
-		case "$name" in nfqws|nfqws2) ;; *) continue ;; esac
-		p=${c#/proc/}; p=${p%/comm}
-		cmd=$(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null)
-		case "$cmd" in
-			*zapret2wizard*) ;;
-			*) kill -9 "$p" 2>/dev/null; logger -t zapret2wizard "удалён чужой движок pid=$p" ;;
-		esac
-	done
 }
 
 start_service() {
@@ -344,7 +298,6 @@ start_service() {
 	# QUIC: если UDP/443 реально проходит — не режем его, приложение не ждёт
 	# fallback; если нет — reject + без ICMP-лимита, чтобы падение на TCP было быстрым.
 	[ -x /usr/bin/blockcheckw-helper ] && BCW_QUIC_NO_RESTART=1 /usr/bin/blockcheckw-helper quic_mode >/dev/null 2>&1 || true
-	kill_foreign_engines
 
 	local uci_pkg="zapret2wizard"
 	[ -f /etc/config/zapret2wizard ] || uci_pkg="zapret2"
@@ -389,25 +342,6 @@ start_service() {
 	fi
 	# Снимок таблицы: по нему восстанавливаем правила, не поднимая procd
 	nft list table inet zapret2wizard > /etc/zapret2wizard/fw.nft 2>/dev/null || true
-
-	# Исключаем из туннеля то, что обрабатывает наша служба:
-	# трафик должен идти напрямую и попадать в zapret2wizard, а не в туннель.
-	if [ -x /usr/bin/blockcheckw-helper ]; then
-		touch /var/run/bcw_bypass.run
-		# перезапускаем сторож всегда: обновился helper — нужен новый код
-		if [ -f /var/run/bcw_bypass.watch.pid ]; then
-			kill "$(cat /var/run/bcw_bypass.watch.pid)" 2>/dev/null || true
-			rm -f /var/run/bcw_bypass.watch.pid
-		fi
-		# start-stop-daemon и фоновый subshell наследуют fd-блокировку procd (1000).
-		# Сторож держал её всё время работы, и любой restart/enable/opkg install
-		# вставал на flock. Закрываем унаследованные дескрипторы у детей.
-		start-stop-daemon -S -b -x /usr/bin/blockcheckw-helper -- bypass_watch 1000>&- 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&- >/dev/null 2>&1 || true
-		# сам обход ставим в фон: он может ходить в сеть за диапазонами
-		# sync, а не enable: маршрут включается только по явному решению (UCI
-	# route_enabled / галочка в LuCI) и не должен воскресать после restart.
-	( exec 1000>&- 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&-; sleep 3; /usr/bin/blockcheckw-helper bypass_sync sync >/dev/null 2>&1 ) &
-	fi
 
 	# Start procd instances
 	local LUA_BASE="--lua-init=@$LUA_DIR/zapret-lib.lua --lua-init=@$LUA_DIR/zapret-antidpi.lua --lua-init=@$LUA_DIR/zapret-auto.lua"
@@ -471,14 +405,6 @@ start_service() {
 
 stop_service() {
 	logger -t zapret2wizard "Stopping Zapret2Wizard service and firewall..."
-	# возвращаем домены в туннель (но не во время подбора: там нужен
-	# чистый прямой маршрут, иначе замеры идут через туннель)
-	if [ -x /usr/bin/blockcheckw-helper ] && [ ! -f /tmp/bcw_scan_paused ] \
-		&& [ ! -d /var/run/bcw_scan.lock ]; then
-		rm -f /var/run/bcw_bypass.run
-		[ -f /var/run/bcw_bypass.watch.pid ] && kill "$(cat /var/run/bcw_bypass.watch.pid)" 2>/dev/null
-		/usr/bin/blockcheckw-helper bypass_sync disable keep >/dev/null 2>&1 || true
-	fi
 	nft delete table inet zapret2wizard 2>/dev/null || true
 	rm -f "$PIDDIR/zapret2wizard_"*.pid
 }
@@ -491,8 +417,22 @@ reload_service() {
 }
 
 # Быстрый status: не обращаемся к ubus/procd, иначе при занятом rpcd он висит.
+# Наши движки: только экземпляры службы (очереди 300/65300/65301).
+our_engines() {
+	local c p cmd
+	for c in /proc/[0-9]*/comm; do
+		[ -r "$c" ] || continue
+		[ "$(cat "$c" 2>/dev/null)" = "nfqws2" ] || continue
+		p=${c#/proc/}; p=${p%/comm}
+		cmd=$(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null)
+		case "$cmd" in
+			*--qnum=300\ *|*--qnum=65300\ *|*--qnum=65301\ *) echo "$p" ;;
+		esac
+	done
+}
+
 status() {
-	if pgrep -f "nfqws2" >/dev/null 2>&1; then
+	if [ -n "$(our_engines)" ]; then
 		if nft list table inet zapret2wizard >/dev/null 2>&1; then
 			echo "running"
 			return 0

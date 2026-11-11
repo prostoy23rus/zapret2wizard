@@ -5,7 +5,7 @@ LUCI_DEPENDS:=+luci-base +luci-compat +curl +nftables +ca-bundle
 LUCI_PKGARCH:=all
 
 PKG_NAME:=luci-app-blockcheckw
-PKG_VERSION:=0.19.1
+PKG_VERSION:=0.19.2
 PKG_RELEASE:=1
 PKG_LICENSE:=MIT
 
