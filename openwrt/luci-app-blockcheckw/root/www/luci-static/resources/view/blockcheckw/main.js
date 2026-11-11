@@ -970,8 +970,17 @@ return view.extend({
 		        zapretBadgeEl.appendChild(E('span', { class: 'bcw-status-dot' }));
 		        zapretBadgeEl.appendChild(E('span', {}, running ? 'Zapret2Wizard активен' : 'Zapret2Wizard остановлен'));
 		        zapretBadgeEl.title = running ? 'Служба активна и фильтрует трафик' : 'Служба остановлена — нажмите, чтобы запустить';
-		        if (running && !wasOnline && reloadOnStart) { location.reload(); }
+		        // Скан на время останавливает службу, потом поднимает её. Раньше
+		        // здесь был location.reload() — страница мигала и теряла прокрутку
+		        // прямо во время подбора. Обновляемся тихо, без перезагрузки.
+		        if (running && !wasOnline && reloadOnStart) { softRefreshAfterScan(); }
 		    }).catch(function() {});
+		}
+		// Тихое обновление после подбора: перечитываем результаты и лог,
+		// не перезагружая страницу и не сбрасывая прокрутку/вкладку.
+		function softRefreshAfterScan() {
+			try { if (typeof loadResultsForTarget === 'function') loadResultsForTarget(currentTarget); } catch (e) {}
+			try { if (typeof refreshLogs === 'function') refreshLogs(); } catch (e) {}
 		}
 		zapretBadgeEl.style.cursor = 'pointer';
 		zapretBadgeEl.addEventListener('click', function() {

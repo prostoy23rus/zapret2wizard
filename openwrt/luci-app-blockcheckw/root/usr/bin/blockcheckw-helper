@@ -975,6 +975,24 @@ cmd_results() {
     if [ -f "$f" ]; then cat "$f"; else printf '{"target":"%s","strategies":[]}\n' "$t"; fi
 }
 
+# Провайдеры (РФ) отдают NXDOMAIN на заблокированные домены, и сканер
+# падает с "DNS resolve failed" ещё до подбора. В таком случае переключаем
+# сканер на DoH: резолв идёт по HTTPS и блокировка DNS его не ломает.
+scan_dns_mode() {
+    local d="$1" out
+    [ -n "$d" ] || { echo auto; return 0; }
+    out=$(nslookup "$d" 127.0.0.1 2>&1)
+    case "$out" in
+        *"can't find"*|*NXDOMAIN*|*SERVFAIL*|"") ;;
+        *) echo auto; return 0 ;;
+    esac
+    out=$(nslookup "$d" 2>&1)
+    case "$out" in
+        *"can't find"*|*NXDOMAIN*|*SERVFAIL*|"") echo doh ;;
+        *) echo auto ;;
+    esac
+}
+
 # Если домен заворачивается в туннель, честный подбор невозможен.
 # Возвращает признак (fake-ip или имя интерфейса), иначе пусто.
 scan_tunnel_service() {
@@ -1220,11 +1238,19 @@ cmd_start() {
         # ломали подбор на другом роутере. Свой HOME на прогон это отсекает.
         local scan_qnum=$(pick_scan_qnum)
         local scan_home=/tmp/bcw_scan_home
+        local scan_dns=$(scan_dns_mode "$domain")
+        # Не все сборки сканера знают --profiles-per-instance: ставим флаг только
+        # если он реально есть, иначе вторая фаза падала с ошибкой аргументов.
+        local profiles_opt=""
+        if /usr/bin/blockcheckw scan --help 2>/dev/null | grep -q 'profiles-per-instance'; then
+            profiles_opt="--profiles-per-instance 64"
+        fi
+        [ "$scan_dns" = "doh" ] && echo "[blockcheckw-helper] DNS заблокирован провайдером — подбор через DoH" >> "$LOG_FILE"
         mkdir -p "$scan_home" 2>/dev/null || true
         echo "[blockcheckw-helper] Очередь подбора: $scan_qnum" >> "$LOG_FILE"
 
         # Phase 1: Fast diagnostic probe (3-6s)
-        HOME="$scan_home" /usr/bin/blockcheckw --qnum "$scan_qnum" -w "$workers" scan -d "$domain" -p "$protocols" --dns auto --from-file "$probe_corpus" -o "$probe_output" --auto --timeout 120 >> "$LOG_FILE" 2>&1
+        HOME="$scan_home" /usr/bin/blockcheckw --qnum "$scan_qnum" -w "$workers" scan -d "$domain" -p "$protocols" --dns "$scan_dns" --from-file "$probe_corpus" -o "$probe_output" --auto --timeout 120 >> "$LOG_FILE" 2>&1
 
         local probe_eval=$(lua - "$probe_output" << 'EOF' 2>/dev/null
 local json = require("luci.jsonc")
@@ -1351,7 +1377,7 @@ EOF
             local adapt_cnt=$(grep -c '^curl_test_' "$adaptive_corpus" 2>/dev/null || echo 0)
             echo "[blockcheckw-helper] [Smart Scan] Generated $adapt_cnt targeted permutations for DPI vector matrix." >> "$LOG_FILE"
 
-            HOME="$scan_home" /usr/bin/blockcheckw --qnum "$scan_qnum" --profiles-per-instance 64 -w "$workers" scan -d "$domain" -p "$protocols" --dns auto --timeout 600 --from-file "$adaptive_corpus" -o "$adaptive_output" --auto --progress >> "$LOG_FILE" 2>&1 &
+            HOME="$scan_home" /usr/bin/blockcheckw --qnum "$scan_qnum" $profiles_opt -w "$workers" scan -d "$domain" -p "$protocols" --dns "$scan_dns" --timeout 600 --from-file "$adaptive_corpus" -o "$adaptive_output" --auto --progress >> "$LOG_FILE" 2>&1 &
             local bcw_child=$!
             echo "$bcw_child" > "$PID_FILE"
 
@@ -4431,7 +4457,7 @@ EVOSEED
     local evo_home=/tmp/bcw_evolve_home
     mkdir -p "$evo_home" 2>/dev/null || true
     echo "  проба (scan), очередь $evo_qnum..."
-    HOME="$evo_home" /usr/bin/blockcheckw --qnum "$evo_qnum" -w 2 scan -d "$domain" -p tls12,tls13 --dns auto \
+    HOME="$evo_home" /usr/bin/blockcheckw --qnum "$evo_qnum" -w 2 scan -d "$domain" -p tls12,tls13 --dns "$(scan_dns_mode "$domain")" \
         --from-file "$corpus" -o "$scan" --auto --timeout 600 >/tmp/bcw_evolve_scan.log 2>&1 || true
     # scan пишет либо JSON, либо текстовый список "--payload=..." — считаем оба
     local scan_found=$(grep -c '^--' "$scan" 2>/dev/null)

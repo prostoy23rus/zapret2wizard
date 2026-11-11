@@ -57,6 +57,21 @@ jobs:
           path: out/blockcheckw-${{ matrix.openwrt_arch }}
           retention-days: 14
 
+      # Установщик качает именно blockcheckw-linux-<arch>.tar.gz с релиза.
+      # Без этого ассета он падал на апстрим и ставил старый сканер (v0.12.1).
+      - name: Pack scanner tarball for installer
+        run: |
+          mkdir -p tarout
+          cp target/${{ matrix.target }}/release/blockcheckw tarout/blockcheckw
+          tar -czf "out/blockcheckw-linux-${{ matrix.engine }}.tar.gz" -C tarout blockcheckw
+          ls -l out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scanner-tar-${{ matrix.engine }}
+          path: out/blockcheckw-linux-${{ matrix.engine }}.tar.gz
+          retention-days: 14
+
   package:
     name: package ${{ matrix.openwrt_arch }}
     needs: scanner
@@ -148,6 +163,11 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           pattern: packages-*
+          merge-multiple: true
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: scanner-tar-*
           merge-multiple: true
           path: dist
       - uses: softprops/action-gh-release@v2
