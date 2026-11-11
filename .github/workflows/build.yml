@@ -63,13 +63,13 @@ jobs:
         run: |
           mkdir -p tarout
           cp target/${{ matrix.target }}/release/blockcheckw tarout/blockcheckw
-          tar -czf "out/blockcheckw-linux-${{ matrix.engine }}.tar.gz" -C tarout blockcheckw
+          tar -czf "out/blockcheckw-${{ matrix.engine }}.tar.gz" -C tarout blockcheckw
           ls -l out
 
       - uses: actions/upload-artifact@v4
         with:
           name: scanner-tar-${{ matrix.engine }}
-          path: out/blockcheckw-linux-${{ matrix.engine }}.tar.gz
+          path: out/blockcheckw-${{ matrix.engine }}.tar.gz
           retention-days: 14
 
   package:
