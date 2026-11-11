@@ -1,11 +1,11 @@
 {
-  "version": "0.19.5",
+  "version": "0.19.6",
   "release_date": "2026-11-12",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "Исправлены имена ассетов сканера в релизе: blockcheckw-linux-arm64.tar.gz (раньше получалось blockcheckw-linux-linux-arm64.tar.gz, и установщик не находил файл)",
-    "Подбор на доменах с NXDOMAIN идёт через DoH; страница не перезагружается во время подбора",
-    "В релизе: ipk, apk, bundle и tar.gz со сканером для aarch64, arm и x86_64"
+    "Диагностический отчёт больше не пишет «none configured» при живых стратегиях: читаются option script/enabled/hostlist, а не только name/strategy",
+    "В отчёте переименован блок активных процессов сканера",
+    "DoH-подбор для доменов с NXDOMAIN, тихое обновление страницы без перезагрузки и правильные имена ассетов сканера — из 0.19.4–0.19.5"
   ]
 }

@@ -5142,9 +5142,9 @@ local zeroblock_status = run_cmd("/etc/init.d/zeroblock status 2>/dev/null")
 local nfqws_procs = run_cmd("ps | grep -E 'nfqws2' | grep -v grep")
 local bcw_procs = run_cmd("ps | grep -E 'blockcheckw' | grep -v grep")
 local nft_tables = run_cmd("nft list tables 2>/dev/null")
-local zapret_uci = run_cmd("uci show zapret2wizard 2>/dev/null | grep -E '\\.name=|\\.strategy=|\\.dual_circuit=|\\.ports=' | head -n 35")
+local zapret_uci = run_cmd("uci show zapret2wizard 2>/dev/null | grep -E '\\.name=|\\.strategy=|\\.script=|\\.enabled=|\\.hostlist=|\\.dual_circuit=|\\.ports=' | head -n 35")
 if zapret_uci == "" then
-    zapret_uci = run_cmd("uci show zapret2 2>/dev/null | grep -E '\\.name=|\\.strategy=|\\.dual_circuit=|\\.ports=' | head -n 35")
+    zapret_uci = run_cmd("uci show zapret2 2>/dev/null | grep -E '\\.name=|\\.strategy=|\\.script=|\\.enabled=|\\.hostlist=|\\.dual_circuit=|\\.ports=' | head -n 35")
 end
 local dns_servers = run_cmd("cat /etc/resolv.conf 2>/dev/null | grep -E '^nameserver' | tr '\\n' ', '")
 local ggc_diag = run_cmd("curl -4 -s -k --connect-timeout 2 -m 3 'https://redirector.googlevideo.com/report_mapping?di=no'")
@@ -5197,7 +5197,7 @@ local report_lines = {
     "ZeroBlock status: " .. (zeroblock_status ~= "" and zeroblock_status or "not installed / stopped"),
     "Running nfqws2 processes:",
     nfqws_procs ~= "" and nfqws_procs or "  (none)",
-    "Active blockcheckw processes:",
+    "Active scanner processes:",
     bcw_procs ~= "" and bcw_procs or "  (none)",
     "Nftables tables:",
     nft_tables ~= "" and nft_tables or "  (none)",

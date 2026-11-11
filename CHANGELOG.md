@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.19.6] (2026-11-12)
+
+### Диагностика видит стратегии
+
+В отчёте было «Configured Zapret2 Strategies (UCI): (none configured)»,
+хотя стратегии есть: диагностика искала option name/strategy, а в конфиге
+хранятся script/enabled/hostlist.
+
+* в выборку добавлены script, enabled, hostlist;
+* блок «Active blockcheckw processes» переименован в «Active scanner
+  processes»;
+* остальное — из 0.19.4–0.19.5: DoH для доменов с NXDOMAIN, тихое
+  обновление UI без перезагрузки, правильные имена ассетов сканера.
+
 ## [0.19.5] (2026-11-12)
 
 ### Имена ассетов сканера
