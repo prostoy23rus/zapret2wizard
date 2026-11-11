@@ -539,12 +539,49 @@ if [ "${NFQWS2_MISSING:-0}" = "1" ]; then
     echo -e "  cp /tmp/nfq /usr/bin/nfqws2 && chmod +x /usr/bin/nfqws2"
     exit 1
 fi
+# Модули ядра зависят от версии ядра и не входят в наш пакет — доставляем их
+# сами из фида прошивки, а не просим пользователя делать это руками.
 modprobe nfnetlink_queue 2>/dev/null || true
 modprobe nft_queue 2>/dev/null || true
 if [ ! -d /sys/module/nfnetlink_queue ] || [ ! -d /sys/module/nft_queue ]; then
+    echo -e "${BLUE}ℹ${NC} Доустанавливаю модули ядра nfqueue (kmod-nfnetlink-queue, kmod-nft-queue)..."
+    if [ -x /usr/bin/blockcheckw-helper ]; then
+        /usr/bin/blockcheckw-helper kmods_install >/dev/null 2>&1 || true
+    fi
+    modprobe nfnetlink_queue 2>/dev/null || true
+    modprobe nft_queue 2>/dev/null || true
+    if [ ! -d /sys/module/nfnetlink_queue ] || [ ! -d /sys/module/nft_queue ]; then
+        if command -v opkg >/dev/null 2>&1; then
+            opkg update >/dev/null 2>&1 || true
+            opkg install kmod-nfnetlink-queue kmod-nft-queue >/dev/null 2>&1 || true
+        elif command -v apk >/dev/null 2>&1; then
+            apk update >/dev/null 2>&1 || true
+            apk add kmod-nfnetlink-queue kmod-nft-queue >/dev/null 2>&1 || true
+        fi
+        modprobe nfnetlink_queue 2>/dev/null || true
+        modprobe nft_queue 2>/dev/null || true
+    fi
+fi
+if [ ! -d /sys/module/nfnetlink_queue ] || [ ! -d /sys/module/nft_queue ]; then
     echo -e "${RED}[ERROR] Не загружаются модули nfqueue для ядра $(uname -r).${NC}"
-    echo -e "${YELLOW}Установите kmod-nfnetlink-queue и kmod-nft-queue из репозитория прошивки:${NC}"
+    echo -e "${YELLOW}В фиде прошивки нет подходящих kmod-пакетов. Проверьте:${NC}"
     echo -e "  opkg update && opkg install kmod-nfnetlink-queue kmod-nft-queue"
+    echo -e "  (на apk-прошивках: apk add kmod-nfnetlink-queue kmod-nft-queue)"
+    exit 1
+fi
+# nftables нужен и службе, и сканеру.
+if ! command -v nft >/dev/null 2>&1; then
+    echo -e "${BLUE}ℹ${NC} Устанавливаю nftables..."
+    if command -v opkg >/dev/null 2>&1; then
+        opkg update >/dev/null 2>&1 || true
+        opkg install nftables >/dev/null 2>&1 || true
+    elif command -v apk >/dev/null 2>&1; then
+        apk add nftables >/dev/null 2>&1 || true
+    fi
+fi
+if ! command -v nft >/dev/null 2>&1; then
+    echo -e "${RED}[ERROR] nftables не установлен и не ставится из фида прошивки.${NC}"
+    echo -e "${YELLOW}Установите пакет nftables и повторите.${NC}"
     exit 1
 fi
 
