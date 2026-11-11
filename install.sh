@@ -430,7 +430,7 @@ if [ "$need_fakes" = "1" ]; then
         printf '.'
     done
     echo ""
-    kill -9 "$fake_pid" 2>/dev/null
+    kill -9 "$fake_pid" 2>/dev/null || true
     echo -e "${GREEN}✓${NC} fake-блобов установлено: $(ls "$FAKES_DIR" 2>/dev/null | wc -l)"
 fi
 
@@ -448,7 +448,7 @@ while kill -0 "$lists_pid" 2>/dev/null && [ "$waited" -lt 40 ]; do
     sleep 3
     waited=$((waited + 3))
 done
-kill -9 "$lists_pid" 2>/dev/null
+kill -9 "$lists_pid" 2>/dev/null || true
 for ipset_file in zapret_hosts_youtube.txt zapret_hosts_discord.txt zapret_hosts_x.txt zapret_hosts_instagram.txt zapret_hosts_twitch.txt zapret_hosts_user.txt zapret_hosts_user_exclude.txt zapret_hosts_auto.txt; do
     [ -f "/etc/zapret2wizard/ipset/$ipset_file" ] || cp -f "/usr/share/zapret2wizard/ipset/$ipset_file" "/etc/zapret2wizard/ipset/$ipset_file" 2>/dev/null || true
 done
@@ -528,7 +528,7 @@ fi
 
 chmod 644 /www/luci-static/resources/view/blockcheckw/main.js
 chmod 644 /usr/share/blockcheckw/* /usr/share/luci/menu.d/luci-app-blockcheckw.json /usr/share/rpcd/acl.d/luci-app-blockcheckw.json 2>/dev/null || true
-[ -f /etc/hotplug.d/firewall/90-zapret2wizard-bypass ] && chmod 755 /etc/hotplug.d/firewall/90-zapret2wizard-bypass
+[ -f /etc/hotplug.d/firewall/90-zapret2wizard-bypass ] && chmod 755 /etc/hotplug.d/firewall/90-zapret2wizard-bypass || true
 
 # Инициализация списков хостов для сервисов в Zapret2
 /usr/bin/blockcheckw-helper ensure_hostlists >/dev/null 2>&1 || true
