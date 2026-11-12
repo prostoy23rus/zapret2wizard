@@ -935,7 +935,6 @@ return view.extend({
 		}, [
 			zapretBadgeEl,
 			themeSelectEl,
-			btnHostlists,
 			btnSvcStart,
 			btnSvcStop,
 			btnSvcRestart,
@@ -1366,10 +1365,14 @@ return view.extend({
 					E('div', { class: 'bcw-tile-meta' }, rowMetaOf(ch))
 				])
 			];
-			if (chip) children.push(E('span', { class: 'bcw-chip ' + chip.cls }, chip.text));
+			var right = E('span', { style: 'margin-left:auto; display:inline-flex; align-items:center; gap:6px;' });
+			// Фиксированная ширина бейджа и карандаша: кнопки не гуляют по строке.
+			right.appendChild(chip
+				? E('span', { class: 'bcw-chip ' + chip.cls, style: 'min-width:88px; justify-content:center; text-align:center;' }, chip.text)
+				: E('span', { style: 'min-width:88px;' }));
 			var svcForEdit = (zapretInfo && zapretInfo.services) ? zapretInfo.services[rowKeyOf(ch.id)] : null;
-			children.push(E('span', {
-				style: 'cursor:pointer;padding:2px 7px;border:1px solid var(--bcw-border-sub);border-radius:6px;font-size:12px;color:var(--bcw-text-muted);',
+			right.appendChild(E('span', {
+				style: 'width:24px; text-align:center; cursor:pointer;padding:2px 0;border:1px solid var(--bcw-border-sub);border-radius:6px;font-size:12px;color:var(--bcw-text-muted);',
 				title: 'Изменить стратегию nfqws2',
 				click: function(e) {
 					e.stopPropagation();
@@ -1377,7 +1380,8 @@ return view.extend({
 				}
 			}, '✎'));
 			var sw = serviceSwitchFor(ch.id);
-			if (sw) children.push(sw);
+			if (sw) right.appendChild(sw);
+			children.push(right);
 			var btn = E('div', {
 				class: 'bcw-tile-btn' + (currentTarget === ch.id ? ' active' : ''),
 				click: function() { selectTarget(ch.id); }
@@ -2469,6 +2473,13 @@ return view.extend({
 				click: function() { switchMainTab(def.id); }
 			}, def.label));
 		});
+		// Списки доменов — в том же ряду, что и вкладки, а не в шапке.
+		mainTabBar.appendChild(E('button', {
+			class: 'bcw-main-tab',
+			style: 'margin-left: auto;',
+			title: 'Просмотр и правка списков доменов, которые обходит служба',
+			click: function() { showHostlistsModal(zapretInfo.hostlists); }
+		}, '📋 Списки доменов'));
 
 		mainLayout.appendChild(mainTabBar);
 		mainTabDefs.forEach(function(def) {
@@ -3509,6 +3520,36 @@ return view.extend({
 			return m ? m[1] : 'прочее';
 		}
 
+		// Быстрое применение найденной стратегии к текущему выбранному сервису.
+		function applyStrategyFromCard(args, btn) {
+			var label = (PRESET_DEFS[currentTarget] && PRESET_DEFS[currentTarget].name) || currentTarget;
+			var oldText = btn.textContent;
+			btn.disabled = true;
+			btn.textContent = '⏳ Применяю...';
+			fs.exec(HELPER_BIN, ['apply', '--target', currentTarget, '--script', args]).then(function(res) {
+				var out = parseHelperJson(res) || {};
+				if (out.success) {
+					if (out.all_ok) {
+						ui.addNotification(null, E('p', {}, '✓ Стратегия применена и проверена: ' + label), 'info');
+					} else {
+						ui.addNotification(null, E('p', {}, '⚠ Стратегия записана, но трафик не подтвердился — проверьте сервис'), 'warning');
+					}
+				} else {
+					ui.addNotification(null, E('p', {}, '✗ Не удалось применить: ' + (out.error || 'ошибка')), 'danger');
+				}
+				return getZapretInfo();
+			}).then(function(info) {
+				zapretInfo = info || zapretInfo;
+				updateSummaryBox();
+				updateActiveStrategyDisplay();
+			}).catch(function(err) {
+				ui.addNotification(null, E('p', {}, '✗ Ошибка применения: ' + err), 'danger');
+			}).then(function() {
+				btn.disabled = false;
+				btn.textContent = oldText;
+			});
+		}
+
 		function renderStrategyCards(strategies) {
 			resultsCard.style.display = 'block';
 			strategiesListEl.innerHTML = '';
@@ -3587,6 +3628,14 @@ return view.extend({
 							E('strong', { style: 'color: #61afef; font-size: 12.5px;' }, 'Одиночная стратегия'),
 							E('span', { class: 'badge bcw-strat-family', style: 'background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); color: #98c379; font-size: 11px; font-weight: 600;' }, stratFamilyOf(sText)),
 						]),
+						E('div', { style: 'margin-left: auto; display: flex; align-items: center; gap: 8px;' }, [
+							E('button', {
+								class: 'bcw-btn-sm cbi-button cbi-button-action',
+								style: 'height: 28px; padding: 0 12px; font-size: 12px; font-weight: 600; white-space: nowrap;',
+								title: 'Применить эту стратегию к выбранному сервису',
+								click: function() { applyStrategyFromCard(sText, this); }
+							}, '⚡ Применить')
+						])
 					]),
 					E('pre', {
 						class: 'bcw-code-box',
@@ -4220,7 +4269,7 @@ return view.extend({
 
 				var btnEdit = E('button', {
 					class: 'bcw-btn-secondary',
-					style: 'height: 30px; font-size: 12px;',
+					style: 'height: 30px; font-size: 12px; min-width: 116px; justify-content: center;',
 					click: function() {
 						var opening = (editor.style.display === 'none');
 						editor.style.display = opening ? 'block' : 'none';
@@ -4244,23 +4293,21 @@ return view.extend({
 				return E('div', {
 					style: 'padding: 10px 14px; background: rgba(255,255,255,0.03); border: 1px solid #383e4a; border-radius: 6px; margin-bottom: 8px;'
 				}, [
-					E('div', { style: 'display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;' }, [
-						E('div', {}, [
+					E('div', { style: 'display: grid; grid-template-columns: minmax(0,1fr) 160px 128px; align-items: center; column-gap: 12px;' }, [
+						E('div', { style: 'min-width: 0;' }, [
 							E('div', { style: 'font-weight: bold; color: #e5e9f0; font-size: 13px; display: flex; align-items: center; gap: 6px;' }, [
 								E('span', { style: 'color: ' + (isOk ? '#98c379' : '#e5c07b') }, isOk ? '✓' : '⚠️'),
 								hl.name
 							]),
-							E('div', { style: 'font-size: 11.5px; color: #abb2bf; font-family: monospace; margin-top: 3px;' }, hl.file)
+							E('div', { style: 'font-size: 11.5px; color: #abb2bf; font-family: monospace; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;' }, hl.file)
 						]),
-						E('div', { style: 'display: flex; align-items: center; gap: 10px;' }, [
-							E('div', { style: 'text-align: right;' }, [
-								E('div', { style: 'font-weight: bold; color: ' + (count > 0 ? '#98c379' : '#e06c75') + '; font-size: 13px;' },
-									count + ' доменов'),
-								E('div', { style: 'font-size: 11px; color: ' + (hl.uci_configured === false ? '#e5c07b' : '#61afef') + ';' },
-									(hl.uci_configured === false ? (count > 0 ? 'Нет стратегии — запустите поиск' : 'Список пуст') : 'Zapret2 подключен'))
-							]),
-							btnEdit
-						])
+						E('div', { style: 'text-align: right;' }, [
+							E('div', { style: 'font-weight: bold; color: ' + (count > 0 ? '#98c379' : '#e06c75') + '; font-size: 13px;' },
+								count + ' доменов'),
+							E('div', { style: 'font-size: 11px; white-space: nowrap; color: ' + (hl.uci_configured === false ? '#e5c07b' : '#61afef') + ';' },
+								(hl.uci_configured === false ? (count > 0 ? 'Нет стратегии — запустите поиск' : 'Список пуст') : 'Zapret2 подключен'))
+						]),
+						E('div', { style: 'display: flex; justify-content: flex-end;' }, [ btnEdit ])
 					]),
 					editor
 				]);
