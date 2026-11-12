@@ -2140,28 +2140,40 @@ return view.extend({
 			function renderTop(d) {
 				topBox.innerHTML = '';
 				var recipes = (d && d.recipes) || {};
-				var bannedSet = {};
+				var bannedMap = {};
+				var nowSec = Math.floor(Date.now() / 1000);
 				Object.keys((d && d.banned) || {}).forEach(function(dom) {
 					(((d.banned || {})[dom]) || []).forEach(function(it) {
 						var h = (typeof it === 'string') ? it : (it && it.h);
-						if (h) bannedSet[h] = true;
+						var ts = (typeof it === 'string') ? 0 : ((it && it.ts) || 0);
+						var active = (ts === 0) || ((nowSec - ts) <= 7 * 24 * 3600);
+						if (h && active) bannedMap[h] = { dom: dom, fails: (it && it.fails) || 1 };
 					});
 				});
+				var hiddenBans = 0;
 				var arr = Object.keys(recipes).map(function(k) {
 					var r = recipes[k] || {};
 					var ok = r.ok || 0, fail = r.fail || 0;
 					var ewma = r.ewma || 0;
 					var speed = 1;
 					if (ewma > 0) speed = Math.min(1, 1000 / Math.max(ewma, 100));
-					return { key: k, args: String(r.args || ''), ok: ok, fail: fail, ewma: ewma, score: ((ok + 1) / (ok + fail + 2)) * (0.5 + 0.5 * speed) };
-				}).filter(function(r) { return r.ok + r.fail > 0 && !bannedSet[r.key]; }).sort(function(a, b) { return b.score - a.score; }).slice(0, 6);
-				if (!arr.length) return;
+					return { key: k, args: String(r.args || ''), ok: ok, fail: fail, ewma: ewma, ban: bannedMap[k] || null, score: ((ok + 1) / (ok + fail + 2)) * (0.5 + 0.5 * speed) };
+				}).filter(function(r) {
+					if (r.ok + r.fail <= 0) return false;
+					if (r.ban && r.ban.fails >= 2) { hiddenBans++; return false; }
+					return true;
+				}).sort(function(a, b) { return b.score - a.score; }).slice(0, 6);
+				if (!arr.length && !hiddenBans) return;
 				topBox.appendChild(E('div', { style: 'font-size: 12px; color: #61afef; font-weight: 600; margin-bottom: 6px;' }, '🏆 Топ рецептов по success-rate'));
+				if (hiddenBans) topBox.appendChild(E('div', { style: 'font-size: 11px; color: #abb2bf; margin-bottom: 6px;' }, 'Скрыто уверенных банов: ' + hiddenBans + ' (детали — в списке неудачных)'));
 				arr.forEach(function(r) {
 					var a = r.args;
 					if (a.length > 80) a = a.slice(0, 80) + '…';
 					topBox.appendChild(E('div', { style: 'display: grid; grid-template-columns: minmax(0,1fr) 70px 62px 70px; align-items: center; gap: 10px; padding: 7px 10px; border: 1px solid var(--bcw-border-sub); border-radius: 6px; margin-bottom: 5px;' }, [
-						E('div', { style: 'font-family: monospace; font-size: 11px; color: #c8ccd4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;', title: r.args }, a || '—'),
+						E('div', {}, [
+							E('div', { style: 'font-family: monospace; font-size: 11px; color: #c8ccd4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;', title: r.args }, a || '—'),
+							(r.ban ? E('div', { style: 'font-size: 10.5px; color: #e5c07b;' }, '⛔ бан: ' + r.ban.dom + (r.ban.fails > 1 ? ' ×' + r.ban.fails : '')) : E('span', { style: 'display: none;' }))
+						]),
 						E('div', { style: 'font-size: 11.5px; text-align: right; color: ' + (r.score >= 0.6 ? '#98c379' : '#e5c07b') + ';' }, Math.round(r.score * 100) + '%'),
 						E('div', { style: 'font-size: 11px; text-align: right; color: #abb2bf;' }, '✓' + r.ok + ' / ✗' + r.fail),
 						E('div', { style: 'font-size: 11px; text-align: right; color: #abb2bf;' }, r.ewma ? (r.ewma + ' мс') : '—')

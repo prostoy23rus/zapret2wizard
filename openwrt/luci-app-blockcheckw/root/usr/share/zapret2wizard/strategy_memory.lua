@@ -2,6 +2,7 @@
 local json = require("luci.jsonc")
 local FILE = "/etc/zapret2wizard/strategy_memory.json"
 local TTL = 7 * 24 * 3600
+local BAN_TTL = 7 * 24 * 3600
 local a = { ... }
 local cmd = a[1] or "stats"
 
@@ -87,6 +88,14 @@ elseif cmd == "put" then
     d.domains[dom] = { recipe = recipe, ts = now(), ip = ip, net = net, verified = (ok == "1"), fails = 0 }
     if net then d.subnets[net] = { recipe = recipe, ts = now() } end
     local key = h(recipe)
+    if ok == "1" and d.banned[dom] then
+        local kept = {}
+        for _, v in ipairs(d.banned[dom]) do
+            local vh = (type(v) == "table") and v.h or v
+            if vh ~= key then table.insert(kept, v) end
+        end
+        d.banned[dom] = kept
+    end
     local r = d.recipes[key] or { args = normalize(recipe), ok = 0, fail = 0 }
     if ok == "1" then r.ok = (r.ok or 0) + 1 else r.fail = (r.fail or 0) + 1 end
     if ms > 0 then
@@ -103,11 +112,14 @@ elseif cmd == "ban" then
     local list = d.banned[dom] or {}
     local kh = h(recipe)
     local kept = {}
+    local prev = nil
     for _, v in ipairs(list) do
         local vh = (type(v) == "table") and v.h or v
-        if vh ~= kh then table.insert(kept, v) end
+        if vh == kh then prev = v else table.insert(kept, v) end
     end
-    table.insert(kept, 1, { h = kh, ts = now(), reason = reason, args = normalize(recipe) })
+    local fails = 1
+    if type(prev) == "table" and prev.fails then fails = (prev.fails or 1) + 1 end
+    table.insert(kept, 1, { h = kh, ts = now(), reason = reason, args = normalize(recipe), fails = fails })
     while #kept > 32 do table.remove(kept) end
     d.banned[dom] = kept
     local key = h(recipe)
@@ -138,7 +150,9 @@ elseif cmd == "filter" then
     local banned = {}
     for _, item in ipairs(d.banned[dom] or {}) do
         local kh = (type(item) == "table") and item.h or item
-        if kh then banned[kh] = true end
+        local ts = (type(item) == "table") and (item.ts or 0) or 0
+        local active = (ts == 0) or ((now() - ts) <= BAN_TTL)
+        if kh and active then banned[kh] = true end
     end
     local removed = 0
     local f = io.open(file, "r")
