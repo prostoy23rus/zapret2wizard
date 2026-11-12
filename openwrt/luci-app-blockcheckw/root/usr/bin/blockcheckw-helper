@@ -443,6 +443,11 @@ ensure_firewall_quic_reject() {
 HOSTLISTS_REV="2026-11-13.1-ai-spotify"
 HOSTLISTS_MARKER="/etc/zapret2wizard/.hostlists.rev"
 
+# Память стратегий (L1 домен / L2 подсеть / L3 статистика / бан-маска).
+MEM_LUA="/usr/share/zapret2wizard/strategy_memory.lua"
+mem() { [ -f "$MEM_LUA" ] && lua "$MEM_LUA" "$@" 2>/dev/null; }
+domain_ip() { nslookup -type=a "$1" 127.0.0.1 2>/dev/null | sed -n 's/Address: //p' | grep -E '^[0-9.]+$' | tail -1; }
+
 # Быстрая проверка: все списки на месте, секции и правило QUIC заведены.
 # Нужна, чтобы не гонять полный ensure на каждый вызов info из интерфейса.
 _hostlists_ready() {
@@ -1346,6 +1351,24 @@ cmd_start() {
 
         generate_smart_probe_corpus "$target" "$domain" "$probe_corpus"
 
+        # L1/L2: если для домена или его /24 уже есть проверенная стратегия —
+        # ставим её первой; забаненные для домена рецепты из корпуса убираем.
+        local dom_ip=$(domain_ip "$domain")
+        local seed_json=$(mem get "$domain" "$dom_ip")
+        local seed_recipe=$(printf '%s' "$seed_json" | sed -n 's/.*"recipe":"\([^"]*\)".*/\1/p')
+        if [ -n "$seed_recipe" ]; then
+            local seed_src=$(printf '%s' "$seed_json" | sed -n 's/.*"source":"\([^"]*\)".*/\1/p')
+            local seed_tmp="$probe_corpus.seed"
+            { echo "# --- $seed_src memory seed ---"; \
+              echo "curl_test_https_tls12 ipv4 $domain : nfqws2 $seed_recipe"; \
+              echo "curl_test_https_tls13 ipv4 $domain : nfqws2 $seed_recipe"; \
+              cat "$probe_corpus"; } > "$seed_tmp" && mv -f "$seed_tmp" "$probe_corpus"
+            echo "[blockcheckw-helper] Memory seed ($seed_src): $seed_recipe" >> "$LOG_FILE"
+        fi
+        local mem_removed=$(mem filter "$domain" "$probe_corpus" | sed -n 's/.*"removed":\([0-9]*\).*/\1/p')
+        [ -n "$mem_removed" ] && [ "$mem_removed" -gt 0 ] && echo "[blockcheckw-helper] Memory ban: убрано $mem_removed кандидатов" >> "$LOG_FILE"
+        true
+
         # Сканер хранит «память прошлых запусков» в $HOME/.config/blockcheckw.
         # Унаследованные от ручных прогонов умолчания (domain_list, dns) молча
         # ломали подбор на другом роутере. Свой HOME на прогон это отсекает.
@@ -1833,6 +1856,13 @@ EOF
             fi
 
             if [ "$apply_ok" = "1" ]; then
+                local rec_recipe="$best_single"
+                [ "$circular_used" = "1" ] && rec_recipe="$circ_text"
+                [ -n "$rec_recipe" ] || rec_recipe="$circ_text"
+                if [ -n "$rec_recipe" ]; then
+                    local rec_json=$(mem put "$domain" "$(domain_ip "$domain")" "$rec_recipe" 1)
+                    echo "[blockcheckw-helper] Memory L1/L2: $rec_json" >> "$LOG_FILE"
+                fi
                 # Приложение YouTube использует отдельный SNI youtubei.googleapis.com;
                 # если он закрыт — добавляем отдельный профиль YTApi (проверено на МТС).
                 case "$target" in
@@ -1843,6 +1873,8 @@ EOF
                 [ -n "$stab_circ" ] && apply_info="$apply_info,\"stability_circular\":\"$stab_circ\""
                 apply_info="$apply_info,\"circular_reason\":\"$circular_reason\""
             elif [ "$tried" -gt 0 ]; then
+                [ -n "${best_single:-}" ] && mem ban "$domain" "$best_single" >/dev/null 2>&1 || true
+                [ -n "${circ_text:-}" ] && mem ban "$domain" "$circ_text" >/dev/null 2>&1 || true
                 if [ -s "$cfg_backup" ]; then
                     cp -f "$cfg_backup" "/etc/config/$cfg_pkg"
                     rm -f /tmp/blockcheckw_apply_result.json
@@ -3945,6 +3977,14 @@ cmd_doctor() {
         add_check "lua-библиотеки" 0 "нет /opt/zapret2/lua/zapret-lib.lua" "Перезапустите службу или выполните install.sh: nfqws2 не найдёт Lua"
     fi
 
+    # Память стратегий (L1 домен / L2 /24 / бан-маска): просто показываем размер.
+    local mem_stats=$(mem stats 2>/dev/null)
+    local mem_domains=$(printf '%s' "$mem_stats" | sed -n 's/.*"domains":\([0-9]*\).*/\1/p')
+    [ -n "$mem_domains" ] || mem_domains=0
+    local mem_banned=$(printf '%s' "$mem_stats" | sed -n 's/.*"banned":\([0-9]*\).*/\1/p')
+    [ -n "$mem_banned" ] || mem_banned=0
+    add_check "память стратегий" 1 "$mem_domains доменов, $mem_banned банов" ""
+
     if [ -x /usr/bin/blockcheckw ]; then add_check "сканер blockcheckw" 1 "$(/usr/bin/blockcheckw --version 2>/dev/null | head -1)" ""; else add_check "сканер blockcheckw" 0 "бинарник не найден" "Переустановите службу через install.sh"; fi
 
     if [ -f /etc/config/zapret2wizard ]; then add_check "конфигурация" 1 "/etc/config/zapret2wizard" ""; else add_check "конфигурация" 0 "нет /etc/config/zapret2wizard" "Запустите /etc/init.d/zapret2wizard restart — файл создаётся при старте"; fi
@@ -4433,6 +4473,10 @@ cmd_health_tick() {
 
     echo 0 > "$counter"
     echo "$now" > "$last"
+    # Память: два сбоя домена подряд → помечаем стратегию непроверенной (L1),
+    # снимаем /24-запись и уходим в переобучение.
+    local mem_res=$(mem fail "www.youtube.com")
+    echo "[health] memory fail: $mem_res" >> /tmp/bcw_evolve.log 2>/dev/null || true
     echo "{\"healthy\":false,\"fails\":2,\"action\":\"evolve\",\"target\":\"$target\"}"
     ( /usr/bin/blockcheckw-helper evolve --target "$target" --count 8 --verify 2 --tests 2 --sleep 2 >>/tmp/bcw_evolve.log 2>&1 & ) || true
 }
@@ -5969,6 +6013,10 @@ case "$1" in
     uninstall) shift; cmd_uninstall "$@" ;;
     diag) shift; cmd_diag "$@" ;;
     ensure_hostlists) shift; cmd_ensure_hostlists "$@" ;;
+    memory_stats) mem stats ;;
+    memory_dump) mem dump ;;
+    memory_clear) mem clear ;;
+    memory_fail) shift; mem fail "$@" ;;
     read_hostlist) shift; cmd_read_hostlist "$@" ;;
     add_hostlist_domain) shift; cmd_add_hostlist_domain "$@" ;;
     remove_hostlist_domain) shift; cmd_remove_hostlist_domain "$@" ;;

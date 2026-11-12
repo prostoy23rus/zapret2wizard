@@ -393,6 +393,8 @@ chmod +x /usr/bin/blockcheckw-helper 2>/dev/null || true
 fetch_file "openwrt/luci-app-blockcheckw/root/usr/bin/circular-builder.lua" /usr/bin/circular-builder.lua 8 || true
 fetch_req "openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/uci2config" /usr/share/zapret2wizard/uci2config 8
 fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/evolve.lua" /usr/share/zapret2wizard/evolve.lua 8 || true
+fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/strategy_memory.lua" /usr/share/zapret2wizard/strategy_memory.lua 8 || true
+chmod 644 /usr/share/zapret2wizard/strategy_memory.lua 2>/dev/null || true
 fetch_file "strategies/zapret2_presets.json" /usr/share/blockcheckw/zapret2_presets.json 8 || true
 fetch_req "openwrt/version.json" /usr/share/blockcheckw/version.json 8
 fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/luci/menu.d/luci-app-blockcheckw.json" /usr/share/luci/menu.d/luci-app-blockcheckw.json 8 || true

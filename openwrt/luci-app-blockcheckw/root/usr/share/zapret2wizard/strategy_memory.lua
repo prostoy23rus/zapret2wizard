@@ -1,0 +1,159 @@
+-- Память стратегий: L1 домен, L2 /24, L3 статистика рецептов, бан-маска.
+local json = require("luci.jsonc")
+local FILE = "/etc/zapret2wizard/strategy_memory.json"
+local TTL = 7 * 24 * 3600
+local a = { ... }
+local cmd = a[1] or "stats"
+
+local function load()
+    local d = { domains = {}, subnets = {}, recipes = {}, banned = {} }
+    local f = io.open(FILE, "r")
+    if f then
+        local ok, parsed = pcall(json.parse, f:read("*a"))
+        f:close()
+        if ok and type(parsed) == "table" then
+            d.domains = parsed.domains or {}
+            d.subnets = parsed.subnets or {}
+            d.recipes = parsed.recipes or {}
+            d.banned = parsed.banned or {}
+        end
+    end
+    return d
+end
+
+local function save(d)
+    local f = io.open(FILE, "w")
+    if not f then return false end
+    f:write(json.stringify(d))
+    f:close()
+    return true
+end
+
+local function normalize(s)
+    s = tostring(s or ""):gsub("%s+", " ")
+    s = s:gsub("^%s+", ""):gsub("%s+$", "")
+    return s
+end
+
+local function h(s)
+    local x = 5381
+    s = normalize(s)
+    for i = 1, #s do x = (x * 33 + s:byte(i)) % 2147483647 end
+    return "h" .. tostring(x)
+end
+
+local function ip24(ip)
+    if not ip then return nil end
+    local p = ip:match("^(%d+%.%d+%.%d+)%.")
+    return p and (p .. ".0/24") or nil
+end
+
+local function now() return os.time() end
+local function fresh(e)
+    return e and e.ts and (now() - e.ts) <= TTL
+end
+
+local function out(t) print(json.stringify(t)) end
+
+if cmd == "stats" then
+    local d = load()
+    local nd, ns, nr, nb = 0, 0, 0, 0
+    for _ in pairs(d.domains) do nd = nd + 1 end
+    for _ in pairs(d.subnets) do ns = ns + 1 end
+    for _ in pairs(d.recipes) do nr = nr + 1 end
+    for _, list in pairs(d.banned) do nb = nb + #list end
+    out({ domains = nd, subnets = ns, recipes = nr, banned = nb, ttl = TTL })
+elseif cmd == "get" then
+    local dom, ip = a[2] or "", a[3] or ""
+    local d = load()
+    local e = d.domains[dom]
+    if fresh(e) and e.verified and e.recipe and e.recipe ~= "" then
+        out({ recipe = e.recipe, source = "L1", ts = e.ts })
+        return
+    end
+    local net = ip24(ip)
+    local s = net and d.subnets[net] or nil
+    if fresh(s) and s.recipe and s.recipe ~= "" then
+        out({ recipe = s.recipe, source = "L2", ts = s.ts, net = net })
+        return
+    end
+    out({})
+elseif cmd == "put" then
+    local dom, ip, recipe, ok = a[2] or "", a[3] or "", a[4] or "", a[5] or "1"
+    if dom == "" or recipe == "" then out({ ok = false, error = "domain/recipe required" }) return end
+    local d = load()
+    local net = ip24(ip)
+    d.domains[dom] = { recipe = recipe, ts = now(), ip = ip, net = net, verified = (ok == "1"), fails = 0 }
+    if net then d.subnets[net] = { recipe = recipe, ts = now() } end
+    local key = h(recipe)
+    local r = d.recipes[key] or { args = normalize(recipe), ok = 0, fail = 0 }
+    if ok == "1" then r.ok = (r.ok or 0) + 1 else r.fail = (r.fail or 0) + 1 end
+    r.ts = now()
+    d.recipes[key] = r
+    out({ ok = save(d), source = net and "L1+L2" or "L1" })
+elseif cmd == "ban" then
+    local dom, recipe = a[2] or "", a[3] or ""
+    if dom == "" or recipe == "" then out({ ok = false }) return end
+    local d = load()
+    local list = d.banned[dom] or {}
+    local kh = h(recipe)
+    local exists = false
+    for _, v in ipairs(list) do if v == kh then exists = true end end
+    if not exists then
+        table.insert(list, 1, kh)
+        while #list > 32 do table.remove(list) end
+    end
+    d.banned[dom] = list
+    local key = h(recipe)
+    local r = d.recipes[key] or { args = normalize(recipe), ok = 0, fail = 0 }
+    r.fail = (r.fail or 0) + 1
+    r.ts = now()
+    d.recipes[key] = r
+    out({ ok = save(d), banned = #list })
+elseif cmd == "fail" then
+    local dom = a[2] or ""
+    local d = load()
+    local e = d.domains[dom]
+    if not e or not e.recipe then out({ stale = false, tracked = false }) return end
+    e.fails = (e.fails or 0) + 1
+    local stale = false
+    if e.fails >= 2 then
+        e.verified = false
+        e.fails = 0
+        stale = true
+        if e.net and d.subnets[e.net] then d.subnets[e.net] = nil end
+    end
+    d.domains[dom] = e
+    save(d)
+    out({ stale = stale, tracked = true, fails = e.fails })
+elseif cmd == "filter" then
+    local file, dom = a[2] or "", a[3] or ""
+    local d = load()
+    local banned = {}
+    for _, kh in ipairs(d.banned[dom] or {}) do banned[kh] = true end
+    local removed = 0
+    local f = io.open(file, "r")
+    if not f then out({ removed = 0 }); return end
+    local lines = {}
+    for line in f:lines() do
+        local args = line:match(": nfqws2%s+(.+)$")
+        if args and banned[h(args)] then
+            removed = removed + 1
+        else
+            table.insert(lines, line)
+        end
+    end
+    f:close()
+    if removed > 0 then
+        local o = io.open(file, "w")
+        if o then o:write(table.concat(lines, "\n") .. "\n"); o:close() end
+    end
+    out({ removed = removed })
+elseif cmd == "clear" then
+    os.remove(FILE)
+    out({ ok = true })
+elseif cmd == "dump" then
+    out(load())
+else
+    out({ error = "unknown command" })
+end
