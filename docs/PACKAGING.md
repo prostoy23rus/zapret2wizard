@@ -15,9 +15,10 @@
 
 ```sh
 cd /tmp
-wget -O bcw.tgz "https://raw.githubusercontent.com/prostoy23rus/zapret2wizard/main/dist/zapret2wizard-0.18.9-aarch64_cortex-a53-bundle.tar.gz"
+# ссылку на bundle берите со страницы последнего релиза
+wget -O bcw.tgz "https://github.com/prostoy23rus/zapret2wizard/releases/latest/download/zapret2wizard-<версия>-<арх>-bundle.tar.gz"
 tar -xzf bcw.tgz
-cd zapret2wizard-0.18.9-aarch64_cortex-a53
+cd zapret2wizard-*
 sh install.sh
 ```
 
