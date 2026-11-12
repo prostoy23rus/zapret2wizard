@@ -490,24 +490,29 @@ _hostlists_ready() {
 # Удалённые пресеты AI/Spotify: чистим секции и списки на существующих установках.
 purge_removed_presets() {
     local marker="/etc/zapret2wizard/.removed_ai_spotify"
-    [ -f "$marker" ] && return 0
-    local pkg sec
-    for pkg in zapret2 zapret2wizard; do
-        [ -f "/etc/config/$pkg" ] || continue
-        for sec in $(uci -q show "$pkg" 2>/dev/null | sed -n "s/^$pkg\.\([A-Za-z0-9_]*\)=.*/\1/p" | grep -E '^(BlockcheckW_AI|BlockcheckW_AI_[0-9]+|BlockcheckW_Spotify|BlockcheckW_Spotify_[0-9]+|list_hosts_ai|list_hosts_spotify)$'); do
-            uci -q delete "$pkg.$sec" 2>/dev/null || true
+    local mem_marker="${marker}.mem"
+    local pkg sec d
+    if [ ! -f "$marker" ]; then
+        for pkg in zapret2 zapret2wizard; do
+            [ -f "/etc/config/$pkg" ] || continue
+            for sec in $(uci -q show "$pkg" 2>/dev/null | sed -n "s/^$pkg\.\([A-Za-z0-9_]*\)=.*/\1/p" | grep -E '^(BlockcheckW_AI|BlockcheckW_AI_[0-9]+|BlockcheckW_Spotify|BlockcheckW_Spotify_[0-9]+|list_hosts_ai|list_hosts_spotify)$'); do
+                uci -q delete "$pkg.$sec" 2>/dev/null || true
+            done
+            uci -q commit "$pkg" 2>/dev/null || true
         done
-        uci -q commit "$pkg" 2>/dev/null || true
-    done
-    rm -f /etc/zapret2wizard/ipset/zapret_hosts_ai.txt /etc/zapret2wizard/ipset/zapret_hosts_spotify.txt 2>/dev/null || true
-    rm -f /usr/share/zapret2wizard/ipset/zapret_hosts_ai.txt /usr/share/zapret2wizard/ipset/zapret_hosts_spotify.txt 2>/dev/null || true
-    # Убираем из памяти домены и баны удалённых пресетов.
-    local d
-    for d in chatgpt.com openai.com claude.ai anthropic.com gemini.google.com copilot.microsoft.com perplexity.ai deepseek.com open.spotify.com api.spotify.com i.scdn.co scdn.co pscdn.co; do
-        mem forget "$d" >/dev/null 2>&1 || true
-    done
-    [ -x /usr/share/zapret2wizard/uci2config ] && /usr/share/zapret2wizard/uci2config >/dev/null 2>&1 || true
-    touch "$marker"
+        rm -f /etc/zapret2wizard/ipset/zapret_hosts_ai.txt /etc/zapret2wizard/ipset/zapret_hosts_spotify.txt 2>/dev/null || true
+        rm -f /usr/share/zapret2wizard/ipset/zapret_hosts_ai.txt /usr/share/zapret2wizard/ipset/zapret_hosts_spotify.txt 2>/dev/null || true
+        [ -x /usr/share/zapret2wizard/uci2config ] && /usr/share/zapret2wizard/uci2config >/dev/null 2>&1 || true
+        touch "$marker"
+    fi
+    if [ ! -f "$mem_marker" ]; then
+        # Убираем из памяти домены и баны удалённых пресетов (отдельный маркер,
+        # чтобы очистка выполнилась и на установках, уже прошедших purge секций).
+        for d in chatgpt.com openai.com claude.ai anthropic.com gemini.google.com copilot.microsoft.com perplexity.ai deepseek.com open.spotify.com api.spotify.com i.scdn.co scdn.co pscdn.co; do
+            mem forget "$d" >/dev/null 2>&1 || true
+        done
+        touch "$mem_marker"
+    fi
 }
 
 ensure_all_hostlists() {
