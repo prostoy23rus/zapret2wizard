@@ -284,6 +284,25 @@ _uci_set_list_if_missing() {
     fi
 }
 
+# Обновление пресет-листов: объединяем поставку с /etc, сохраняя правки пользователя.
+# Пользовательские user/user_exclude не трогаем: это его собственные списки.
+cmd_hostlists_merge() {
+    local share="/usr/share/zapret2wizard/ipset" etc="/etc/zapret2wizard/ipset"
+    local b src dst tmp
+    mkdir -p "$etc" 2>/dev/null || true
+    local changed=0
+    for b in zapret_hosts_youtube.txt zapret_hosts_discord.txt zapret_hosts_x.txt zapret_hosts_instagram.txt zapret_hosts_twitch.txt; do
+        src="$share/$b"; dst="$etc/$b"
+        [ -f "$src" ] || continue
+        if [ ! -f "$dst" ]; then cp -f "$src" "$dst" 2>/dev/null && changed=1; continue; fi
+        tmp="/tmp/bcw_hl_$$.add"
+        awk 'NR==FNR{seen[tolower($0)]=1; next} {d=tolower($0); if (d != "" && !(d in seen)) { print d; seen[d]=1 }}' "$dst" "$src" > "$tmp" 2>/dev/null || true
+        if [ -s "$tmp" ]; then cat "$tmp" >> "$dst"; changed=1; fi
+        rm -f "$tmp"
+    done
+    chmod 644 "$etc"/*.txt 2>/dev/null || true
+    echo "{\"changed\":$changed}"
+}
 ensure_preset_hostlist() {
     local tgt="$1"
     local custom_dom="$2"
@@ -5873,6 +5892,7 @@ kmods_resolve) shift; _kmods_fetch_official "$@" dry ;;
 fix_ytapi) cmd_fix_ytapi ;;
 ensure_ytapi) cmd_ensure_ytapi ;;
 ensure_lua) cmd_ensure_lua ;;
+hostlists_merge) cmd_hostlists_merge ;;
 ttl_probe) shift; cmd_ttl_probe "$@" ;;
 quic_probe) cmd_quic_probe && echo ok || echo fail ;;
 quic_mode) shift; cmd_quic_mode "$@" ;;

@@ -231,6 +231,9 @@ prepare_environment() {
 		done
 	fi
 
+	# Подтягиваем новые домены из поставки в /etc-списки (union, правки сохраняются).
+	[ -x /usr/bin/blockcheckw-helper ] && /usr/bin/blockcheckw-helper hostlists_merge >/dev/null 2>&1 || true
+
 	# Backward compatibility symlinks for legacy /opt/zapret2 paths
 	mkdir -p /opt/zapret2/files /opt/zapret2/init.d/openwrt 2>/dev/null || true
 	[ -e /opt/zapret2/files/fake ] || ln -sf "$FAKE_DIR" /opt/zapret2/files/fake 2>/dev/null || true
