@@ -1377,6 +1377,32 @@ cmd_start() {
             history_add "scan_pause" "$(metric_target_key "$target")" "Служба остановлена на время подбора"
         fi
         : > /tmp/bcw_scan_paused
+
+        # AI/Spotify: базовый домен может открываться без обхода, а CDN —
+        # нет. Сканер по базовому домену скажет "not_blocked" и не станет
+        # искать. Проверяем все эндпоинты пресета и при необходимости
+        # переключаем домен сканирования на заблокированный CDN.
+        case "$target" in
+            preset_ai|preset_spotify)
+                local pre_json pre_bad pre_host
+                pre_json=$(cmd_test "$target" "" 2>/dev/null)
+                if printf '%s' "$pre_json" | grep -q '"all_ok":true'; then
+                    mkdir -p /tmp/bcw_results 2>/dev/null
+                    printf '{"target":"%s","ts":%s,"strategies":[]}\n' "$target" "$(date +%s)" > "/tmp/bcw_results/$target.json" 2>/dev/null || true
+                    write_status "done" 100 "Сервис доступен без обхода — стратегии не нужны"
+                    rm -f /tmp/bcw_scan_paused
+                    ( /etc/init.d/zapret2wizard start >/dev/null 2>&1 & ) || true
+                    exit 0
+                fi
+                pre_bad=$(printf '%s' "$pre_json" | tr '{' '\n' | grep '"accessible":false' | grep -o '"url":"[^"]*"' | head -1 | cut -d'"' -f4 | tr -d '\\')
+                pre_host=$(printf '%s' "$pre_bad" | sed -E 's#^https?://##; s#/.*##')
+                if [ -n "$pre_host" ] && [ "$pre_host" != "$domain" ]; then
+                    echo "[blockcheckw-helper] Scan domain switch: base $domain accessible, blocked endpoint $pre_host" >> "$LOG_FILE"
+                    domain="$pre_host"
+                fi
+                ;;
+        esac
+
             # Сторож: если процесс подбора умрёт (перезагрузка страницы, kill), служба
             # всё равно вернётся. Без этого пользователь оставался без обхода.
             (
