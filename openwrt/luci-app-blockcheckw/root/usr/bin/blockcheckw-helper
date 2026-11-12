@@ -295,10 +295,18 @@ cmd_hostlists_merge() {
         src="$share/$b"; dst="$etc/$b"
         [ -f "$src" ] || continue
         if [ ! -f "$dst" ]; then cp -f "$src" "$dst" 2>/dev/null && changed=1; continue; fi
-        tmp="/tmp/bcw_hl_$$.add"
-        awk 'NR==FNR{seen[tolower($0)]=1; next} {d=tolower($0); if (d != "" && !(d in seen)) { print d; seen[d]=1 }}' "$dst" "$src" > "$tmp" 2>/dev/null || true
-        if [ -s "$tmp" ]; then cat "$tmp" >> "$dst"; changed=1; fi
-        rm -f "$tmp"
+        base="/tmp/bcw_hl_base_$$"; add="/tmp/bcw_hl_add_$$"; out="/tmp/bcw_hl_out_$$"
+        # CRLF и дубли из старых поставок: нормализуем и схлопываем, иначе
+        # union добавляет те же домены второй раз (discord 70 → 134).
+        tr -d '\r' < "$dst" > "$base" 2>/dev/null || cp -f "$dst" "$base"
+        tr -d '\r' < "$src" > "$add" 2>/dev/null || cp -f "$src" "$add"
+        awk 'NR==FNR{seen[tolower($0)]=1; next} {d=tolower($0); if (d != "" && !(d in seen)) { print d; seen[d]=1 }}' "$base" "$add" > "$out" 2>/dev/null || true
+        if [ -s "$out" ]; then cat "$out" >> "$base"; changed=1; fi
+        awk '!seen[tolower($0)]++' "$base" > "$out" 2>/dev/null || true
+        if [ -s "$out" ]; then
+            cmp -s "$out" "$dst" || { cp -f "$out" "$dst"; changed=1; }
+        fi
+        rm -f "$base" "$add" "$out"
     done
     chmod 644 "$etc"/*.txt 2>/dev/null || true
     echo "{\"changed\":$changed}"
