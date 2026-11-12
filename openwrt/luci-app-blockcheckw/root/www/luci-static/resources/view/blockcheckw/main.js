@@ -1381,6 +1381,7 @@ return view.extend({
 			}, '✎'));
 			var sw = serviceSwitchFor(ch.id);
 			if (sw) right.appendChild(sw);
+			else right.appendChild(E('span', { style: 'width: 38px; display: inline-block;' }));
 			children.push(right);
 			var btn = E('div', {
 				class: 'bcw-tile-btn' + (currentTarget === ch.id ? ' active' : ''),
