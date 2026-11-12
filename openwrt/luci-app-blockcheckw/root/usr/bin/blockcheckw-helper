@@ -1883,8 +1883,8 @@ EOF
                 [ -n "$stab_circ" ] && apply_info="$apply_info,\"stability_circular\":\"$stab_circ\""
                 apply_info="$apply_info,\"circular_reason\":\"$circular_reason\""
             elif [ "$tried" -gt 0 ]; then
-                [ -n "${best_single:-}" ] && mem ban "$domain" "$best_single" >/dev/null 2>&1 || true
-                [ -n "${circ_text:-}" ] && mem ban "$domain" "$circ_text" >/dev/null 2>&1 || true
+                [ -n "${best_single:-}" ] && mem ban "$domain" "$best_single" "применение не подтвердилось" >/dev/null 2>&1 || true
+                [ -n "${circ_text:-}" ] && mem ban "$domain" "$circ_text" "circular не прошла проверку" >/dev/null 2>&1 || true
                 if [ -s "$cfg_backup" ]; then
                     cp -f "$cfg_backup" "/etc/config/$cfg_pkg"
                     rm -f /tmp/blockcheckw_apply_result.json

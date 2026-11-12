@@ -2133,6 +2133,7 @@ return view.extend({
 			var stats = E('div', { style: 'font-size: 12px; color: #abb2bf; margin: 6px 0 10px;' }, 'Загрузка...');
 			var list = E('div', { style: 'display: flex; flex-direction: column; gap: 6px;' });
 			var topBox = E('div', { style: 'margin-top: 14px;' });
+			var bansBox = E('div', { style: 'margin-top: 14px;' });
 			var refreshBtn = E('button', { class: 'bcw-btn-secondary', style: 'height: 30px; font-size: 12px;' }, '🔄 Обновить');
 			var clearBtn = E('button', { class: 'bcw-btn-secondary', style: 'height: 30px; font-size: 12px; color: #e06c75;' }, '🧹 Очистить память');
 
@@ -2142,7 +2143,10 @@ return view.extend({
 				var arr = Object.keys(recipes).map(function(k) {
 					var r = recipes[k] || {};
 					var ok = r.ok || 0, fail = r.fail || 0;
-					return { key: k, args: String(r.args || ''), ok: ok, fail: fail, ewma: r.ewma || 0, score: (ok + 1) / (ok + fail + 2) };
+					var ewma = r.ewma || 0;
+					var speed = 1;
+					if (ewma > 0) speed = Math.min(1, 1000 / Math.max(ewma, 100));
+					return { key: k, args: String(r.args || ''), ok: ok, fail: fail, ewma: ewma, score: ((ok + 1) / (ok + fail + 2)) * (0.5 + 0.5 * speed) };
 				}).filter(function(r) { return r.ok + r.fail > 0; }).sort(function(a, b) { return b.score - a.score; }).slice(0, 6);
 				if (!arr.length) return;
 				topBox.appendChild(E('div', { style: 'font-size: 12px; color: #61afef; font-weight: 600; margin-bottom: 6px;' }, '🏆 Топ рецептов по success-rate'));
@@ -2154,6 +2158,39 @@ return view.extend({
 						E('div', { style: 'font-size: 11.5px; text-align: right; color: ' + (r.score >= 0.6 ? '#98c379' : '#e5c07b') + ';' }, Math.round(r.score * 100) + '%'),
 						E('div', { style: 'font-size: 11px; text-align: right; color: #abb2bf;' }, '✓' + r.ok + ' / ✗' + r.fail),
 						E('div', { style: 'font-size: 11px; text-align: right; color: #abb2bf;' }, r.ewma ? (r.ewma + ' мс') : '—')
+					]));
+				});
+			}
+
+			function renderBans(d) {
+				bansBox.innerHTML = '';
+				var banned = (d && d.banned) || {};
+				var items = [];
+				Object.keys(banned).forEach(function(dom) {
+					(banned[dom] || []).forEach(function(it) {
+						if (typeof it === 'string') { items.push({ dom: dom, args: '', reason: '', ts: 0 }); return; }
+						items.push({ dom: dom, args: String(it.args || ''), reason: String(it.reason || ''), ts: it.ts || 0 });
+					});
+				});
+				items.sort(function(a, b) { return b.ts - a.ts; });
+				items = items.slice(0, 8);
+				if (!items.length) return;
+				bansBox.appendChild(E('div', { style: 'font-size: 12px; color: #e06c75; font-weight: 600; margin-bottom: 6px;' }, '⛔ Последние неудачные рецепты'));
+				items.forEach(function(it) {
+					var a = it.args || 'ранняя запись без деталей';
+					if (a.length > 80) a = a.slice(0, 80) + '…';
+					var ago = '';
+					if (it.ts > 0) {
+						var m = Math.max(1, Math.round((Date.now() / 1000 - it.ts) / 60));
+						ago = m < 60 ? (m + ' мин назад') : (Math.round(m / 60) + ' ч назад');
+					}
+					bansBox.appendChild(E('div', { style: 'display: grid; grid-template-columns: minmax(0,1fr) 120px 90px; align-items: center; gap: 10px; padding: 7px 10px; border: 1px solid var(--bcw-border-sub); border-radius: 6px; margin-bottom: 5px;' }, [
+						E('div', {}, [
+							E('div', { style: 'font-family: monospace; font-size: 11px; color: #c8ccd4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;', title: it.args }, a),
+							E('div', { style: 'font-size: 11px; color: #e06c75;' }, (it.reason || 'без причины') + (it.dom ? ' · ' + it.dom : ''))
+						]),
+						E('div', { style: 'font-size: 11px; color: #abb2bf; text-align: right;' }, it.dom),
+						E('div', { style: 'font-size: 11px; color: #abb2bf; text-align: right;' }, ago)
 					]));
 				});
 			}
@@ -2170,6 +2207,7 @@ return view.extend({
 				if (!keys.length) {
 					list.appendChild(E('div', { style: 'font-size: 12.5px; color: #abb2bf;' }, 'Память пуста: записи появятся после успешного применения стратегий.'));
 					renderTop(d);
+					renderBans(d);
 					return;
 				}
 				keys.sort();
@@ -2194,6 +2232,7 @@ return view.extend({
 					]));
 				});
 				renderTop(d);
+				renderBans(d);
 			}
 
 			function load() {
@@ -2214,6 +2253,7 @@ return view.extend({
 			root.appendChild(stats);
 			root.appendChild(list);
 			root.appendChild(topBox);
+			root.appendChild(bansBox);
 			return root;
 		}
 

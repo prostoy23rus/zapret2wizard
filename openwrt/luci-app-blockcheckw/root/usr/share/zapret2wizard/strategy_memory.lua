@@ -97,17 +97,19 @@ elseif cmd == "put" then
     out({ ok = save(d), source = net and "L1+L2" or "L1" })
 elseif cmd == "ban" then
     local dom, recipe = a[2] or "", a[3] or ""
+    local reason = a[4] or ""
     if dom == "" or recipe == "" then out({ ok = false }) return end
     local d = load()
     local list = d.banned[dom] or {}
     local kh = h(recipe)
-    local exists = false
-    for _, v in ipairs(list) do if v == kh then exists = true end end
-    if not exists then
-        table.insert(list, 1, kh)
-        while #list > 32 do table.remove(list) end
+    local kept = {}
+    for _, v in ipairs(list) do
+        local vh = (type(v) == "table") and v.h or v
+        if vh ~= kh then table.insert(kept, v) end
     end
-    d.banned[dom] = list
+    table.insert(kept, 1, { h = kh, ts = now(), reason = reason, args = normalize(recipe) })
+    while #kept > 32 do table.remove(kept) end
+    d.banned[dom] = kept
     local key = h(recipe)
     local r = d.recipes[key] or { args = normalize(recipe), ok = 0, fail = 0 }
     r.fail = (r.fail or 0) + 1
@@ -134,7 +136,10 @@ elseif cmd == "filter" then
     local file, dom = a[2] or "", a[3] or ""
     local d = load()
     local banned = {}
-    for _, kh in ipairs(d.banned[dom] or {}) do banned[kh] = true end
+    for _, item in ipairs(d.banned[dom] or {}) do
+        local kh = (type(item) == "table") and item.h or item
+        if kh then banned[kh] = true end
+    end
     local removed = 0
     local f = io.open(file, "r")
     if not f then out({ removed = 0 }); return end
@@ -175,8 +180,16 @@ elseif cmd == "rank" then
             local r = d.recipes[h(args)]
             local ok = (r and r.ok) or 0
             local fail = (r and r.fail) or 0
-            -- Laplace: не даём одному успеху перевесить статистику
-            local score = (ok + 1) / (ok + fail + 2)
+            -- Laplace-успех, умноженный на скоростной вес: EWMA 300 мс и
+            -- быстрее — полный вес, 3000 мс — примерно 0.67.
+            local base = (ok + 1) / (ok + fail + 2)
+            local ewma = (r and r.ewma) or 0
+            local speed = 1
+            if ewma > 0 then
+                speed = 1000 / math.max(ewma, 100)
+                if speed > 1 then speed = 1 end
+            end
+            local score = base * (0.5 + 0.5 * speed)
             table.insert(items, { line = line, score = score, idx = idx })
         else
             table.insert(comments, line)
