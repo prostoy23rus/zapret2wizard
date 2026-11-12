@@ -333,7 +333,7 @@ cmd_hostlists_merge() {
     local b src dst tmp
     mkdir -p "$etc" 2>/dev/null || true
     local changed=0
-    for b in zapret_hosts_youtube.txt zapret_hosts_discord.txt zapret_hosts_x.txt zapret_hosts_instagram.txt zapret_hosts_twitch.txt zapret_hosts_ai.txt zapret_hosts_spotify.txt; do
+    for b in zapret_hosts_youtube.txt zapret_hosts_discord.txt zapret_hosts_x.txt zapret_hosts_instagram.txt zapret_hosts_twitch.txt; do
         src="$share/$b"; dst="$etc/$b"
         [ -f "$src" ] || continue
         if [ ! -f "$dst" ]; then cp -f "$src" "$dst" 2>/dev/null && changed=1; continue; fi
@@ -375,21 +375,6 @@ ensure_preset_hostlist() {
                 "threads.net" "gateway.instagram.com" "static.cdninstagram.com" \
                 "graph.instagram.com" "i.instagram.com"
             _uci_set_list_if_missing list_hosts_instagram "$ig_file"
-            ;;
-        preset_ai|ai)
-            local ai_file="$ipset_dir/zapret_hosts_ai.txt"
-            _add_domains_if_missing "$ai_file" \
-                "chatgpt.com" "openai.com" "claude.ai" "anthropic.com" \
-                "gemini.google.com" "copilot.microsoft.com" "perplexity.ai" \
-                "deepseek.com" "huggingface.co" "openrouter.ai"
-            _uci_set_list_if_missing list_hosts_ai "$ai_file"
-            ;;
-        preset_spotify|spotify)
-            local sp_file="$ipset_dir/zapret_hosts_spotify.txt"
-            _add_domains_if_missing "$sp_file" \
-                "open.spotify.com" "api.spotify.com" "spotify.com" \
-                "scdn.co" "pscdn.co" "soundcloud.com" "sndcdn.com"
-            _uci_set_list_if_missing list_hosts_spotify "$sp_file"
             ;;
         preset_twitch|twitch)
             local tw_file="$ipset_dir/zapret_hosts_twitch.txt"
@@ -502,7 +487,26 @@ _hostlists_ready() {
     return 0
 }
 
+# Удалённые пресеты AI/Spotify: чистим секции и списки на существующих установках.
+purge_removed_presets() {
+    local marker="/etc/zapret2wizard/.removed_ai_spotify"
+    [ -f "$marker" ] && return 0
+    local pkg sec
+    for pkg in zapret2 zapret2wizard; do
+        [ -f "/etc/config/$pkg" ] || continue
+        for sec in $(uci -q show "$pkg" 2>/dev/null | sed -n "s/^$pkg\.\([A-Za-z0-9_]*\)=.*/\1/p" | grep -E '^(BlockcheckW_AI|BlockcheckW_AI_[0-9]+|BlockcheckW_Spotify|BlockcheckW_Spotify_[0-9]+|list_hosts_ai|list_hosts_spotify)$'); do
+            uci -q delete "$pkg.$sec" 2>/dev/null || true
+        done
+        uci -q commit "$pkg" 2>/dev/null || true
+    done
+    rm -f /etc/zapret2wizard/ipset/zapret_hosts_ai.txt /etc/zapret2wizard/ipset/zapret_hosts_spotify.txt 2>/dev/null || true
+    rm -f /usr/share/zapret2wizard/ipset/zapret_hosts_ai.txt /usr/share/zapret2wizard/ipset/zapret_hosts_spotify.txt 2>/dev/null || true
+    [ -x /usr/share/zapret2wizard/uci2config ] && /usr/share/zapret2wizard/uci2config >/dev/null 2>&1 || true
+    touch "$marker"
+}
+
 ensure_all_hostlists() {
+    purge_removed_presets
     if [ "$(cat "$HOSTLISTS_MARKER" 2>/dev/null)" = "$HOSTLISTS_REV" ] && _hostlists_ready; then
         return 0
     fi
@@ -531,8 +535,6 @@ ensure_all_hostlists() {
     ensure_preset_hostlist "preset_discord"
     ensure_preset_hostlist "preset_x"
     ensure_preset_hostlist "preset_instagram"
-    ensure_preset_hostlist "preset_ai"
-    ensure_preset_hostlist "preset_spotify"
     ensure_preset_hostlist "preset_twitch"
     ensure_preset_hostlist "builtin"
 
@@ -1221,16 +1223,6 @@ cmd_start() {
             [ -n "$domain" ] || domain="gateway.instagram.com"
             protocols="tls12,tls13"
             ;;
-        preset_ai|ai)
-            domain=$(get_preset_param "preset_ai" "domain")
-            [ -n "$domain" ] || domain="chatgpt.com"
-            protocols="tls12,tls13"
-            ;;
-        preset_spotify|spotify)
-            domain=$(get_preset_param "preset_spotify" "domain")
-            [ -n "$domain" ] || domain="open.spotify.com"
-            protocols="tls12,tls13"
-            ;;
         tcp16)
             domain=$(get_preset_param "tcp16" "domain")
             [ -n "$domain" ] || domain="discord.com"
@@ -1382,26 +1374,6 @@ cmd_start() {
         # нет. Сканер по базовому домену скажет "not_blocked" и не станет
         # искать. Проверяем все эндпоинты пресета и при необходимости
         # переключаем домен сканирования на заблокированный CDN.
-        case "$target" in
-            preset_ai|preset_spotify)
-                local pre_json pre_bad pre_host
-                pre_json=$(cmd_test "$target" "" 2>/dev/null)
-                if printf '%s' "$pre_json" | grep -q '"all_ok":true'; then
-                    mkdir -p /tmp/bcw_results 2>/dev/null
-                    printf '{"target":"%s","ts":%s,"strategies":[]}\n' "$target" "$(date +%s)" > "/tmp/bcw_results/$target.json" 2>/dev/null || true
-                    write_status "done" 100 "Сервис доступен без обхода — стратегии не нужны"
-                    rm -f /tmp/bcw_scan_paused
-                    ( /etc/init.d/zapret2wizard start >/dev/null 2>&1 & ) || true
-                    exit 0
-                fi
-                pre_bad=$(printf '%s' "$pre_json" | tr '{' '\n' | grep '"accessible":false' | grep -o '"url":"[^"]*"' | head -1 | cut -d'"' -f4 | tr -d '\\')
-                pre_host=$(printf '%s' "$pre_bad" | sed -E 's#^https?://##; s#/.*##')
-                if [ -n "$pre_host" ] && [ "$pre_host" != "$domain" ]; then
-                    echo "[blockcheckw-helper] Scan domain switch: base $domain accessible, blocked endpoint $pre_host" >> "$LOG_FILE"
-                    domain="$pre_host"
-                fi
-                ;;
-        esac
 
             # Сторож: если процесс подбора умрёт (перезагрузка страницы, kill), служба
             # всё равно вернётся. Без этого пользователь оставался без обхода.
@@ -2367,20 +2339,6 @@ cmd_apply() {
             hostlist="list_hosts_instagram"
             test_url="https://gateway.instagram.com"
             ;;
-        preset_ai|ai)
-            base_sec="BlockcheckW_AI"
-            port="443"
-            l7="tls"
-            hostlist="list_hosts_ai"
-            test_url="https://chatgpt.com"
-            ;;
-        preset_spotify|spotify)
-            base_sec="BlockcheckW_Spotify"
-            port="443"
-            l7="tls"
-            hostlist="list_hosts_spotify"
-            test_url="https://open.spotify.com"
-            ;;
         tcp16)
             base_sec="BlockcheckW_TCP16"
             port="443"
@@ -2589,8 +2547,6 @@ cmd_activate() {
         preset_twitch|twitch) base_sec="BlockcheckW_Twitch" ;;
         preset_x|x) base_sec="BlockcheckW_X" ;;
         preset_instagram|instagram) base_sec="BlockcheckW_Instagram" ;;
-        preset_ai|ai) base_sec="BlockcheckW_AI" ;;
-        preset_spotify|spotify) base_sec="BlockcheckW_Spotify" ;;
         tcp16) base_sec="BlockcheckW_TCP16" ;;
         builtin|general) base_sec="BlockcheckW_General" ;;
         *)
@@ -2923,8 +2879,6 @@ metric_target_key() {
         preset_youtube|youtube) echo "youtube" ;;
         preset_discord|discord) echo "discord" ;;
         preset_instagram|instagram) echo "instagram" ;;
-        preset_ai|ai) echo "ai" ;;
-        preset_spotify|spotify) echo "spotify" ;;
         preset_x|x) echo "x" ;;
         preset_twitch|twitch) echo "twitch" ;;
         builtin|general|user) echo "general" ;;
@@ -2940,8 +2894,6 @@ target_domain() {
         preset_twitch|twitch) echo "twitch.tv" ;;
         preset_x|x) echo "x.com" ;;
         preset_instagram|instagram) echo "gateway.instagram.com" ;;
-        preset_ai|ai) echo "chatgpt.com" ;;
-        preset_spotify|spotify) echo "open.spotify.com" ;;
         builtin|general) echo "rutracker.org" ;;
         *) echo "" ;;
     esac
@@ -3418,8 +3370,6 @@ cmd_toggle_service() {
         preset_twitch|twitch) base_sec="BlockcheckW_Twitch" ;;
         preset_x|x) base_sec="BlockcheckW_X" ;;
         preset_instagram|instagram) base_sec="BlockcheckW_Instagram" ;;
-        preset_ai|ai) base_sec="BlockcheckW_AI" ;;
-        preset_spotify|spotify) base_sec="BlockcheckW_Spotify" ;;
         builtin|general|user) base_sec="BlockcheckW_General" ;;
         *) printf '{"success":false,"error":"Unknown target: %s"}\n' "$target"; return 1 ;;
     esac
@@ -4626,7 +4576,7 @@ cmd_health_tick() {
     # подряд по сервису → L1-запись помечается непроверенной, /24 снимается,
     # запускается переобучение именно этого сервиса.
     local any_fail=0 spawned=0 tgt sec cfile n dom mres
-    for tgt in preset_youtube preset_discord preset_twitch preset_x preset_instagram preset_ai preset_spotify; do
+    for tgt in preset_youtube preset_discord preset_twitch preset_x preset_instagram; do
         sec=$(_strategy_section "$tgt")
         [ -n "$sec" ] || continue
         uci -q get "zapret2wizard.$sec.enabled" 2>/dev/null | grep -q '^1$' || continue
@@ -4807,8 +4757,6 @@ cmd_genome_apply() {
         preset_discord|discord) sec="BlockcheckW_Discord" ;;
         preset_x|x)             sec="BlockcheckW_X" ;;
         preset_instagram|instagram) sec="BlockcheckW_Instagram" ;;
-        preset_ai|ai) sec="BlockcheckW_AI" ;;
-        preset_spotify|spotify) sec="BlockcheckW_Spotify" ;;
         preset_twitch|twitch)   sec="BlockcheckW_Twitch" ;;
         *)                      sec="BlockcheckW_General" ;;
     esac
@@ -4831,8 +4779,6 @@ _strategy_section() {
         preset_twitch|twitch) echo "BlockcheckW_Twitch" ;;
         preset_x|x) echo "BlockcheckW_X" ;;
         preset_instagram|instagram) echo "BlockcheckW_Instagram" ;;
-        preset_ai|ai) echo "BlockcheckW_AI" ;;
-        preset_spotify|spotify) echo "BlockcheckW_Spotify" ;;
         builtin|general|domains) echo "BlockcheckW_General" ;;
         *) echo "" ;;
     esac
@@ -5058,8 +5004,6 @@ cmd_evolve() {
         preset_twitch|twitch) domain="twitch.tv" ;;
         preset_x|x) domain="x.com" ;;
         preset_instagram|instagram) domain="instagram.com" ;;
-        preset_ai|ai) domain="chatgpt.com" ;;
-        preset_spotify|spotify) domain="open.spotify.com" ;;
     esac
 
     local evo="/usr/share/zapret2wizard/evolve.lua"
@@ -5310,8 +5254,6 @@ cmd_info() {
             { key = "x", name = "X (Twitter)", fname = "zapret_hosts_x.txt", uci_sec = "list_hosts_x" },
             { key = "instagram", name = "Instagram", fname = "zapret_hosts_instagram.txt", uci_sec = "list_hosts_instagram" },
             { key = "twitch", name = "Twitch", fname = "zapret_hosts_twitch.txt", uci_sec = "list_hosts_twitch" },
-            { key = "ai", name = "AI-сервисы", fname = "zapret_hosts_ai.txt", uci_sec = "list_hosts_ai" },
-            { key = "spotify", name = "Spotify / аудио", fname = "zapret_hosts_spotify.txt", uci_sec = "list_hosts_spotify" },
             { key = "user", name = "Общие сайты (User)", fname = "zapret_hosts_user.txt", uci_sec = "list_hosts_user" },
             { key = "exclude", name = "Исключения (не обходить)", fname = "zapret_hosts_user_exclude.txt", uci_sec = "list_hosts_user_exclude" }
         }
@@ -5387,10 +5329,6 @@ cmd_info() {
             x = { base = "BlockcheckW_X", name = "X (Twitter)" },
             preset_instagram = { base = "BlockcheckW_Instagram", name = "Предустановленный список Instagram (2)" },
             instagram = { base = "BlockcheckW_Instagram", name = "Instagram" },
-            preset_ai = { base = "BlockcheckW_AI", name = "Предустановленный список AI (3)" },
-            ai = { base = "BlockcheckW_AI", name = "AI-сервисы" },
-            preset_spotify = { base = "BlockcheckW_Spotify", name = "Предустановленный список Spotify (3)" },
-            spotify = { base = "BlockcheckW_Spotify", name = "Spotify" },
             tcp16 = { base = "BlockcheckW_TCP16", name = "Лимит данных (16 КБ)" },
             domains = { base = "BlockcheckW_Custom", name = "Свои домены" },
             custom = { base = "BlockcheckW_Custom", name = "Свои домены" },
@@ -6004,8 +5942,6 @@ _hostlist_path() {
         discord|preset_discord) echo "/etc/zapret2wizard/ipset/zapret_hosts_discord.txt" ;;
         x|preset_x) echo "/etc/zapret2wizard/ipset/zapret_hosts_x.txt" ;;
         instagram|preset_instagram) echo "/etc/zapret2wizard/ipset/zapret_hosts_instagram.txt" ;;
-        ai|preset_ai) echo "/etc/zapret2wizard/ipset/zapret_hosts_ai.txt" ;;
-        spotify|preset_spotify) echo "/etc/zapret2wizard/ipset/zapret_hosts_spotify.txt" ;;
         twitch|preset_twitch) echo "/etc/zapret2wizard/ipset/zapret_hosts_twitch.txt" ;;
         user|general|builtin) echo "/etc/zapret2wizard/ipset/zapret_hosts_user.txt" ;;
         exclude) echo "/etc/zapret2wizard/ipset/zapret_hosts_user_exclude.txt" ;;

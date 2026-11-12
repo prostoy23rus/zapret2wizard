@@ -156,44 +156,6 @@ var PRESET_DEFS = {
 			]
 		}
 	},
-	'preset_ai': {
-		name: 'Предустановленный список AI (3)',
-		label: 'AI-сервисы (3)',
-		icon: '🤖',
-		domain: 'chatgpt.com',
-		domainsText: 'chatgpt.com, claude.ai, gemini.google.com, copilot.microsoft.com, perplexity.ai, deepseek.com + CDN',
-		test_url: 'https://chatgpt.com',
-		key: 'preset_ai',
-		port: '443',
-		hint: {
-			title: 'AI-сервисы (ChatGPT, Claude, Gemini, Copilot)',
-			summary: 'Обход SNI-блокировок AI-платформ: OpenAI, Anthropic, Google AI, Copilot, Perplexity, DeepSeek и их CDN.',
-			details: [
-				{ title: '🎯 Что тестируется', text: 'chatgpt.com (веб и API), claude.ai, gemini.google.com, copilot.microsoft.com, perplexity.ai, deepseek.com.' },
-				{ title: '🛡️ Секция Zapret2', text: 'Запись zapret2.BlockcheckW_AI (список list_hosts_ai).' },
-				{ title: '💡 Особенность', text: 'AI-платформы режутся по SNI в TLS ClientHello — подходят fake-split/multisplit; CDN может требовать отдельную стратегию.' }
-			]
-		}
-	},
-	'preset_spotify': {
-		name: 'Предустановленный список Spotify (3)',
-		label: 'Spotify / аудио (3)',
-		icon: '🎵',
-		domain: 'open.spotify.com',
-		domainsText: 'open.spotify.com, api.spotify.com, scdn.co, pscdn.co, soundcloud.com и медиа-CDN',
-		test_url: 'https://open.spotify.com',
-		key: 'preset_spotify',
-		port: '443',
-		hint: {
-			title: 'Spotify и SoundCloud (веб-плеер, API, медиа)',
-			summary: 'Профиль для аудио-стриминга: обход SNI-блокировок Spotify/SoundCloud и загрузки медиа-CDN.',
-			details: [
-				{ title: '🎯 Что тестируется', text: 'open.spotify.com (веб-плеер), api.spotify.com (метаданные), i.scdn.co и scdn.co (аудио-CDН), soundcloud.com.' },
-				{ title: '🛡️ Секция Zapret2', text: 'Запись zapret2.BlockcheckW_Spotify (список list_hosts_spotify).' },
-				{ title: '💡 Особенность', text: 'Аудио-сегменты идут с CDN: если плеер играет, а обложки нет — проверьте отдельно CDN-хосты.' }
-			]
-		}
-	},
 	'domains': {
 		name: 'Свои домены',
 		label: 'Свои домены',
@@ -1265,8 +1227,6 @@ return view.extend({
 			{ id: 'preset_twitch', icon: '🎮', name: 'Twitch' },
 			{ id: 'preset_x', icon: '🐦', name: 'X / Twitter' },
 			{ id: 'preset_instagram', icon: '📸', name: 'Instagram' },
-			{ id: 'preset_ai', icon: '🤖', name: 'AI-сервисы' },
-			{ id: 'preset_spotify', icon: '🎵', name: 'Spotify' },
 			{ id: 'builtin', icon: '🌐', name: 'Встроенные хосты (33)' },
 			{ id: 'domains', icon: '🎯', name: 'Свои домены' }
 		];
@@ -2055,7 +2015,7 @@ return view.extend({
 
 		function rebuildHistory() {
 			if (!historyListEl) return;
-			var names = { youtube: 'YouTube', discord: 'Discord', instagram: 'Instagram', x: 'X / Twitter', twitch: 'Twitch', ai: 'AI-сервисы', spotify: 'Spotify', general: 'Общие сайты' };
+			var names = { youtube: 'YouTube', discord: 'Discord', instagram: 'Instagram', x: 'X / Twitter', twitch: 'Twitch', general: 'Общие сайты' };
 			historyListEl.innerHTML = '';
 			var items = (metricsData.history || []);
 			if (!items.length) {
@@ -2295,8 +2255,6 @@ return view.extend({
 				E('option', { value: 'preset_twitch' }, 'Twitch'),
 				E('option', { value: 'preset_x' }, 'X (Twitter)'),
 				E('option', { value: 'preset_instagram' }, 'Instagram'),
-				E('option', { value: 'preset_ai' }, 'AI-сервисы'),
-				E('option', { value: 'preset_spotify' }, 'Spotify')
 			]);
 			var startBtn = E('button', { class: 'bcw-btn-launch', style: 'height: 34px;' }, '🧬 Запустить эволюцию');
 			var histBtn = E('button', { class: 'bcw-btn-secondary', style: 'height: 34px;' }, '🕓 Установить ночное обучение');
@@ -2480,8 +2438,6 @@ return view.extend({
 				E('option', { value: 'preset_discord' }, 'Discord'),
 				E('option', { value: 'preset_x' }, 'X (Twitter)'),
 				E('option', { value: 'preset_instagram' }, 'Instagram'),
-				E('option', { value: 'preset_ai' }, 'AI-сервисы'),
-				E('option', { value: 'preset_spotify' }, 'Spotify'),
 				E('option', { value: 'preset_twitch' }, 'Twitch'),
 				E('option', { value: 'builtin' }, 'Свои домены')
 			]);
@@ -2876,8 +2832,6 @@ return view.extend({
 			{ key: 'x', altKey: 'preset_x', name: 'X (Twitter)', icon: '🐦', uciBase: 'BlockcheckW_X', desc: 'Лента, видео, медиа и CDN t.co', hostlistKey: 'x', targetId: 'preset_x', portDefault: 'TCP 443' },
 			{ key: 'general', altKey: 'builtin', name: 'Общие сайты (User)', icon: '🌐', uciBase: 'BlockcheckW_General', desc: '33 встроенных хоста + добавленные пользователем', hostlistKey: 'user', targetId: 'builtin', portDefault: 'TCP 80, 443' },
 			{ key: 'twitch', altKey: 'preset_twitch', name: 'Twitch', icon: '🎮', uciBase: 'BlockcheckW_Twitch', desc: 'Прямые трансляции и веб-плеер', hostlistKey: 'twitch', targetId: 'preset_twitch', portDefault: 'TCP 443' },
-			{ key: 'ai', altKey: 'preset_ai', name: 'AI-сервисы', icon: '🤖', uciBase: 'BlockcheckW_AI', desc: 'ChatGPT, Claude, Gemini, Copilot, Perplexity, DeepSeek', hostlistKey: 'ai', targetId: 'preset_ai', portDefault: 'TCP 443' },
-			{ key: 'spotify', altKey: 'preset_spotify', name: 'Spotify / аудио', icon: '🎵', uciBase: 'BlockcheckW_Spotify', desc: 'Spotify, SoundCloud: плеер, API и медиа-CDN', hostlistKey: 'spotify', targetId: 'preset_spotify', portDefault: 'TCP 443' }
 		];
 
 		function updateActiveStrategyDisplay() {
@@ -3273,8 +3227,6 @@ return view.extend({
 			             (currentTarget === 'preset_x') ? 'BlockcheckW_X' :
 			             (currentTarget === 'preset_instagram') ? 'BlockcheckW_Instagram' :
 			             (currentTarget === 'preset_twitch') ? 'BlockcheckW_Twitch' :
-			             (currentTarget === 'preset_ai') ? 'BlockcheckW_AI' :
-			             (currentTarget === 'preset_spotify') ? 'BlockcheckW_Spotify' :
 			             (currentTarget === 'builtin') ? 'BlockcheckW_General' :
 			             ('BlockcheckW_' + currentTarget.replace(/[^a-zA-Z0-9_]/g, '_'));
 
