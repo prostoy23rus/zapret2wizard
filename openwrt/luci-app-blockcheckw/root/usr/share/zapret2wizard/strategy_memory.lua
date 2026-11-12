@@ -178,6 +178,7 @@ elseif cmd == "forget" then
     local e = d.domains[dom]
     if e and e.net and d.subnets[e.net] then d.subnets[e.net] = nil end
     d.domains[dom] = nil
+    d.banned[dom] = nil
     save(d)
     out({ ok = true, domain = dom })
 elseif cmd == "rank" then

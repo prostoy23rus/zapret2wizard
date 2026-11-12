@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.29.1] (2026-11-13)
+
+### Память удалённых пресетов
+
+* `purge_removed_presets` удаляет из `strategy_memory.json` домены и баны
+  chatgpt/openai/claude/gemini/spotify/scdn и т.п.;
+* `memory_forget` теперь снимает и бан-записи домена (кнопка «Забыть»
+  очищает полностью).
+
 ## [0.29.0] (2026-11-13)
 
 ### AI-сервисы и Spotify удалены

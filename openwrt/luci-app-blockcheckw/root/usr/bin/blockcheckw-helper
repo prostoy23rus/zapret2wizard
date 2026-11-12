@@ -501,6 +501,11 @@ purge_removed_presets() {
     done
     rm -f /etc/zapret2wizard/ipset/zapret_hosts_ai.txt /etc/zapret2wizard/ipset/zapret_hosts_spotify.txt 2>/dev/null || true
     rm -f /usr/share/zapret2wizard/ipset/zapret_hosts_ai.txt /usr/share/zapret2wizard/ipset/zapret_hosts_spotify.txt 2>/dev/null || true
+    # Убираем из памяти домены и баны удалённых пресетов.
+    local d
+    for d in chatgpt.com openai.com claude.ai anthropic.com gemini.google.com copilot.microsoft.com perplexity.ai deepseek.com open.spotify.com api.spotify.com i.scdn.co scdn.co pscdn.co; do
+        mem forget "$d" >/dev/null 2>&1 || true
+    done
     [ -x /usr/share/zapret2wizard/uci2config ] && /usr/share/zapret2wizard/uci2config >/dev/null 2>&1 || true
     touch "$marker"
 }
