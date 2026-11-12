@@ -2239,6 +2239,14 @@ cmd_apply() {
     local _bpkg=$(_strategy_pkg)
     cp -f "/etc/config/$_bpkg" "/etc/config/$_bpkg.bak.$ts" 2>/dev/null || true
 
+    # Снимок конфигов для авто-отката: apply меняет обе возможные секции.
+    local rb_dir="/tmp/bcw_apply_rollback"
+    rm -rf "$rb_dir"; mkdir -p "$rb_dir"
+    local _rpkg
+    for _rpkg in zapret2 zapret2wizard; do
+        [ -f "/etc/config/$_rpkg" ] && cp -f "/etc/config/$_rpkg" "$rb_dir/$_rpkg"
+    done
+
     # Map target to base strategy section
     local base_sec=""
     local port="443"
@@ -2427,10 +2435,38 @@ cmd_apply() {
         [ -n "$extracted_code" ] && http_code="$extracted_code"
     fi
 
+    # Если трафик не подтвердился — возвращаем конфиг, который был до apply.
+    local rolled_back=false
+    local out_msg="Новая запись стратегии ($sec_name) успешно создана в Zapret2, активирована и проверена!"
+    if [ "$all_ok_val" != "true" ]; then
+        local _restored=0
+        for _rpkg in zapret2 zapret2wizard; do
+            if [ -f "$rb_dir/$_rpkg" ]; then
+                cp -f "$rb_dir/$_rpkg" "/etc/config/$_rpkg"
+                uci -q commit "$_rpkg" 2>/dev/null || true
+                _restored=1
+            fi
+        done
+        if [ "$_restored" = "1" ]; then
+            restart_dpi_service
+            local _rw=0
+            while [ "$_rw" -lt 20 ]; do
+                if _svc_running && nft list table inet zapret2wizard >/dev/null 2>&1; then
+                    break
+                fi
+                sleep 1
+                _rw=$((_rw + 1))
+            done
+            rolled_back=true
+            out_msg="Стратегия не подтвердила трафик — прежняя конфигурация восстановлена"
+        fi
+    fi
+    rm -rf "$rb_dir"
+
     local res_json=$(cat <<EOF
 {
   "success": true,
-  "message": "Новая запись стратегии ($sec_name) успешно создана в Zapret2, активирована и проверена!",
+  "message": "$out_msg",
   "target": "$target",
   "section": "$sec_name",
   "zapret2_status": "$zapret_running",
@@ -2438,6 +2474,7 @@ cmd_apply() {
   "http_code": "$http_code",
   "connected": $([ "$curl_status" = "1" ] && echo "true" || echo "false"),
   "all_ok": $all_ok_val,
+  "rolled_back": $rolled_back,
   "multi_domain": ${multi_res:-"{}"}
 }
 EOF

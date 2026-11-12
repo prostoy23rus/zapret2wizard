@@ -3743,6 +3743,8 @@ return view.extend({
 				if (out.success) {
 					if (out.all_ok) {
 						ui.addNotification(null, E('p', {}, '✓ Стратегия применена и проверена: ' + label), 'info');
+					} else if (out.rolled_back) {
+						ui.addNotification(null, E('p', {}, '⚠ Стратегия не подтвердила трафик — прежняя конфигурация восстановлена'), 'warning');
 					} else {
 						ui.addNotification(null, E('p', {}, '⚠ Стратегия записана, но трафик не подтвердился — проверьте сервис'), 'warning');
 					}
