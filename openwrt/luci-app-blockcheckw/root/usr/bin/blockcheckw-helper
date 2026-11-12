@@ -1367,6 +1367,9 @@ cmd_start() {
         fi
         local mem_removed=$(mem filter "$domain" "$probe_corpus" | sed -n 's/.*"removed":\([0-9]*\).*/\1/p')
         [ -n "$mem_removed" ] && [ "$mem_removed" -gt 0 ] && echo "[blockcheckw-helper] Memory ban: убрано $mem_removed кандидатов" >> "$LOG_FILE"
+        # L3: кандидаты с лучшим success-rate из памяти идут раньше.
+        local mem_ranked=$(mem rank "$probe_corpus" | sed -n 's/.*"ranked":\([0-9]*\).*/\1/p')
+        [ -n "$mem_ranked" ] && echo "[blockcheckw-helper] Memory L3: ранжировано $mem_ranked кандидатов" >> "$LOG_FILE"
         true
 
         # Сканер хранит «память прошлых запусков» в $HOME/.config/blockcheckw.
@@ -1509,6 +1512,8 @@ EOF
             rm -f "$adaptive_corpus" "$adaptive_output"
 
             generate_adaptive_corpus "$target" "$domain" "$protocols" "$probe_output" "$adaptive_corpus"
+            mem filter "$domain" "$adaptive_corpus" >/dev/null 2>&1 || true
+            mem rank "$adaptive_corpus" >/dev/null 2>&1 || true
 
             local adapt_cnt=$(grep -c '^curl_test_' "$adaptive_corpus" 2>/dev/null || echo 0)
             echo "[blockcheckw-helper] [Smart Scan] Generated $adapt_cnt targeted permutations for DPI vector matrix." >> "$LOG_FILE"
@@ -2795,6 +2800,21 @@ metric_target_key() {
         preset_twitch|twitch) echo "twitch" ;;
         builtin|general|user) echo "general" ;;
         *) echo "$1" ;;
+    esac
+}
+
+# Домен, по которому проверяется/запоминается сервис.
+target_domain() {
+    case "$1" in
+        preset_youtube|youtube) echo "www.youtube.com" ;;
+        preset_discord|discord) echo "discord.com" ;;
+        preset_twitch|twitch) echo "twitch.tv" ;;
+        preset_x|x) echo "x.com" ;;
+        preset_instagram|instagram) echo "gateway.instagram.com" ;;
+        preset_ai|ai) echo "chatgpt.com" ;;
+        preset_spotify|spotify) echo "open.spotify.com" ;;
+        builtin|general) echo "rutracker.org" ;;
+        *) echo "" ;;
     esac
 }
 
@@ -4453,32 +4473,43 @@ cmd_health_tick() {
     # не дожидаясь ночной эволюции (сама проверка стоит один curl с -m 6).
     dns_fix_instagram >/dev/null 2>&1 || true
 
-    local target="preset_youtube"
-    cmd_test "$target" "" > /tmp/bcw_health.json 2>/dev/null
-    if grep -q '"all_ok":true' /tmp/bcw_health.json; then
+    # Проверяем все включённые сервисы, а не только YouTube: два сбоя
+    # подряд по сервису → L1-запись помечается непроверенной, /24 снимается,
+    # запускается переобучение именно этого сервиса.
+    local any_fail=0 spawned=0 tgt sec cfile n dom mres
+    for tgt in preset_youtube preset_discord preset_twitch preset_x preset_instagram preset_ai preset_spotify; do
+        sec=$(_strategy_section "$tgt")
+        [ -n "$sec" ] || continue
+        uci -q get "zapret2wizard.$sec.enabled" 2>/dev/null | grep -q '^1$' || continue
+        if cmd_test "$tgt" "" > /tmp/bcw_health.json 2>/dev/null && grep -q '"all_ok":true' /tmp/bcw_health.json; then
+            echo 0 > "/etc/zapret2wizard/.health_fail_${tgt#preset_}"
+            continue
+        fi
+        any_fail=1
+        cfile="/etc/zapret2wizard/.health_fail_${tgt#preset_}"
+        n=$(cat "$cfile" 2>/dev/null || echo 0)
+        n=$((n + 1))
+        echo "$n" > "$cfile"
+        if [ "$n" -ge 2 ]; then
+            echo 0 > "$cfile"
+            dom=$(target_domain "$tgt")
+            mres=$(mem fail "$dom")
+            echo "[health] $tgt/$dom: $mres" >> /tmp/bcw_evolve.log 2>/dev/null || true
+            if [ "$spawned" = "0" ] && ! scan_busy; then
+                ( /usr/bin/blockcheckw-helper evolve --target "$tgt" --count 8 --verify 2 --tests 2 --sleep 2 >>/tmp/bcw_evolve.log 2>&1 & ) || true
+                spawned=1
+            fi
+        fi
+    done
+    rm -f /tmp/bcw_health.json
+    if [ "$any_fail" = "0" ]; then
         echo 0 > "$counter"
-        rm -f /tmp/bcw_health.json
         echo '{"healthy":true}'
         return 0
     fi
-    rm -f /tmp/bcw_health.json
-
-    local n=$(cat "$counter" 2>/dev/null || echo 0)
-    n=$((n + 1))
-    echo "$n" > "$counter"
-    if [ "$n" -lt 2 ]; then
-        echo "{\"healthy\":false,\"fails\":$n}"
-        return 0
-    fi
-
     echo 0 > "$counter"
     echo "$now" > "$last"
-    # Память: два сбоя домена подряд → помечаем стратегию непроверенной (L1),
-    # снимаем /24-запись и уходим в переобучение.
-    local mem_res=$(mem fail "www.youtube.com")
-    echo "[health] memory fail: $mem_res" >> /tmp/bcw_evolve.log 2>/dev/null || true
-    echo "{\"healthy\":false,\"fails\":2,\"action\":\"evolve\",\"target\":\"$target\"}"
-    ( /usr/bin/blockcheckw-helper evolve --target "$target" --count 8 --verify 2 --tests 2 --sleep 2 >>/tmp/bcw_evolve.log 2>&1 & ) || true
+    echo "{\"healthy\":false,\"relearn\":$spawned}"
 }
 
 # Экспорт рабочих геномов провайдера в JSON (для обмена).
@@ -6017,6 +6048,8 @@ case "$1" in
     memory_dump) mem dump ;;
     memory_clear) mem clear ;;
     memory_fail) shift; mem fail "$@" ;;
+    memory_forget) shift; mem forget "$@" ;;
+    memory_rank) shift; mem rank "$@" ;;
     read_hostlist) shift; cmd_read_hostlist "$@" ;;
     add_hostlist_domain) shift; cmd_add_hostlist_domain "$@" ;;
     remove_hostlist_domain) shift; cmd_remove_hostlist_domain "$@" ;;

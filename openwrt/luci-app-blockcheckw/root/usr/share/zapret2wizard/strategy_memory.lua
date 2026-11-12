@@ -149,6 +149,47 @@ elseif cmd == "filter" then
         if o then o:write(table.concat(lines, "\n") .. "\n"); o:close() end
     end
     out({ removed = removed })
+elseif cmd == "forget" then
+    local dom = a[2] or ""
+    local d = load()
+    local e = d.domains[dom]
+    if e and e.net and d.subnets[e.net] then d.subnets[e.net] = nil end
+    d.domains[dom] = nil
+    save(d)
+    out({ ok = true, domain = dom })
+elseif cmd == "rank" then
+    local file = a[2] or ""
+    local d = load()
+    local f = io.open(file, "r")
+    if not f then out({ ranked = 0 }); return end
+    local comments, items = {}, {}
+    local idx = 0
+    for line in f:lines() do
+        idx = idx + 1
+        local args = line:match(": nfqws2%s+(.+)$")
+        if args then
+            local r = d.recipes[h(args)]
+            local ok = (r and r.ok) or 0
+            local fail = (r and r.fail) or 0
+            -- Laplace: не даём одному успеху перевесить статистику
+            local score = (ok + 1) / (ok + fail + 2)
+            table.insert(items, { line = line, score = score, idx = idx })
+        else
+            table.insert(comments, line)
+        end
+    end
+    f:close()
+    table.sort(items, function(x, y)
+        if math.abs(x.score - y.score) > 1e-9 then return x.score > y.score end
+        return x.idx < y.idx
+    end)
+    local o = io.open(file, "w")
+    if o then
+        for _, c in ipairs(comments) do o:write(c .. "\n") end
+        for _, it in ipairs(items) do o:write(it.line .. "\n") end
+        o:close()
+    end
+    out({ ranked = #items })
 elseif cmd == "clear" then
     os.remove(FILE)
     out({ ok = true })

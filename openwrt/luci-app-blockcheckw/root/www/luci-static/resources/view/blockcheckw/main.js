@@ -2072,11 +2072,12 @@ return view.extend({
 		var mainTabDefs = [
 			{ id: 'scan', label: '🔍 Сканер', nodes: [targetSectionCard, unifiedScanCard] },
 			{ id: 'history', label: '🕘 История', nodes: [historyCard] },
-			{ id: 'evolve', label: '🧬 Эволюция', nodes: [buildEvolutionPanel()] },
+			{ id: 'evolve', label: '🧬 Эволюция', nodes: [buildEvolutionPanel(), buildMemoryPanel()] },
 			{ id: 'logs', label: '📜 Логи', nodes: [logCard] }
 		];
 
 		var mainTabBar = E('div', { class: 'bcw-main-tabs' });
+		var memoryPanelRefresh = null;
 		var mainTabPanels = {};
 
 		mainTabDefs.forEach(function(def) {
@@ -2125,6 +2126,71 @@ return view.extend({
 		}
 
 // -------- Вкладка «Эволюция»: запуск, история поколений, топ геномов --------
+		// Память стратегий: L1 домен / L2 подсеть, статусы и очистка.
+		function buildMemoryPanel() {
+			var root = E('div', { class: 'bcw-card', style: 'padding: 16px; margin-top: 16px;' });
+			var title = E('h3', { class: 'bcw-card-title', style: 'margin: 0;' }, '🧠 Память стратегий (L1/L2)');
+			var stats = E('div', { style: 'font-size: 12px; color: #abb2bf; margin: 6px 0 10px;' }, 'Загрузка...');
+			var list = E('div', { style: 'display: flex; flex-direction: column; gap: 6px;' });
+			var refreshBtn = E('button', { class: 'bcw-btn-secondary', style: 'height: 30px; font-size: 12px;' }, '🔄 Обновить');
+			var clearBtn = E('button', { class: 'bcw-btn-secondary', style: 'height: 30px; font-size: 12px; color: #e06c75;' }, '🧹 Очистить память');
+
+			function render(d) {
+				d = d || {};
+				var domains = d.domains || {};
+				var subnets = d.subnets || {};
+				var banned = d.banned || {};
+				var keys = Object.keys(domains);
+				var nb = 0; Object.keys(banned).forEach(function(k) { nb += (banned[k] || []).length; });
+				stats.textContent = 'Доменов: ' + keys.length + ' · подсетей: ' + Object.keys(subnets).length + ' · банов: ' + nb + ' · TTL 7 суток';
+				list.innerHTML = '';
+				if (!keys.length) {
+					list.appendChild(E('div', { style: 'font-size: 12.5px; color: #abb2bf;' }, 'Память пуста: записи появятся после успешного применения стратегий.'));
+					return;
+				}
+				keys.sort();
+				keys.slice(0, 80).forEach(function(dom) {
+					var e = domains[dom] || {};
+					var bad = (banned[dom] || []).length;
+					var ok = !!e.verified;
+					var rec = String(e.recipe || '');
+					if (rec.length > 90) rec = rec.slice(0, 90) + '…';
+					var btn = E('button', { class: 'bcw-btn-secondary', style: 'height: 26px; font-size: 11.5px; white-space: nowrap;' }, 'Забыть');
+					btn.addEventListener('click', function() {
+						btn.disabled = true;
+						fs.exec(HELPER_BIN, ['memory_forget', dom]).then(function() { load(); }).catch(function() { btn.disabled = false; });
+					});
+					list.appendChild(E('div', { style: 'display: grid; grid-template-columns: minmax(0,1fr) 92px 90px; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--bcw-border-sub); border-radius: 6px;' }, [
+						E('div', {}, [
+							E('div', { style: 'font-weight: 600; font-size: 12.5px;' }, dom),
+							E('div', { style: 'font-family: monospace; font-size: 11px; color: #98c379; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;' }, rec || '—')
+						]),
+						E('div', { style: 'font-size: 11px; text-align: right; color: ' + (ok ? '#98c379' : '#e5c07b') + ';' }, (ok ? '✓ проверена' : '⚠ переобучение') + (bad ? ' · бан ' + bad : '')),
+						btn
+					]));
+				});
+			}
+
+			function load() {
+				fs.exec(HELPER_BIN, ['memory_dump']).then(function(res) {
+					var d = null;
+					try { d = JSON.parse((res && res.stdout) ? String(res.stdout) : '{}'); } catch (e) {}
+					render(d || {});
+				}).catch(function() { stats.textContent = 'Не удалось прочитать память'; });
+			}
+			refreshBtn.addEventListener('click', load);
+			clearBtn.addEventListener('click', function() {
+				if (!confirm('Очистить всю память стратегий?')) return;
+				fs.exec(HELPER_BIN, ['memory_clear']).then(function() { load(); });
+			});
+			load();
+			memoryPanelRefresh = load;
+			root.appendChild(E('div', { style: 'display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;' }, [title, E('div', { style: 'display:flex;gap:8px;' }, [refreshBtn, clearBtn])]));
+			root.appendChild(stats);
+			root.appendChild(list);
+			return root;
+		}
+
 		function buildEvolutionPanel() {
 			var root = E('div', { id: 'bcw-evo-root', class: 'bcw-card', style: 'padding: 16px;' });
 
@@ -2508,7 +2574,10 @@ return view.extend({
 				}
 			});
 			try { localStorage.setItem(MAIN_TAB_KEY, id); } catch (e) {}
-			if (id === 'evolve') refreshEvolution();
+			if (id === 'evolve') {
+				refreshEvolution();
+				if (typeof memoryPanelRefresh === 'function') memoryPanelRefresh();
+			}
 		}
 
 		mainTabDefs.forEach(function(def) {
