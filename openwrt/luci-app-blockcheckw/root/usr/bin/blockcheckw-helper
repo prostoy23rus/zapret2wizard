@@ -2568,7 +2568,10 @@ for idx, ep in ipairs(endpoints) do
             local ra, rb = tostring(ep.range):match("^(%d+)%-(%d+)$")
             if ra and rb then exp_bytes = tonumber(rb) - tonumber(ra) + 1 end
         end
-        local cmd = string.format("curl -4 -k -s -L %s -w '%%{http_code}|%%{size_download}|%%{speed_download}|%%{time_total}' -o /dev/null --connect-timeout 4 -m 6 '%s' 2>/dev/null", range_opt, ep.url)
+        -- Для больших страниц ждём дольше 6 с: иначе реальный 16-КБ cap ТСПУ
+        -- обрывается по таймауту и выглядит как обычный 000, а не как обрезка.
+        local mopt = (exp_bytes >= 32768) and "20" or "6"
+        local cmd = string.format("curl -4 -k -s -L %s -w '%%{http_code}|%%{size_download}|%%{speed_download}|%%{time_total}' -o /dev/null --connect-timeout 4 -m %s '%s' 2>/dev/null", range_opt, mopt, ep.url)
         local pipe = io.popen(cmd)
         local out = pipe and pipe:read("*a") or ""
         if pipe then pipe:close() end
@@ -2583,6 +2586,13 @@ for idx, ep in ipairs(endpoints) do
         local is_ok = false
         local is_truncated = false
         local stall_reason = ""
+
+        -- Таймаут с частично принятым телом 14..32 КБ — это тот самый 16-КБ cap:
+        -- сервер отдал начало, дальше ТСПУ молча держит поток.
+        if code_num == 0 and size >= 14336 and size < 32768 and elapsed >= 15 then
+            is_truncated = true
+            stall_reason = "16k_cap"
+        end
 
         if (code_num >= 200 and code_num < 400) then
             if code_num == 204 then
@@ -3767,6 +3777,16 @@ cmd_ensure_lua() {
 # Авто-калибровка TTL для фейковых пакетов (идея tachyon-desync AutoTTL):
 # фейк должен пройти транзитный узел ТСПУ, но умереть до сервера. Оцениваем
 # дистанцию хопов и берём TTL на 1–2 меньше, чтобы сервер не получил фейк.
+# Диагностика/тест fallback-резолвера: dns_alt <домен>.
+cmd_dns_alt() {
+    local d="${1:-instagram.com}"
+    if dns_alt_ensure "$d"; then
+        printf '{"ok":true,"domain":"%s"}\n' "$d"
+    else
+        printf '{"ok":false,"domain":"%s"}\n' "$d"
+    fi
+}
+
 cmd_ttl_probe() {
     local domain="${1:-www.youtube.com}"
     local ip="" hops="" ttl t=2
@@ -4341,6 +4361,10 @@ cmd_health_tick() {
         echo '{"skipped":true,"reason":"busy"}'
         return 0
     fi
+
+    # Закреплённый IP Instagram мог умереть: перепроверяем при каждом тике,
+    # не дожидаясь ночной эволюции (сама проверка стоит один curl с -m 6).
+    dns_fix_instagram >/dev/null 2>&1 || true
 
     local target="preset_youtube"
     cmd_test "$target" "" > /tmp/bcw_health.json 2>/dev/null
@@ -5902,6 +5926,7 @@ ensure_ytapi) cmd_ensure_ytapi ;;
 ensure_lua) cmd_ensure_lua ;;
 hostlists_merge) cmd_hostlists_merge ;;
 ttl_probe) shift; cmd_ttl_probe "$@" ;;
+dns_alt) shift; cmd_dns_alt "$@" ;;
 quic_probe) cmd_quic_probe && echo ok || echo fail ;;
 quic_mode) shift; cmd_quic_mode "$@" ;;
 optimize_dns) cmd_optimize_dns ;;

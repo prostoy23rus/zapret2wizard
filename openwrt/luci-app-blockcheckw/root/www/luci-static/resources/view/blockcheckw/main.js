@@ -3503,7 +3503,16 @@ return view.extend({
 				} else {
 					uniqueStrategiesCount = 0;
 					strategiesListEl.innerHTML = '';
-					resultsCard.style.display = 'none';
+					var label = (PRESET_DEFS[target] && PRESET_DEFS[target].name) || target;
+					resultsCard.style.display = 'block';
+					isStrategiesExpanded = true;
+					var titleEl = resultsCard.querySelector('.bcw-card-title');
+					if (titleEl) titleEl.textContent = 'Найденные рабочие стратегии (0)';
+					var badge = resultsCard.querySelector('.bcw-strats-count-badge');
+					if (badge) badge.textContent = '0 шт.';
+					strategiesListEl.appendChild(E('div', { style: 'padding: 12px 14px; color: #abb2bf; font-size: 13px; line-height: 1.5;' },
+						'Для «' + label + '» ещё нет сохранённых результатов подбора — нажмите «Запустить поиск», чтобы найти стратегии именно для этого сервиса.'));
+					updateSpoilerUI();
 				}
 			}).catch(function() {});
 		}
