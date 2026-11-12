@@ -2132,8 +2132,31 @@ return view.extend({
 			var title = E('h3', { class: 'bcw-card-title', style: 'margin: 0;' }, '🧠 Память стратегий (L1/L2)');
 			var stats = E('div', { style: 'font-size: 12px; color: #abb2bf; margin: 6px 0 10px;' }, 'Загрузка...');
 			var list = E('div', { style: 'display: flex; flex-direction: column; gap: 6px;' });
+			var topBox = E('div', { style: 'margin-top: 14px;' });
 			var refreshBtn = E('button', { class: 'bcw-btn-secondary', style: 'height: 30px; font-size: 12px;' }, '🔄 Обновить');
 			var clearBtn = E('button', { class: 'bcw-btn-secondary', style: 'height: 30px; font-size: 12px; color: #e06c75;' }, '🧹 Очистить память');
+
+			function renderTop(d) {
+				topBox.innerHTML = '';
+				var recipes = (d && d.recipes) || {};
+				var arr = Object.keys(recipes).map(function(k) {
+					var r = recipes[k] || {};
+					var ok = r.ok || 0, fail = r.fail || 0;
+					return { key: k, args: String(r.args || ''), ok: ok, fail: fail, ewma: r.ewma || 0, score: (ok + 1) / (ok + fail + 2) };
+				}).filter(function(r) { return r.ok + r.fail > 0; }).sort(function(a, b) { return b.score - a.score; }).slice(0, 6);
+				if (!arr.length) return;
+				topBox.appendChild(E('div', { style: 'font-size: 12px; color: #61afef; font-weight: 600; margin-bottom: 6px;' }, '🏆 Топ рецептов по success-rate'));
+				arr.forEach(function(r) {
+					var a = r.args;
+					if (a.length > 80) a = a.slice(0, 80) + '…';
+					topBox.appendChild(E('div', { style: 'display: grid; grid-template-columns: minmax(0,1fr) 70px 62px 70px; align-items: center; gap: 10px; padding: 7px 10px; border: 1px solid var(--bcw-border-sub); border-radius: 6px; margin-bottom: 5px;' }, [
+						E('div', { style: 'font-family: monospace; font-size: 11px; color: #c8ccd4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;', title: r.args }, a || '—'),
+						E('div', { style: 'font-size: 11.5px; text-align: right; color: ' + (r.score >= 0.6 ? '#98c379' : '#e5c07b') + ';' }, Math.round(r.score * 100) + '%'),
+						E('div', { style: 'font-size: 11px; text-align: right; color: #abb2bf;' }, '✓' + r.ok + ' / ✗' + r.fail),
+						E('div', { style: 'font-size: 11px; text-align: right; color: #abb2bf;' }, r.ewma ? (r.ewma + ' мс') : '—')
+					]));
+				});
+			}
 
 			function render(d) {
 				d = d || {};
@@ -2146,6 +2169,7 @@ return view.extend({
 				list.innerHTML = '';
 				if (!keys.length) {
 					list.appendChild(E('div', { style: 'font-size: 12.5px; color: #abb2bf;' }, 'Память пуста: записи появятся после успешного применения стратегий.'));
+					renderTop(d);
 					return;
 				}
 				keys.sort();
@@ -2169,6 +2193,7 @@ return view.extend({
 						btn
 					]));
 				});
+				renderTop(d);
 			}
 
 			function load() {
@@ -2188,6 +2213,7 @@ return view.extend({
 			root.appendChild(E('div', { style: 'display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;' }, [title, E('div', { style: 'display:flex;gap:8px;' }, [refreshBtn, clearBtn])]));
 			root.appendChild(stats);
 			root.appendChild(list);
+			root.appendChild(topBox);
 			return root;
 		}
 

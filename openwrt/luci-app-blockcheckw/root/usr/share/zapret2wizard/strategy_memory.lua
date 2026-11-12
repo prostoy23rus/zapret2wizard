@@ -80,6 +80,7 @@ elseif cmd == "get" then
     out({})
 elseif cmd == "put" then
     local dom, ip, recipe, ok = a[2] or "", a[3] or "", a[4] or "", a[5] or "1"
+    local ms = tonumber(a[6]) or 0
     if dom == "" or recipe == "" then out({ ok = false, error = "domain/recipe required" }) return end
     local d = load()
     local net = ip24(ip)
@@ -88,6 +89,9 @@ elseif cmd == "put" then
     local key = h(recipe)
     local r = d.recipes[key] or { args = normalize(recipe), ok = 0, fail = 0 }
     if ok == "1" then r.ok = (r.ok or 0) + 1 else r.fail = (r.fail or 0) + 1 end
+    if ms > 0 then
+        if r.ewma and r.ewma > 0 then r.ewma = math.floor(0.3 * ms + 0.7 * r.ewma) else r.ewma = math.floor(ms) end
+    end
     r.ts = now()
     d.recipes[key] = r
     out({ ok = save(d), source = net and "L1+L2" or "L1" })
@@ -190,6 +194,30 @@ elseif cmd == "rank" then
         o:close()
     end
     out({ ranked = #items })
+elseif cmd == "ewma_filter" then
+    local file, max_ms = a[2] or "", tonumber(a[3]) or 3000
+    local d = load()
+    local f = io.open(file, "r")
+    if not f then out({ removed = 0 }); return end
+    local kept, removed = {}, 0
+    for line in f:lines() do
+        local args = line:match(": nfqws2%s+(.+)$")
+        local drop = false
+        if args then
+            local r = d.recipes[h(args)]
+            if r and r.ewma and r.ewma > 0 and ((r.ok or 0) + (r.fail or 0)) >= 2 and r.ewma > max_ms then
+                drop = true
+                removed = removed + 1
+            end
+        end
+        if not drop then table.insert(kept, line) end
+    end
+    f:close()
+    if removed > 0 then
+        local o = io.open(file, "w")
+        if o then o:write(table.concat(kept, "\n") .. "\n"); o:close() end
+    end
+    out({ removed = removed, max_ms = max_ms })
 elseif cmd == "clear" then
     os.remove(FILE)
     out({ ok = true })

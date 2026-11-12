@@ -1370,6 +1370,8 @@ cmd_start() {
         # L3: кандидаты с лучшим success-rate из памяти идут раньше.
         local mem_ranked=$(mem rank "$probe_corpus" | sed -n 's/.*"ranked":\([0-9]*\).*/\1/p')
         [ -n "$mem_ranked" ] && echo "[blockcheckw-helper] Memory L3: ранжировано $mem_ranked кандидатов" >> "$LOG_FILE"
+        local mem_slow=$(mem ewma_filter "$probe_corpus" 3000 | sed -n 's/.*"removed":\([0-9]*\).*/\1/p')
+        [ -n "$mem_slow" ] && [ "$mem_slow" -gt 0 ] && echo "[blockcheckw-helper] Memory EWMA: отсечено $mem_slow медленных кандидатов" >> "$LOG_FILE"
         true
 
         # Сканер хранит «память прошлых запусков» в $HOME/.config/blockcheckw.
@@ -1514,6 +1516,7 @@ EOF
             generate_adaptive_corpus "$target" "$domain" "$protocols" "$probe_output" "$adaptive_corpus"
             mem filter "$domain" "$adaptive_corpus" >/dev/null 2>&1 || true
             mem rank "$adaptive_corpus" >/dev/null 2>&1 || true
+            mem ewma_filter "$adaptive_corpus" 3000 >/dev/null 2>&1 || true
 
             local adapt_cnt=$(grep -c '^curl_test_' "$adaptive_corpus" 2>/dev/null || echo 0)
             echo "[blockcheckw-helper] [Smart Scan] Generated $adapt_cnt targeted permutations for DPI vector matrix." >> "$LOG_FILE"
@@ -1865,8 +1868,10 @@ EOF
                 [ "$circular_used" = "1" ] && rec_recipe="$circ_text"
                 [ -n "$rec_recipe" ] || rec_recipe="$circ_text"
                 if [ -n "$rec_recipe" ]; then
-                    local rec_json=$(mem put "$domain" "$(domain_ip "$domain")" "$rec_recipe" 1)
-                    echo "[blockcheckw-helper] Memory L1/L2: $rec_json" >> "$LOG_FILE"
+                    local rec_ms=$(cmd_test "$target" "" 2>/dev/null | awk -F'"time_sec":"' '{if (NF>1) {split($2,a,"\""); print int(a[1]*1000)}}' | head -1)
+                    [ -n "$rec_ms" ] || rec_ms=0
+                    local rec_json=$(mem put "$domain" "$(domain_ip "$domain")" "$rec_recipe" 1 "$rec_ms")
+                    echo "[blockcheckw-helper] Memory L1/L2(ewma=${rec_ms}ms): $rec_json" >> "$LOG_FILE"
                 fi
                 # Приложение YouTube использует отдельный SNI youtubei.googleapis.com;
                 # если он закрыт — добавляем отдельный профиль YTApi (проверено на МТС).
@@ -6050,6 +6055,7 @@ case "$1" in
     memory_fail) shift; mem fail "$@" ;;
     memory_forget) shift; mem forget "$@" ;;
     memory_rank) shift; mem rank "$@" ;;
+    memory_ewma) shift; mem ewma_filter "$@" ;;
     read_hostlist) shift; cmd_read_hostlist "$@" ;;
     add_hostlist_domain) shift; cmd_add_hostlist_domain "$@" ;;
     remove_hostlist_domain) shift; cmd_remove_hostlist_domain "$@" ;;
