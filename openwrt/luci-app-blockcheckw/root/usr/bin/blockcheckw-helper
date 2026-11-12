@@ -1167,6 +1167,7 @@ cmd_start() {
     (
         cleanup_subshell() {
             rm -f "$PID_FILE"
+            [ -n "${SCAN_KEEPER:-}" ] && kill "$SCAN_KEEPER" 2>/dev/null
             rm -rf /var/run/bcw_scan.lock 2>/dev/null || true
             # Remove scanner priority bypass rule from fw4 output chain
             local handle=$(nft -a list chain inet fw4 output 2>/dev/null | grep '0x30000000' | awk '{print $NF}')
@@ -1237,21 +1238,25 @@ cmd_start() {
             exit 1
         fi
 
-        # Одновременные подборы недопустимы: каждый останавливает службу.
+        # Лок подбора снимаем в конце (trap), а берём его первым делом:
+        # иначе два одновременных запуска успевают пройти проверки до создания лока.
         SCAN_LOCK="/var/run/bcw_scan.lock"
+        sleep 7200 &
+        SCAN_KEEPER=$!
         if ! mkdir "$SCAN_LOCK" 2>/dev/null; then
             _old=$(cat "$SCAN_LOCK/pid" 2>/dev/null)
+            # Пустой pid — лок только что создан другим процессом: даём 2 с и
+            # перепроверяем, иначе второй скан угоняет лок у первого.
+            [ -n "$_old" ] || { sleep 2; _old=$(cat "$SCAN_LOCK/pid" 2>/dev/null); }
             if [ -n "$_old" ] && kill -0 "$_old" 2>/dev/null; then
+                kill "$SCAN_KEEPER" 2>/dev/null
+                write_status "error" 0 "Подбор уже выполняется. Дождитесь завершения."
                 echo '{"success":false,"error":"Подбор уже выполняется. Дождитесь завершения."}'
                 exit 1
             fi
             rm -rf "$SCAN_LOCK"
             mkdir "$SCAN_LOCK" 2>/dev/null || true
         fi
-        # $$ в subshell ash указывает на родителя; держим отдельный «сторожевой» pid,
-        # чтобы лок считался живым ровно на время подбора.
-        sleep 7200 &
-        SCAN_KEEPER=$!
         echo "$SCAN_KEEPER" > "$SCAN_LOCK/pid" 2>/dev/null || true
 
         echo "[blockcheckw-helper] Starting Unified Smart Scan for $domain (target=$target, workers=$workers, auto_apply=$auto_apply)..." >> "$LOG_FILE"
@@ -2025,6 +2030,15 @@ EOF
 cmd_start_bg() {
     exec 2>>/tmp/bcw_sb_trace.log
     echo "=== $(date +%H:%M:%S) start_bg begin ===" >> /tmp/bcw_sb_trace.log
+    # Атомарный засов на время проверки и запуска: два одновременных клика
+    # UI иначе успевают проскочить до создания лока подбора и запускают два скана.
+    if command -v flock >/dev/null 2>&1; then
+        exec 9>/var/run/bcw_start.lock
+        if ! flock -n 9; then
+            echo '{"ok":false,"error":"Подбор уже запускается"}'
+            return 0
+        fi
+    fi
     set -x
     # Не даём запускать второй подбор: флаг, лок и живые процессы
     if [ -d /var/run/bcw_scan.lock ]; then
@@ -4296,7 +4310,7 @@ cmd_health_tick() {
         fi
     fi
 
-    if [ -f /tmp/bcw_scan_paused ] || [ -f /tmp/bcw_evolve.running ]; then
+    if scan_busy || [ -f /tmp/bcw_scan_paused ]; then
         echo '{"skipped":true,"reason":"busy"}'
         return 0
     fi
@@ -4553,6 +4567,24 @@ cmd_evolve_start() {
 }
 
 # Ночное самообучение: один прогон в сутки, цель выбирается по дню.
+# Подбор/эволюция/health-тест не должны пересекаться: каждый из них
+# останавливает службу и запускает свой сканер.
+scan_busy() {
+    local p
+    if [ -d /var/run/bcw_scan.lock ]; then
+        p=$(cat /var/run/bcw_scan.lock/pid 2>/dev/null)
+        [ -n "$p" ] || { sleep 1; p=$(cat /var/run/bcw_scan.lock/pid 2>/dev/null); }
+        if [ -n "$p" ] && kill -0 "$p" 2>/dev/null; then return 0; fi
+        rm -rf /var/run/bcw_scan.lock 2>/dev/null
+    fi
+    if [ -f /tmp/bcw_evolve.running ]; then
+        p=$(cat /tmp/bcw_evolve.running 2>/dev/null)
+        if [ -n "$p" ] && kill -0 "$p" 2>/dev/null; then return 0; fi
+        rm -f /tmp/bcw_evolve.running 2>/dev/null
+    fi
+    ps w 2>/dev/null | grep -qE '[b]lockcheckw-helper (start|apply) ' && return 0
+    return 1
+}
 cmd_evolve_nightly() {
     local marker="/etc/zapret2wizard/.evolve_last"
     local today=$(date +%Y-%m-%d)
@@ -4575,7 +4607,7 @@ cmd_evolve_nightly() {
         *) target="preset_youtube" ;;
     esac
 
-    if [ -f /tmp/bcw_scan_paused ] || [ -f /tmp/bcw_evolve.running ]; then
+    if scan_busy || [ -f /tmp/bcw_scan_paused ]; then
         echo '{"skipped":true,"reason":"busy"}'
         return 0
     fi
@@ -4602,15 +4634,14 @@ cmd_evolve_nightly() {
 cmd_cron_install() {
     local cron_dir="/etc/crontabs"
     local cron_file="$cron_dir/root"
-    local line="23 4 * * * /usr/bin/blockcheckw-helper evolve_nightly >/dev/null 2>&1 # bcw-evolve"
+    local line="10 6 * * * /usr/bin/blockcheckw-helper evolve_nightly >/dev/null 2>&1 # bcw-evolve"
     mkdir -p "$cron_dir" 2>/dev/null || true
     touch "$cron_file" 2>/dev/null || true
-    if ! grep -q 'bcw-evolve' "$cron_file" 2>/dev/null; then
-        echo "$line" >> "$cron_file"
-    fi
-    if ! grep -q 'bcw-health' "$cron_file" 2>/dev/null; then
-        echo "*/30 * * * * /usr/bin/blockcheckw-helper health_tick >/dev/null 2>&1 # bcw-health" >> "$cron_file"
-    fi
+    # Чистим старые задачи (bypass_sync из 0.19.x, прежнее время эволюции),
+    # иначе они продолжают дёргать helper каждые 2 минуты после обновления.
+    sed -i '/bcw-bypass/d;/bcw-health/d;/bcw-evolve/d' "$cron_file" 2>/dev/null || true
+    echo "$line" >> "$cron_file"
+    echo "*/30 * * * * /usr/bin/blockcheckw-helper health_tick >/dev/null 2>&1 # bcw-health" >> "$cron_file"
     /etc/init.d/cron enable >/dev/null 2>&1 || true
     /etc/init.d/cron restart >/dev/null 2>&1 || true
     echo '{"success":true}'
@@ -4716,8 +4747,19 @@ cmd_evolve() {
     local scan="/tmp/bcw_evolve_scan.json"
     local verified="/tmp/bcw_evolve_verified.txt"
 
+    # Эволюция тоже останавливает службу и запускает сканер: без лока она',
+    # пересекается с ручным подбором (ровно этот баг ловили на живом роутере).
+    if scan_busy; then
+        echo '{"success":false,"error":"уже идёт подбор или эволюция"}'
+        return 1
+    fi
+    if ! mkdir /var/run/bcw_scan.lock 2>/dev/null; then
+        echo '{"success":false,"error":"уже идёт подбор или эволюция"}'
+        return 1
+    fi
+    echo $$ > /var/run/bcw_scan.lock/pid 2>/dev/null || true
     echo $$ > /tmp/bcw_evolve.running 2>/dev/null || true
-    trap 'rm -f /tmp/bcw_evolve.running' EXIT INT TERM
+    trap 'rm -f /tmp/bcw_evolve.running; rm -rf /var/run/bcw_scan.lock; _svc_running || _svc_start_bg' EXIT INT TERM
 
     echo "=== Эволюционный подбор ==="
     echo "  провайдер:  $provider"

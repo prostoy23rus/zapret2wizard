@@ -4412,6 +4412,9 @@ return view.extend({
 			btnStopScan.style.display = 'inline-flex';
 			updateProgressUI(statusData);
 			startPolling();
+			// Баннер мог отрисоваться раньше с красным «служба не готова»;
+			// во время подбора он должен быть нейтральным (служба остановлена намеренно).
+			renderRepairBanner();
 		} else if (statusData.status === 'done' && (statusData.isp || statusData.block_type)) {
 			monitorCard.style.display = 'block';
 			updateProgressUI(statusData);
