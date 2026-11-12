@@ -688,6 +688,14 @@ curl_test_https_tls12 ipv4 $domain : nfqws2 --payload=tls_client_hello --lua-des
 curl_test_https_tls13 ipv4 $domain : nfqws2 --payload=tls_client_hello --lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=blob_tls_clienthello_www_google_com:ip_id=zero
 curl_test_https_tls13 ipv4 $domain : nfqws2 --payload=tls_client_hello --lua-desync=fake:blob=0x0F0F0F0F:tcp_seq=-10000:tcp_ack=-66000:badsum --lua-desync=multisplit:pos=2,sld:seqovl=620:seqovl_pattern=blob_tls_clienthello_www_google_com
 curl_test_https_tls13 ipv4 $domain : nfqws2 --payload=tls_client_hello --lua-desync=multidisorder:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1
+
+# --- Family 10: DataNoAck, 7-точечный md5, seqovl 210, bin_noise triple (tachyon-desync) ---
+# PSH без ACK: DPI видит сегмент, но не связывает его с потоком; окно 16 КБ не встаёт.
+curl_test_https_tls13 ipv4 $domain : nfqws2 --payload=tls_client_hello --lua-desync=fake:blob=0x00000000:tcp_flags_set=PSH:tcp_flags_unset=ACK:repeats=2 --lua-desync=multisplit:pos=sniext+1:seqovl=16
+curl_test_https_tls13 ipv4 $domain : nfqws2 --payload=tls_client_hello --lua-desync=multidisorder:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1:tcp_md5
+curl_test_https_tls13 ipv4 $domain : nfqws2 --payload=tls_client_hello --lua-desync=multisplit:pos=midsld:seqovl=210
+curl_test_https_tls13 ipv4 $domain : nfqws2 --payload=tls_client_hello --lua-desync=fake:blob=0x0F0F0F0F:tcp_seq=-10000:tcp_ack=-66000:badsum:repeats=2 --lua-desync=multidisorder:pos=midsld
+curl_test_https_tls13 ipv4 $domain : nfqws2 --payload=tls_client_hello --lua-desync=fake:blob=0x00000000:tcp_ts_up:tcp_ack=-66000:repeats=2 --lua-desync=multisplit:pos=1,midsld
 EOF
 
     # Family 7: Window Size Scaling (wssize) - STRICTLY for non-discord targets
@@ -730,6 +738,17 @@ EOF
             end
         end
 EOF
+
+    # TTL-калибровка (идея AutoTTL из tachyon-desync): фейк должен пройти
+    # транзитный узел, но умереть до сервера. Дистанцию хопов измеряем сами.
+    local ttl=$(cmd_ttl_probe "$domain" 2>/dev/null | sed -n 's/.*"fake_ttl":\([0-9]*\).*/\1/p')
+    if [ -n "$ttl" ]; then
+        cat >> "$probe_file" <<EOF
+# --- Family 11: TTL-калибровка (ip_ttl=$ttl) ---
+curl_test_https_tls13 ipv4 $domain : nfqws2 --payload=tls_client_hello --lua-desync=fake:blob=0x00000000:ip_ttl=$ttl:repeats=2 --lua-desync=multisplit:pos=1,midsld
+curl_test_https_tls13 ipv4 $domain : nfqws2 --payload=tls_client_hello --lua-desync=fakeddisorder:pos=midsld:ip_ttl=$ttl
+EOF
+    fi
 }
 
 generate_adaptive_corpus() {
@@ -2522,27 +2541,49 @@ for idx, ep in ipairs(endpoints) do
         local code_num = tonumber(code) or 0
         local is_ok = false
         local is_truncated = false
+        local stall_reason = ""
 
         if (code_num >= 200 and code_num < 400) then
             if code_num == 204 then
                 is_ok = (elapsed < 5.0)
+                if not is_ok then stall_reason = "204_slow" end
             else
-                -- Body stream validation against TSPU mid-stream truncation / 16 KB stall (inspired by ByeByeDPI)
+                -- Валидация потока против обрыва ТСПУ: 16 КБ cap, недобор тела,
+                -- зависание. Порог 14..32 КБ + 15 с — эвристика tachyon-desync:
+                -- сервер отдал начало, дальше DPI молча держит поток.
                 if size > 0 then
                     is_ok = (elapsed < 5.5)
-                    -- Крупный запрос, а пришло меньше половины — значит ТСПУ оборвал поток
-                    -- (классический стоп на 16 КБ), даже если код 200.
-                    if is_ok and exp_bytes >= 100000 and size < exp_bytes * 0.5 then
+                    if not is_ok then stall_reason = "slow_body" end
+                    if size >= 14336 and size < 32768 and elapsed >= 15.0 then
                         is_ok = false
                         is_truncated = true
+                        stall_reason = "16k_cap"
+                    end
+                    -- Крупный запрос, а пришло меньше половины — ТСПУ оборвал поток.
+                    if exp_bytes >= 100000 and size < exp_bytes * 0.5 then
+                        is_ok = false
+                        is_truncated = true
+                        if stall_reason == "" or stall_reason == "slow_body" then stall_reason = "short_body" end
+                    end
+                    -- Короткая чистая транзакция (JSON API, WebSocket upgrade, картинка)
+                    -- не должна считаться обрывом, если объём ожидаем для эндпоинта.
+                    if size >= 96 and size < 32768 and elapsed < 5.5 and code_num ~= 204
+                       and (exp_bytes < 100000 or size >= exp_bytes * 0.5) then
+                        is_ok = true
+                        is_truncated = false
+                        if stall_reason == "slow_body" or stall_reason == "short_body" then stall_reason = "" end
                     end
                 else
                     is_ok = false
                     is_truncated = true
+                    stall_reason = "zero_body"
                 end
             end
         elseif (code_num == 403 or code_num == 404) then
             is_ok = (elapsed < 4.5)
+            if not is_ok then stall_reason = "auth_slow" end
+        else
+            stall_reason = "http_" .. tostring(code)
         end
 
         local speed_kbs = math.floor(speed / 1024)
@@ -2559,6 +2600,7 @@ for idx, ep in ipairs(endpoints) do
             http_code = code,
             accessible = is_ok,
             truncated = is_truncated,
+            stall_reason = stall_reason,
             data_flow = ((size > 0 or code_num == 204 or code_num == 403 or code_num == 404) and is_ok),
             size_bytes = size,
             speed_kbs = speed_kbs,
@@ -2568,8 +2610,11 @@ for idx, ep in ipairs(endpoints) do
 end
 
 local has_truncated = false
+local has_cap16 = false
+local cap16_name = ""
 for _, r in ipairs(results) do
-    if r.truncated then has_truncated = true break end
+    if r.truncated then has_truncated = true end
+    if r.stall_reason == "16k_cap" then has_cap16 = true; cap16_name = r.name end
 end
 
 local all_ok = (total_ok == #endpoints and #endpoints > 0)
@@ -2579,6 +2624,9 @@ local status_msg = "✗ Сервис не отвечает (заблокиров
 if all_ok then
     overall_status = "optimal"
     status_msg = "✓ Все компоненты сервиса доступны, данные передаются без помех (" .. #endpoints .. "/" .. #endpoints .. ")"
+elseif has_cap16 then
+    overall_status = "degraded"
+    status_msg = "⚠️ ТСПУ обрывает поток на ~16 КБ (" .. cap16_name .. "): соединение есть, данные не идут."
 elseif has_truncated then
     overall_status = "degraded"
     status_msg = "⚠️ Обнаружен скрытый троттлинг ТСПУ: соединение установлено, но передача потока данных заблокирована (0 байт)!"
@@ -3411,10 +3459,40 @@ dns_fix_instagram() {
     return 0
 }
 
+# Fallback без DoH: нестандартные порты публичных резолверов (идея tachyon-desync
+# clean DNS). Провайдер часто перехватывает UDP/53, но 1253/5353 проходят.
+dns_alt_ensure() {
+    local dom="$1" srv out
+    [ -n "$dom" ] || return 1
+    case "$dom" in *[!a-zA-Z0-9.-]*) return 1 ;; esac
+    out=$(nslookup "$dom" 127.0.0.1 2>&1)
+    case "$out" in *"can't find"*|*NXDOMAIN*|*SERVFAIL*|"") ;; *) return 0 ;; esac
+    for srv in "77.88.8.8#1253" "208.67.222.222#5353"; do
+        uci -q get dhcp.@dnsmasq[0].server 2>/dev/null | grep -q "/$dom/$srv" && return 0
+        uci add_list dhcp.@dnsmasq[0].server="/$dom/$srv" 2>/dev/null || continue
+        uci commit dhcp 2>/dev/null || true
+        /etc/init.d/dnsmasq reload >/dev/null 2>&1 || /etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
+        if nslookup "$dom" 127.0.0.1 2>&1 | grep -q "Name:"; then
+            echo "[blockcheckw-helper] DNS: $dom через $srv (без DoH)" >> "$LOG_FILE" 2>/dev/null || true
+            return 0
+        fi
+        uci del_list dhcp.@dnsmasq[0].server="/$dom/$srv" 2>/dev/null || true
+        uci commit dhcp 2>/dev/null || true
+    done
+    return 1
+}
 cmd_optimize_dns() {
     local changed=0 entry dom cs
     uci -q get dhcp.@dnsmasq[0] >/dev/null 2>&1 || return 0
-    netstat -ln 2>/dev/null | grep -q '127.0.0.1:5053' || return 0
+    if ! netstat -ln 2>/dev/null | grep -q '127.0.0.1:5053'; then
+        # DoH нет: чиним DNS для заблокированных домен через альтернативные порты.
+        local alt=0 d
+        for d in instagram.com cdninstagram.com discord.com twitch.tv x.com; do
+            dns_alt_ensure "$d" && alt=1
+        done
+        echo "{\"changed\":$alt}"
+        return 0
+    fi
     for dom in googlevideo.com ytimg.com ggpht.com; do
         entry="/$dom/127.0.0.1#5053"
         if ! uci -q get dhcp.@dnsmasq[0].server 2>/dev/null | grep -q "/$dom/"; then
@@ -3645,6 +3723,29 @@ cmd_ensure_lua() {
     return 1
 }
 
+# Авто-калибровка TTL для фейковых пакетов (идея tachyon-desync AutoTTL):
+# фейк должен пройти транзитный узел ТСПУ, но умереть до сервера. Оцениваем
+# дистанцию хопов и берём TTL на 1–2 меньше, чтобы сервер не получил фейк.
+cmd_ttl_probe() {
+    local domain="${1:-www.youtube.com}"
+    local ip="" hops="" ttl t=2
+    ip=$(nslookup -type=a "$domain" 127.0.0.1 2>/dev/null | sed -n "s/Address: //p" | tail -1)
+    [ -n "$ip" ] || ip=$(nslookup "$domain" 2>/dev/null | sed -n "s/Address: //p" | tail -1)
+    if [ -n "$ip" ] && command -v traceroute >/dev/null 2>&1; then
+        hops=$(traceroute -n -m 12 -q 1 -w 2 "$ip" 2>/dev/null | awk 'NF >= 2 && $1 ~ /^[0-9]+$/ { h = $1 } END { print h }')
+    fi
+    if [ -z "$hops" ] && [ -n "$ip" ] && command -v ping >/dev/null 2>&1; then
+        while [ "$t" -le 12 ]; do
+            if ping -c1 -W1 -t "$t" "$ip" >/dev/null 2>&1; then hops="$t"; break; fi
+            t=$((t + 1))
+        done
+    fi
+    [ -n "$hops" ] || hops=6
+    ttl=$((hops - 2))
+    [ "$ttl" -lt 2 ] && ttl=2
+    [ "$ttl" -gt 9 ] && ttl=9
+    printf '{"ok":true,"domain":"%s","ip":"%s","hops":%s,"fake_ttl":%s}\n' "$domain" "${ip:-}" "$hops" "$ttl"
+}
 cmd_doctor() {
     local ok=1
     local checks=""
@@ -4315,10 +4416,22 @@ cmd_youtube_audit() {
             code="$1"; bytes="$2"; sec="$3"
         fi
         total=$((total + 1))
-        [ "$code" != "000" ] && score=$((score + 1))
-        checks="${checks:+$checks,}{\"name\":\"$name\",\"code\":\"$code\",\"bytes\":${bytes:-0},\"time\":${sec:-0}}"
+        local point_ok=0 point_reason=""
+        if [ "$code" != "000" ] && [ -n "$code" ]; then point_ok=1; fi
+        # 16 КБ cap: код 200, тело 14..32 КБ и ожидание — ТСПУ держит поток.
+        if [ "$point_ok" = "1" ] && [ "$name" = "www" ]; then
+            local b=${bytes:-0} s=${sec:-0}
+            if [ "$b" -gt 0 ] && [ "$b" -lt 32768 ] && awk "BEGIN{exit !($s >= 5)}" 2>/dev/null; then
+                point_ok=0; point_reason="cap16"
+            elif [ "$b" -eq 0 ]; then
+                point_ok=0; point_reason="zero_body"
+            fi
+        fi
+        [ "$point_ok" = "1" ] && score=$((score + 1))
+        checks="${checks:+$checks,}{\"name\":\"$name\",\"code\":\"$code\",\"bytes\":${bytes:-0},\"time\":${sec:-0},\"ok\":$([ "$point_ok" = "1" ] && echo true || echo false),\"reason\":\"$point_reason\"}"
         [ "$name" = "api" ] && [ "$code" = "000" ] && { advice="fix_ytapi"; advice_text="API YouTube не открывается — примените профиль YTApi"; }
         [ "$name" = "cdn" ] && [ "$code" = "000" ] && { advice="rescan_youtube"; advice_text="CDN YouTube не отвечает — запустите подбор заново"; }
+        [ "$name" = "www" ] && [ "$point_reason" = "cap16" ] && { advice="rescan_youtube"; advice_text="ТСПУ обрывает поток YouTube на ~16 КБ — стратегия не держит поток, запустите подбор заново"; }
     done
     qm=$(uci -q get zapret2wizard.main.quic_mode); [ -n "$qm" ] || qm=auto
     qr=$(uci -q get firewall.reject_quic.enabled); [ -n "$qr" ] || qr=?
@@ -5718,6 +5831,7 @@ kmods_resolve) shift; _kmods_fetch_official "$@" dry ;;
 fix_ytapi) cmd_fix_ytapi ;;
 ensure_ytapi) cmd_ensure_ytapi ;;
 ensure_lua) cmd_ensure_lua ;;
+ttl_probe) shift; cmd_ttl_probe "$@" ;;
 quic_probe) cmd_quic_probe && echo ok || echo fail ;;
 quic_mode) shift; cmd_quic_mode "$@" ;;
 optimize_dns) cmd_optimize_dns ;;

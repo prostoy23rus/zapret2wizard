@@ -7,3 +7,6 @@ gateway.instagram.com
 static.cdninstagram.com
 graph.instagram.com
 i.instagram.com
+scontent.cdninstagram.com
+video.cdninstagram.com
+www.instagram.com

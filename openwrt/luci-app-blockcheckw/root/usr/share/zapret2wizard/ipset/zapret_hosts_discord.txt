@@ -64,3 +64,6 @@ development.dl2.discordapp.net
 discord-attachments-uploads-prd.storage.googleapis.com
 gateway.discord.gg
 gateway.discord.gg
+cdn.discordapp.com
+media.discordapp.net
+discord.com

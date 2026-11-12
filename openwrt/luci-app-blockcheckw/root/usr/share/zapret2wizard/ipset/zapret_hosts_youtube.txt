@@ -46,3 +46,5 @@ jnn-pa.googleapis.com
 youtubeembeddedplayer.googleapis.com
 youtube.googleapis.com
 redirector.googlevideo.com
+youtubei.googleapis.com
+www.youtube.com
