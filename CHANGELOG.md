@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.28.0] (2026-11-13)
+
+### Полная очистка следов при удалении/остановке (issue #1)
+
+После удаления z2w оставались DNS-переадресации `/googlevideo.com/
+127.0.0.1#5053`, `/ytimg.com/...`, `/ggpht.com/...` и правило Reject-QUIC.
+Если DoH-прокси уже не работал, YouTube открывался, но видео не грузилось
+(CDN не резолвился), а Reject-QUIC блокировал UDP/443 даже через ZeroBlock.
+
+* `cleanup_leftovers`: удаляет наши DNS-записи (5053/5055/alt-порты),
+  Instagram-пины, правило `firewall.reject_quic`, nft-таблицу;
+* `uninstall` вызывает очистку **всегда**, а не только с `--remove-quic`;
+* `init stop` снимает Reject-QUIC (внутренняя остановка на время скана —
+  через `BCW_INTERNAL_STOP=1` — правило не трогает);
+* команда `helper cleanup`;
+* `tools/cleanup-leftovers.sh` — для тех, кто уже удалил службу.
+
+Проверено: синтетические записи + Reject-QUIC → cleanup удалил всё,
+служба после restart снова 3 движка/nft, YouTube audit 4/4; отдельно
+проверено, что `init stop` выключает Reject-QUIC.
+
 ## [0.27.3] (2026-11-13)
 
 ### Вечный «Подбор уже выполняется»

@@ -419,6 +419,14 @@ stop_service() {
 	logger -t zapret2wizard "Stopping Zapret2Wizard service and firewall..."
 	nft delete table inet zapret2wizard 2>/dev/null || true
 	rm -f "$PIDDIR/zapret2wizard_"*.pid
+	# Пользовательская остановка: снимаем Reject-QUIC, иначе UDP/443 остаётся
+	# заблокированным и YouTube не грузит видео через другие обходы.
+	# При внутренней остановке на время скана правило не трогаем.
+	if [ "${BCW_INTERNAL_STOP:-0}" != "1" ] && uci -q get firewall.reject_quic >/dev/null 2>&1; then
+		uci -q set firewall.reject_quic.enabled=0
+		uci -q commit firewall 2>/dev/null || true
+		/etc/init.d/firewall reload >/dev/null 2>&1 || true
+	fi
 }
 
 reload_service() {

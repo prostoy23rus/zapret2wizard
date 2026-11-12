@@ -209,7 +209,7 @@ _svc_stop() {
     # init stop иногда зависает (procd ждёт pidfile/движки) — ограничиваем 8 с,
     # иначе подбор навсегда застревает на фазе «Инициализация 10%».
     if [ -x /etc/init.d/zapret2wizard ]; then
-        ( /etc/init.d/zapret2wizard stop >/dev/null 2>&1 ) &
+        ( BCW_INTERNAL_STOP=1 /etc/init.d/zapret2wizard stop >/dev/null 2>&1 ) &
         local sp=$!
         local i=0
         while kill -0 "$sp" 2>/dev/null && [ "$i" -lt 8 ]; do
@@ -2237,6 +2237,13 @@ cmd_stop() {
     rm -rf /var/run/bcw_scan.lock 2>/dev/null || true
     rm -f /tmp/bcw_scan_paused /tmp/bcw_paused_services 2>/dev/null || true
     nft delete table inet blockcheckw 2>/dev/null
+    # Остановили службу — снимаем и Reject-QUIC, иначе YouTube-видео
+    # остаётся без UDP/443 даже при работе другого обхода.
+    if uci -q get firewall.reject_quic >/dev/null 2>&1; then
+        uci -q set firewall.reject_quic.enabled=0
+        uci -q commit firewall
+        /etc/init.d/firewall reload >/dev/null 2>&1 || true
+    fi
     restart_dpi_service
     write_status "idle" 0 "Остановлено пользователем"
     echo '{"status":"stopped"}'
@@ -5718,8 +5725,50 @@ cmd_update() {
     echo '{"success":true,"version":"'"$new_ver"'","message":"Служба успешно обновлена до версии '"$new_ver"'!"}'
 }
 
+# Удаление наших следов: DNS-записи, Reject-QUIC, nft-таблица.
+# Нужно и при uninstall, и как отдельная команда для уже удалённых установок.
+cleanup_leftovers() {
+    local changed=0 s
+    if uci -q get dhcp.@dnsmasq[0] >/dev/null 2>&1; then
+        for s in $(uci -q get dhcp.@dnsmasq[0].server 2>/dev/null); do
+            case "$s" in
+                /googlevideo.com/*|/ytimg.com/*|/ggpht.com/*|/instagram.com/*|/cdninstagram.com/*|/discord.com/*|/twitch.tv/*|/x.com/*)
+                    case "$s" in
+                        *127.0.0.1#5053*|*127.0.0.1#5055*|*77.88.8.8#1253*|*208.67.222.222#5353*)
+                            uci -q del_list dhcp.@dnsmasq[0].server="$s" 2>/dev/null && changed=1
+                            ;;
+                    esac
+                    ;;
+            esac
+        done
+        for s in $(uci -q get dhcp.@dnsmasq[0].address 2>/dev/null); do
+            case "$s" in
+                /instagram.com/*|/cdninstagram.com/*|/www.instagram.com/*)
+                    uci -q del_list dhcp.@dnsmasq[0].address="$s" 2>/dev/null && changed=1
+                    ;;
+            esac
+        done
+        if [ "$changed" = "1" ]; then
+            uci commit dhcp 2>/dev/null || true
+            /etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
+        fi
+    fi
+    if uci -q get firewall.reject_quic >/dev/null 2>&1; then
+        uci -q delete firewall.reject_quic 2>/dev/null || true
+        uci commit firewall 2>/dev/null || true
+        /etc/init.d/firewall reload >/dev/null 2>&1 || true
+    fi
+    nft delete table inet zapret2wizard 2>/dev/null || true
+    echo "{\"cleaned\":true,\"dns_changed\":$changed}"
+}
+
 cmd_uninstall() {
     local remove_quic="$1"
+
+    # Убираем свои следы всегда, а не только с --remove-quic: иначе после
+    # удаления остаются DNS-записи на мёртвый DoH и Reject-QUIC, из-за
+    # которых YouTube не грузит видео даже через ZeroBlock.
+    cleanup_leftovers >/dev/null 2>&1 || true
 
     # Stop active scanning processes
     killall -9 blockcheckw 2>/dev/null || true
@@ -5752,14 +5801,6 @@ ubus call luci reload >/dev/null 2>&1 || true
 rm -f /tmp/bcw_uninstall_exec.sh
 EOF
     chmod +x /tmp/bcw_uninstall_exec.sh
-
-    if [ "$remove_quic" = "--remove-quic" ]; then
-        if command -v uci >/dev/null 2>&1 && [ -f /etc/config/firewall ]; then
-            uci delete firewall.reject_quic 2>/dev/null || true
-            uci commit firewall 2>/dev/null || true
-            /etc/init.d/firewall reload >/dev/null 2>&1 || true
-        fi
-    fi
 
     /tmp/bcw_uninstall_exec.sh </dev/null >/dev/null 2>&1 &
 
@@ -6168,6 +6209,7 @@ case "$1" in
     memory_forget) shift; mem forget "$@" ;;
     memory_rank) shift; mem rank "$@" ;;
     memory_ewma) shift; mem ewma_filter "$@" ;;
+    cleanup) cleanup_leftovers ;;
     read_hostlist) shift; cmd_read_hostlist "$@" ;;
     add_hostlist_domain) shift; cmd_add_hostlist_domain "$@" ;;
     remove_hostlist_domain) shift; cmd_remove_hostlist_domain "$@" ;;
