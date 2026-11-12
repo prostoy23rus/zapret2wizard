@@ -172,6 +172,38 @@ our_engines() {
     done
 }
 _svc_running() { [ -n "$(our_engines)" ]; }
+
+# Жив ли владелец scan-лока. Keeper — это "sleep 7200": он может пережить
+# убитый скан и держать лок два часа, поэтому одного kill -0 недостаточно.
+_scan_lock_alive() {
+    local p="$1"
+    [ -n "$p" ] || return 1
+    kill -0 "$p" 2>/dev/null || return 1
+    local cmd
+    cmd=$(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null)
+    case "$cmd" in
+        *blockcheckw*) return 0 ;;
+    esac
+    # keeper-sleep сам по себе ничего не значит: смотрим scan_pid (shell скана)
+    # и реальный процесс сканера.
+    local sp
+    sp=$(cat /var/run/bcw_scan.lock/scan_pid 2>/dev/null)
+    if [ -n "$sp" ] && kill -0 "$sp" 2>/dev/null; then
+        cmd=$(tr '\0' ' ' < "/proc/$sp/cmdline" 2>/dev/null)
+        case "$cmd" in
+            *blockcheckw*) return 0 ;;
+        esac
+    fi
+    local q qcmd
+    for q in /proc/[0-9]*; do
+        q="${q#/proc/}"
+        qcmd=$(tr '\0' ' ' < "/proc/$q/cmdline" 2>/dev/null)
+        case "$qcmd" in
+            *"/usr/bin/blockcheckw "*|*"blockcheckw check"*|*"blockcheckw scan"*) return 0 ;;
+        esac
+    done
+    return 1
+}
 _svc_stop() {
     # Останавливаем через procd: иначе respawn поднимет движок прямо во время подбора.
     # init stop иногда зависает (procd ждёт pidfile/движки) — ограничиваем 8 с,
@@ -1317,16 +1349,23 @@ cmd_start() {
             # Пустой pid — лок только что создан другим процессом: даём 2 с и
             # перепроверяем, иначе второй скан угоняет лок у первого.
             [ -n "$_old" ] || { sleep 2; _old=$(cat "$SCAN_LOCK/pid" 2>/dev/null); }
-            if [ -n "$_old" ] && kill -0 "$_old" 2>/dev/null; then
+            if [ -n "$_old" ] && _scan_lock_alive "$_old"; then
                 kill "$SCAN_KEEPER" 2>/dev/null
                 write_status "error" 0 "Подбор уже выполняется. Дождитесь завершения."
                 echo '{"success":false,"error":"Подбор уже выполняется. Дождитесь завершения."}'
                 exit 1
             fi
+            # Лок осиротел (keeper-sleep пережил убитый скан) — снимаем.
+            [ -n "$_old" ] && kill -9 "$_old" 2>/dev/null
             rm -rf "$SCAN_LOCK"
             mkdir "$SCAN_LOCK" 2>/dev/null || true
         fi
         echo "$SCAN_KEEPER" > "$SCAN_LOCK/pid" 2>/dev/null || true
+        # PID самого shell-скана (subshell): по нему отличаем живой скан от
+        # осиротевшего keeper-sleep.
+        local _scan_self=""
+        read -r _scan_self _ < /proc/self/stat 2>/dev/null || true
+        [ -n "$_scan_self" ] && echo "$_scan_self" > "$SCAN_LOCK/scan_pid" 2>/dev/null || true
 
         echo "[blockcheckw-helper] Starting Unified Smart Scan for $domain (target=$target, workers=$workers, auto_apply=$auto_apply)..." >> "$LOG_FILE"
         history_add "scan_start" "$(metric_target_key "$target")" "Начат подбор для $domain"
@@ -2189,6 +2228,11 @@ cmd_stop() {
         rm -f "$PID_FILE"
     fi
     killall -9 blockcheckw blockcheckw-helper 2>/dev/null
+    # Keeper-лок мог пережить скан: гасим его явно.
+    if [ -d /var/run/bcw_scan.lock ]; then
+        local _kp=$(cat /var/run/bcw_scan.lock/pid 2>/dev/null)
+        [ -n "$_kp" ] && kill -9 "$_kp" 2>/dev/null
+    fi
     rm -f /tmp/blockcheckw.lock
     rm -rf /var/run/bcw_scan.lock 2>/dev/null || true
     rm -f /tmp/bcw_scan_paused /tmp/bcw_paused_services 2>/dev/null || true
@@ -4823,7 +4867,8 @@ scan_busy() {
     if [ -d /var/run/bcw_scan.lock ]; then
         p=$(cat /var/run/bcw_scan.lock/pid 2>/dev/null)
         [ -n "$p" ] || { sleep 1; p=$(cat /var/run/bcw_scan.lock/pid 2>/dev/null); }
-        if [ -n "$p" ] && kill -0 "$p" 2>/dev/null; then return 0; fi
+        if [ -n "$p" ] && _scan_lock_alive "$p"; then return 0; fi
+        [ -n "$p" ] && kill -9 "$p" 2>/dev/null
         rm -rf /var/run/bcw_scan.lock 2>/dev/null
     fi
     if [ -f /tmp/bcw_evolve.running ]; then
