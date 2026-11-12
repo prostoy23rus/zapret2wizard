@@ -475,7 +475,7 @@ fi
 # Установка базовых списков хостов (лимит 40 с, уже существующие не перекачиваем)
 echo -e "${BLUE}ℹ${NC} Проверка списков доменов..."
 (
-    for ipset_file in zapret_hosts_youtube.txt zapret_hosts_discord.txt zapret_hosts_x.txt zapret_hosts_instagram.txt zapret_hosts_twitch.txt zapret_hosts_user.txt zapret_hosts_user_exclude.txt zapret_hosts_auto.txt; do
+    for ipset_file in zapret_hosts_youtube.txt zapret_hosts_discord.txt zapret_hosts_x.txt zapret_hosts_instagram.txt zapret_hosts_twitch.txt zapret_hosts_ai.txt zapret_hosts_spotify.txt zapret_hosts_user.txt zapret_hosts_user_exclude.txt zapret_hosts_auto.txt; do
         case "$ipset_file" in
             zapret_hosts_user.txt|zapret_hosts_user_exclude.txt|zapret_hosts_auto.txt)
                 [ -s "/usr/share/zapret2wizard/ipset/$ipset_file" ] && continue ;;
@@ -490,13 +490,14 @@ while kill -0 "$lists_pid" 2>/dev/null && [ "$waited" -lt 40 ]; do
     waited=$((waited + 3))
 done
 kill -9 "$lists_pid" 2>/dev/null || true
-for ipset_file in zapret_hosts_youtube.txt zapret_hosts_discord.txt zapret_hosts_x.txt zapret_hosts_instagram.txt zapret_hosts_twitch.txt zapret_hosts_user.txt zapret_hosts_user_exclude.txt zapret_hosts_auto.txt; do
+for ipset_file in zapret_hosts_youtube.txt zapret_hosts_discord.txt zapret_hosts_x.txt zapret_hosts_instagram.txt zapret_hosts_twitch.txt zapret_hosts_ai.txt zapret_hosts_spotify.txt zapret_hosts_user.txt zapret_hosts_user_exclude.txt zapret_hosts_auto.txt; do
     [ -f "/etc/zapret2wizard/ipset/$ipset_file" ] || cp -f "/usr/share/zapret2wizard/ipset/$ipset_file" "/etc/zapret2wizard/ipset/$ipset_file" 2>/dev/null || true
 done
 
 # Объединяем поставку с текущими /etc-списками: новые домены добавляются,
 # правки и дополнения пользователя сохраняются.
 [ -x /usr/bin/blockcheckw-helper ] && /usr/bin/blockcheckw-helper hostlists_merge >/dev/null 2>&1 || true
+[ -x /usr/bin/blockcheckw-helper ] && /usr/bin/blockcheckw-helper ensure_hostlists >/dev/null 2>&1 || true
 
 # Установка автономной службы /etc/init.d/zapret2wizard
 fetch_req "openwrt/luci-app-blockcheckw/root/etc/init.d/zapret2wizard" /etc/init.d/zapret2wizard 8

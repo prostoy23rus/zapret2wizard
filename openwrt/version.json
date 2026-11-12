@@ -1,12 +1,13 @@
 {
-  "version": "0.21.6",
-  "release_date": "2026-11-12",
+  "version": "0.22.0",
+  "release_date": "2026-11-13",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "Классификатор 16-КБ cap теперь срабатывает и при таймауте curl: большие страницы ждут 20 с, частичное тело 14–32 КБ помечается как 16k_cap",
-    "health_tick раз в 30 минут перепроверяет закреплённые IP Instagram и перепинывает их при сбое",
-    "Диагностическая команда dns_alt <домен>; резолвер 77.88.8.8:1253 проверен на живом роутере",
-    "При выборе сервиса без сохранённых результатов показывается подсказка «запустите поиск»"
+    "Новый пресет AI-сервисы: chatgpt.com, claude.ai, gemini.google.com, copilot.microsoft.com, perplexity.ai, deepseek.com и CDN",
+    "Новый пресет Spotify / аудио: open.spotify.com, api.spotify.com, scdn.co, pscdn.co, soundcloud.com",
+    "Плитки AI и Spotify в интерфейсе, цели подбора, аудит доступности, списки доменов (354 и 55 доменов)",
+    "Списки доменов AI и Spotify добавлены в окно списков и в автообновление (объединение с сохранением правок)",
+    "HOSTLISTS_REV поднят: при обновлении разделы list_hosts_ai/list_hosts_spotify создаются автоматически"
   ]
 }

@@ -308,6 +308,48 @@
         "--payload=tls_client_hello --lua-desync=hostfakesplit:host=ozon.ru:tcp_seq=0:tcp_ack=-66000:badsum"
       ]
     },
+    "preset_ai": {
+      "name": "Предустановленный список AI (3)",
+      "label": "AI-сервисы (3)",
+      "domain": "chatgpt.com",
+      "test_url": "https://chatgpt.com",
+      "validation_endpoints": [
+        {"name": "Веб-интерфейс (chatgpt.com)", "url": "https://chatgpt.com", "range": "0-262143"},
+        {"name": "Claude (claude.ai)", "url": "https://claude.ai", "range": "0-16383"},
+        {"name": "Gemini (gemini.google.com)", "url": "https://gemini.google.com", "range": "0-16383"}
+      ],
+      "hostlist": "list_hosts_ai",
+      "port": "443",
+      "protocols": ["tls12", "tls13"],
+      "filter_l7": "tls",
+      "description": "OpenAI/ChatGPT, Claude, Gemini, Copilot, Perplexity, DeepSeek и их CDN",
+      "turbo_strategies": [
+        "--payload=tls_client_hello --lua-desync=hostfakesplit:host=gosuslugi.ru:tcp_ts=-600000",
+        "--payload=tls_client_hello --lua-desync=fake:blob=0x00000000:tcp_md5:repeats=6 --lua-desync=multisplit:pos=midsld",
+        "--payload=tls_client_hello --lua-desync=multidisorder:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1"
+      ]
+    },
+    "preset_spotify": {
+      "name": "Предустановленный список Spotify (3)",
+      "label": "Spotify / аудио (3)",
+      "domain": "open.spotify.com",
+      "test_url": "https://open.spotify.com",
+      "validation_endpoints": [
+        {"name": "Веб-плеер (open.spotify.com)", "url": "https://open.spotify.com", "range": "0-262143"},
+        {"name": "API и метаданные (api.spotify.com)", "url": "https://api.spotify.com", "range": "0-16383"},
+        {"name": "Медиа CDN (i.scdn.co)", "url": "https://i.scdn.co", "range": "0-16383"}
+      ],
+      "hostlist": "list_hosts_spotify",
+      "port": "443",
+      "protocols": ["tls12", "tls13"],
+      "filter_l7": "tls",
+      "description": "Spotify и SoundCloud: веб-плеер, API, медиа-CDN",
+      "turbo_strategies": [
+        "--payload=tls_client_hello --lua-desync=hostfakesplit:host=gosuslugi.ru:tcp_ts=-600000",
+        "--payload=tls_client_hello --lua-desync=multidisorder:pos=1,midsld",
+        "--payload=tls_client_hello --lua-desync=fake:blob=0x00000000:tcp_md5:repeats=6 --lua-desync=multisplit:pos=midsld"
+      ]
+    },
     "tcp16": {
       "name": "Лимит данных (16 КБ)",
       "label": "Лимит данных (16 КБ)",

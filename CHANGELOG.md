@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.22.0] (2026-11-13)
+
+### Новые пресеты: AI-сервисы и Spotify / аудио
+
+* **AI-сервисы**: chatgpt.com, openai.com, claude.ai, anthropic.com,
+  gemini.google.com, copilot.microsoft.com, perplexity.ai, deepseek.com,
+  huggingface.co, openrouter.ai и CDN; список 354 домена;
+* **Spotify / аудио**: open.spotify.com, api.spotify.com, scdn.co,
+  pscdn.co, soundcloud.com, sndcdn.com и медиа-CDN; список 55 доменов;
+* плитки в UI, цели подбора, проверка доступности, сохранение результатов
+  по каждому пресету; кнопка «Применить» работает и для них;
+* окно списков доменов показывает 9 разделов (AI и Spotify добавлены),
+  автообновление списков объединяет новые домены с правками пользователя;
+* HOSTLISTS_REV поднят — на существующих установках разделы
+  list_hosts_ai/list_hosts_spotify создаются при обновлении;
+* проверено на роутере: подбор AI — 40 стратегий, Spotify — 40,
+  служба после обоих подборов running, 3 движка, 9 строк в списках.
+
 ## [0.21.6] (2026-11-12)
 
 ### P0: проверка верификации, DNS и подсказок
