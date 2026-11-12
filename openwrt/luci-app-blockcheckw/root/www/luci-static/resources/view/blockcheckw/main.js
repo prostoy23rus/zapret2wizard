@@ -1091,6 +1091,7 @@ return view.extend({
 			'.bcw-switch .bcw-switch-dot{position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#93a0b4;transition:.15s;}',
 			'.bcw-switch.on .bcw-switch-dot{left:18px;background:#35c07a;}',
 			'.bcw-switch-busy{opacity:.5;pointer-events:none;}',
+			'.bcw-switch.disabled{opacity:.4;cursor:not-allowed;}',
 			'.bcw-history{display:flex;flex-direction:column;}',
 			'.bcw-history-row{display:grid;grid-template-columns:56px 28px minmax(0,1fr);gap:10px;align-items:center;padding:12px 16px;border-top:1px solid var(--bcw-border-divider,#2a313d);}',
 			'.bcw-history-time{font-size:12px;color:var(--bcw-text-muted,#93a0b4);font-variant-numeric:tabular-nums;}',
@@ -1349,6 +1350,7 @@ return view.extend({
 			var svc = (zapretInfo && zapretInfo.services) ? zapretInfo.services[key] : null;
 			if (ch.id === 'domains' || ch.id === 'test_strategy') return null;
 			if (!svc) return { cls: 'mute', text: 'не настроен' };
+			if (!svc.script || !String(svc.script).trim()) return { cls: 'mute', text: 'не настроен' };
 			if (svc.enabled) {
 				// «защищён» — только если служба работает И правила применены
 				if (!isServiceRunning) return { cls: 'warn', text: 'настроен · служба выкл.' };
@@ -1384,7 +1386,14 @@ return view.extend({
 		function serviceSwitchFor(targetId) {
 			var key = rowKeyOf(targetId);
 			var svc = (zapretInfo && zapretInfo.services) ? zapretInfo.services[key] : null;
-			if (!svc || !svc.script || !String(svc.script).trim()) return null;
+			if (targetId === 'domains' || targetId === 'test_strategy') return null;
+			if (!svc || !svc.script || !String(svc.script).trim()) {
+				return E('span', {
+					class: 'bcw-switch disabled',
+					title: 'Сначала примените найденную стратегию — после этого появится переключатель',
+					click: function(e) { e.stopPropagation(); ui.addNotification(null, E('p', {}, 'Для этого сервиса ещё нет применённой стратегии: выберите её в найденных и нажмите «Применить».'), 'warning'); }
+				}, [E('span', { class: 'bcw-switch-dot' })]);
+			}
 			return E('span', {
 				class: 'bcw-switch' + (svc.enabled ? ' on' : ''),
 				title: svc.enabled
@@ -1698,9 +1707,9 @@ return view.extend({
 							self.textContent = '⏳ Обновление...';
 							getZapretInfo().then(function(info) {
 								zapretInfo = info || {};
-						
-		zapretServicesData = zapretInfo.services || {};
+								zapretServicesData = zapretInfo.services || {};
 								zapretAllStrategies = zapretInfo.all_strategies || [];
+								updateSummaryBox();
 								updateActiveStrategyDisplay();
 								self.disabled = false;
 								self.textContent = '🔄 Обновить';
@@ -3070,6 +3079,7 @@ return view.extend({
 				try { parsed = JSON.parse(res.stdout); } catch(e) {}
 				if (parsed && parsed.success) {
 					getZapretInfo().then(function(info) {
+						zapretInfo = info || zapretInfo;
 						zapretServicesData = info.services || {};
 						zapretAllStrategies = info.all_strategies || [];
 						updateSummaryBox();
@@ -3115,6 +3125,7 @@ return view.extend({
 				if (parsed && parsed.success) {
 					ui.addNotification(null, E('p', {}, '✓ Запись ' + chosenSec + ' удалена.'), 'info');
 					getZapretInfo().then(function(info) {
+						zapretInfo = info || zapretInfo;
 						zapretServicesData = info.services || {};
 						zapretAllStrategies = info.all_strategies || [];
 						updateSummaryBox();
@@ -3530,6 +3541,7 @@ return view.extend({
 						activeScanInProgress = false;
 						resetScanUI();
 						getZapretInfo().then(function(info) {
+							zapretInfo = info || zapretInfo;
 							zapretServicesData = info.services || {};
 							zapretAllStrategies = info.all_strategies || [];
 							updateSummaryBox();
@@ -3623,6 +3635,7 @@ return view.extend({
 					doneRefreshRequested = true;
 					getZapretInfo().then(function(info) {
 						zapretInfo = info || {};
+						try { updateSummaryBox(); } catch (e) {}
 						try { updateActiveStrategyDisplay(); } catch (e) {}
 					});
 				}
@@ -4461,6 +4474,7 @@ return view.extend({
 									status.textContent = '✓ Записано: ' + out.written + ', пропущено: ' + out.skipped + ', всего: ' + out.count;
 									return getZapretInfo().then(function(info) {
 										zapretInfo = info || {};
+										try { updateSummaryBox(); } catch (e) {}
 										lists = (zapretInfo.hostlists || lists).slice();
 										renderAll();
 										ui.addNotification(null, E('p', {}, '✓ Список «' + hl.name + '» сохранён'), 'info');
