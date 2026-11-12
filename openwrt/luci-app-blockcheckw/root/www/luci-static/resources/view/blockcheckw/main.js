@@ -2140,6 +2140,13 @@ return view.extend({
 			function renderTop(d) {
 				topBox.innerHTML = '';
 				var recipes = (d && d.recipes) || {};
+				var bannedSet = {};
+				Object.keys((d && d.banned) || {}).forEach(function(dom) {
+					(((d.banned || {})[dom]) || []).forEach(function(it) {
+						var h = (typeof it === 'string') ? it : (it && it.h);
+						if (h) bannedSet[h] = true;
+					});
+				});
 				var arr = Object.keys(recipes).map(function(k) {
 					var r = recipes[k] || {};
 					var ok = r.ok || 0, fail = r.fail || 0;
@@ -2147,7 +2154,7 @@ return view.extend({
 					var speed = 1;
 					if (ewma > 0) speed = Math.min(1, 1000 / Math.max(ewma, 100));
 					return { key: k, args: String(r.args || ''), ok: ok, fail: fail, ewma: ewma, score: ((ok + 1) / (ok + fail + 2)) * (0.5 + 0.5 * speed) };
-				}).filter(function(r) { return r.ok + r.fail > 0; }).sort(function(a, b) { return b.score - a.score; }).slice(0, 6);
+				}).filter(function(r) { return r.ok + r.fail > 0 && !bannedSet[r.key]; }).sort(function(a, b) { return b.score - a.score; }).slice(0, 6);
 				if (!arr.length) return;
 				topBox.appendChild(E('div', { style: 'font-size: 12px; color: #61afef; font-weight: 600; margin-bottom: 6px;' }, '🏆 Топ рецептов по success-rate'));
 				arr.forEach(function(r) {
