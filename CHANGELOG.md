@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.32.0] (2026-11-13)
+
+### Ранний Reject-QUIC для всех устройств
+
+Штатное fw4-правило `Reject-QUIC` стоит после `ct state established accept`,
+поэтому уже открытые UDP/443-потоки его обходят. Телефон продолжал висеть
+на QUIC, пока ПК работал по TCP.
+
+* отдельная таблица `inet bcw_quic` с `hook forward priority -10` режет
+  UDP/443 до проверки established;
+* правило ставится через `/etc/bcw_quic_reject.sh` + firewall include и
+  переживает `fw4 reload` и перезагрузку;
+* `quic_mode=reject/allow` применяет/снимает таблицу при старте и остановке;
+* helper `quic_mode` и `stop` синхронизируют таблицу.
+
+Проверено на домашнем роутере: `remove → absent`, `apply → applied`,
+`fw4 reload → applied`.
+
 ## [0.31.1] (2026-11-13)
 
 ### gv_fix: убрана петля с собственным override

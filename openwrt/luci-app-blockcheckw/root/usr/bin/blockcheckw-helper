@@ -2282,6 +2282,7 @@ cmd_stop() {
         uci -q commit firewall
         /etc/init.d/firewall reload >/dev/null 2>&1 || true
     fi
+    sh /usr/share/zapret2wizard/quic_reject.sh remove >/dev/null 2>&1 || true
     restart_dpi_service
     write_status "idle" 0 "Остановлено пользователем"
     echo '{"status":"stopped"}'
@@ -3907,6 +3908,13 @@ cmd_quic_mode() {
         uci set firewall.reject_quic.enabled="$want"
         uci commit firewall
         /etc/init.d/firewall reload >/dev/null 2>&1 || true
+    fi
+    # Штатное fw4-правило стоит после established и не режет уже открытые
+    # QUIC-потоки. Держим раннюю таблицу bcw_quic (priority -10).
+    if [ "$want" = "1" ]; then
+        sh /usr/share/zapret2wizard/quic_reject.sh apply >/dev/null 2>&1 || true
+    else
+        sh /usr/share/zapret2wizard/quic_reject.sh remove >/dev/null 2>&1 || true
     fi
 
     if command -v uci >/dev/null 2>&1; then

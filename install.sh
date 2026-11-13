@@ -395,6 +395,8 @@ fetch_req "openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/uci2config"
 fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/evolve.lua" /usr/share/zapret2wizard/evolve.lua 8 || true
 fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/strategy_memory.lua" /usr/share/zapret2wizard/strategy_memory.lua 8 || true
 chmod 644 /usr/share/zapret2wizard/strategy_memory.lua 2>/dev/null || true
+fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/quic_reject.sh" /usr/share/zapret2wizard/quic_reject.sh 8 || true
+chmod 755 /usr/share/zapret2wizard/quic_reject.sh 2>/dev/null || true
 fetch_file "strategies/zapret2_presets.json" /usr/share/blockcheckw/zapret2_presets.json 8 || true
 fetch_req "openwrt/version.json" /usr/share/blockcheckw/version.json 8
 fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/luci/menu.d/luci-app-blockcheckw.json" /usr/share/luci/menu.d/luci-app-blockcheckw.json 8 || true
@@ -521,6 +523,7 @@ fi
 MISSING=""
 for f in /usr/bin/blockcheckw-helper \
          /www/luci-static/resources/view/blockcheckw/main.js \
+         /usr/share/zapret2wizard/quic_reject.sh \
          /usr/share/zapret2wizard/uci2config \
          /etc/init.d/zapret2wizard \
          /etc/config/zapret2wizard; do

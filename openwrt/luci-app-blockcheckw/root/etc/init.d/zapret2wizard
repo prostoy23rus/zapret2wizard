@@ -355,6 +355,17 @@ start_service() {
 	# Снимок таблицы: по нему восстанавливаем правила, не поднимая procd
 	nft list table inet zapret2wizard > /etc/zapret2wizard/fw.nft 2>/dev/null || true
 
+	# Ранний Reject-QUIC: отдельная таблица с hook priority -10, иначе
+	# established UDP/443 обходит fw4-правило и телефон продолжает
+	# висеть на QUIC. Ставим до старта движков.
+	local _qm=$(uci -q get zapret2wizard.main.quic_mode 2>/dev/null)
+	local _qr=$(uci -q get firewall.reject_quic.enabled 2>/dev/null)
+	if [ "$_qm" = "reject" ] || { [ "$_qm" != "allow" ] && [ "$_qr" = "1" ]; }; then
+		sh /usr/share/zapret2wizard/quic_reject.sh apply >/dev/null 2>&1 || true
+	else
+		sh /usr/share/zapret2wizard/quic_reject.sh remove >/dev/null 2>&1 || true
+	fi
+
 	# Start procd instances
 	local LUA_BASE="--lua-init=@$LUA_DIR/zapret-lib.lua --lua-init=@$LUA_DIR/zapret-antidpi.lua --lua-init=@$LUA_DIR/zapret-auto.lua"
 
@@ -422,10 +433,13 @@ stop_service() {
 	# Пользовательская остановка: снимаем Reject-QUIC, иначе UDP/443 остаётся
 	# заблокированным и YouTube не грузит видео через другие обходы.
 	# При внутренней остановке на время скана правило не трогаем.
-	if [ "${BCW_INTERNAL_STOP:-0}" != "1" ] && uci -q get firewall.reject_quic >/dev/null 2>&1; then
-		uci -q set firewall.reject_quic.enabled=0
-		uci -q commit firewall 2>/dev/null || true
-		/etc/init.d/firewall reload >/dev/null 2>&1 || true
+	if [ "${BCW_INTERNAL_STOP:-0}" != "1" ]; then
+		sh /usr/share/zapret2wizard/quic_reject.sh remove >/dev/null 2>&1 || true
+		if uci -q get firewall.reject_quic >/dev/null 2>&1; then
+			uci -q set firewall.reject_quic.enabled=0
+			uci -q commit firewall 2>/dev/null || true
+			/etc/init.d/firewall reload >/dev/null 2>&1 || true
+		fi
 	fi
 }
 
