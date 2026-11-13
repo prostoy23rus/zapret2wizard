@@ -1215,8 +1215,8 @@ cmd_start() {
     done
 
     case "$target" in
-        preset_youtube|youtube|preset_discord|discord) ;;
-        *) echo '{"error":"поддерживаются только YouTube и Discord"}'; return 1 ;;
+        preset_youtube|youtube|preset_discord|discord|preset_instagram|instagram) ;;
+        *) echo '{"error":"поддерживаются только YouTube, Discord и Instagram"}'; return 1 ;;
     esac
 
     # Clean domain if user entered multiple or dirty string
@@ -2489,8 +2489,8 @@ cmd_apply() {
         return 1
     fi
     case "$target" in
-        preset_youtube|youtube|preset_discord|discord) ;;
-        *) echo '{"success":false,"error":"поддерживаются только YouTube и Discord"}'; return 1 ;;
+        preset_youtube|youtube|preset_discord|discord|preset_instagram|instagram) ;;
+        *) echo '{"success":false,"error":"поддерживаются только YouTube, Discord и Instagram"}'; return 1 ;;
     esac
 
     # Backup zapret2 config
@@ -3952,7 +3952,7 @@ dns_doh_ensure() {
     if uci -q get dhcp.@dnsmasq[0].server 2>/dev/null | grep -q "/$dom/"; then return 0; fi
     uci add_list dhcp.@dnsmasq[0].server="/$dom/127.0.0.1#5053" 2>/dev/null || return 0
     uci commit dhcp 2>/dev/null || return 0
-    /etc/init.d/dnsmasq reload >/dev/null 2>&1 || /etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
+    safe_dns_restart >/dev/null 2>&1 || true
     # Если штатный DoH сам фильтрует домен — переключаем на cloudflare.
     out=$(nslookup -type=a "$dom" 127.0.0.1 2>&1)
     case "$out" in
@@ -3963,7 +3963,7 @@ dns_doh_ensure() {
                 uci del_list dhcp.@dnsmasq[0].server="/$dom/127.0.0.1#5053" 2>/dev/null || true
                 uci add_list dhcp.@dnsmasq[0].server="/$dom/127.0.0.1#$alt" 2>/dev/null || true
                 uci commit dhcp 2>/dev/null || true
-                /etc/init.d/dnsmasq reload >/dev/null 2>&1 || /etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
+                safe_dns_restart >/dev/null 2>&1 || true
                 port="$alt"
             fi
             ;;
@@ -3979,7 +3979,7 @@ dns_doh_base() {
 # такой адрес, и сайт висит, хотя DPI-обход работает. Проверяем адреса и
 # закрепляем рабочий для www.instagram.com через host-record dnsmasq.
 dns_pin_host() {
-    local host="$1" ip="$2" cur e new=""
+    local host="$1" ip="$2" norestart="$3" cur e new=""
     # OpenWrt dnsmasq не поддерживает host-record через uci, а address= —
     # поддерживает: /www.instagram.com/1.2.3.4 отвечает A и для поддоменов.
     cur=$(uci -q get dhcp.@dnsmasq[0].address 2>/dev/null)
@@ -3992,7 +3992,7 @@ dns_pin_host() {
     done
     uci add_list dhcp.@dnsmasq[0].address="/$host/$ip" 2>/dev/null || return 1
     uci commit dhcp 2>/dev/null || return 1
-    /etc/init.d/dnsmasq restart >/dev/null 2>&1 || /etc/init.d/dnsmasq reload >/dev/null 2>&1 || true
+    [ "$norestart" = "norestart" ] || safe_dns_restart >/dev/null 2>&1 || true
     echo "[blockcheckw-helper] DNS: $host закреплён за рабочим IP $ip" >> "$LOG_FILE" 2>/dev/null || true
 }
 
@@ -4040,15 +4040,22 @@ dns_fix_discord() {
 
 dns_fix_instagram() {
     uci -q get zapret2wizard.BlockcheckW_Instagram.enabled 2>/dev/null | grep -q '^1$' || return 0
-    local ip cdn
-    ip=$(dns_pin_pool "www.instagram.com" "https://www.instagram.com/" 50000 \
-        31.13.72.53 57.144.248.34 157.240.241.174 31.13.71.174 157.240.205.63 2>/dev/null | tail -1)
-    [ -n "$ip" ] || return 0
-    dns_pin_host "instagram.com" "$ip"
-    dns_pin_host "i.instagram.com" "$ip"
-    cdn=$(dns_pin_pool "scontent.cdninstagram.com" "https://scontent.cdninstagram.com/" 0 \
-        31.13.72.53 157.240.241.174 31.13.71.174 157.240.205.63 2>/dev/null | tail -1)
-    [ -n "$cdn" ] && dns_pin_host "cdninstagram.com" "$cdn"
+    # Проверка curl с роутера идёт мимо forward-очереди nfqws и часто
+    # забраковывает рабочий для клиентов edge. Для Instagram используем
+    # проверенную пару Meta-адресов; при смене сети — health/scan.
+    local ip="57.144.248.34" cdn="157.240.224.63"
+    dns_pin_host "www.instagram.com" "$ip" norestart
+    dns_pin_host "instagram.com" "$ip" norestart
+    dns_pin_host "i.instagram.com" "$ip" norestart
+    dns_pin_host "cdninstagram.com" "$cdn" norestart
+    # AAAA ::1 от upstream ломает Edge; фильтруем только в IPv4-only сети.
+    if ! ip -6 route show default 2>/dev/null | grep -q '^default'; then
+        if [ "$(uci -q get dhcp.@dnsmasq[0].filter_aaaa 2>/dev/null)" != "1" ]; then
+            uci -q set dhcp.@dnsmasq[0].filter_aaaa=1
+            uci -q commit dhcp 2>/dev/null || true
+        fi
+    fi
+    safe_dns_restart >/dev/null 2>&1 || true
     return 0
 }
 
@@ -4064,7 +4071,7 @@ dns_alt_ensure() {
         uci -q get dhcp.@dnsmasq[0].server 2>/dev/null | grep -q "/$dom/$srv" && return 0
         uci add_list dhcp.@dnsmasq[0].server="/$dom/$srv" 2>/dev/null || continue
         uci commit dhcp 2>/dev/null || true
-        /etc/init.d/dnsmasq reload >/dev/null 2>&1 || /etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
+        safe_dns_restart >/dev/null 2>&1 || true
         if nslookup "$dom" 127.0.0.1 2>&1 | grep -q "Name:"; then
             echo "[blockcheckw-helper] DNS: $dom через $srv (без DoH)" >> "$LOG_FILE" 2>/dev/null || true
             return 0
@@ -4084,11 +4091,25 @@ _gv_ip_reachable() {
     [ -n "$code" ] && [ "$code" != "000" ]
 }
 
+cmd_ensure_instagram() {
+    uci -q get zapret2wizard.BlockcheckW_Instagram >/dev/null 2>&1 && return 0
+    uci -q set zapret2wizard.BlockcheckW_Instagram=strategy
+    uci -q set zapret2wizard.BlockcheckW_Instagram.enabled=1
+    uci -q set zapret2wizard.BlockcheckW_Instagram.port=443
+    uci -q set zapret2wizard.BlockcheckW_Instagram.protocol=tcp
+    uci -q add_list zapret2wizard.BlockcheckW_Instagram.filter_l3=ipv4
+    uci -q add_list zapret2wizard.BlockcheckW_Instagram.filter_l7=tls
+    uci -q add_list zapret2wizard.BlockcheckW_Instagram.hostlist=list_hosts_instagram
+    uci -q set zapret2wizard.BlockcheckW_Instagram.script="--out-range=-s34228 --payload=tls_client_hello --in-range=-s5556 --lua-desync=circular:fails=3:maxtime=20 --in-range=x --lua-desync=fake:blob=0x00000000:tcp_seq=-10000:tcp_ack=-66000:repeats=2:strategy=1 --lua-desync=multisplit:pos=1,midsld:strategy=1 --lua-desync=multidisorder:pos=1,midsld,1220:strategy=2 --lua-desync=multisplit:pos=1:seqovl=1:strategy=3 --lua-desync=hostfakesplit:host=google.com:tcp_ts=-60000:strategy=4"
+    uci -q commit zapret2wizard
+    logger -t zapret2wizard "Instagram strategy restored"
+}
+
 cmd_prune_services() {
     local pkg=zapret2wizard changed=0 sec e
     for sec in $(uci show "$pkg" 2>/dev/null | sed -n 's/^zapret2wizard\.\([^.=]*\)=strategy$/\1/p'); do
         case "$sec" in
-            BlockcheckW_YouTube|BlockcheckW_Discord|BlockcheckW_Discord_Voice) ;;
+            BlockcheckW_YouTube|BlockcheckW_Discord|BlockcheckW_Discord_Voice|BlockcheckW_Instagram) ;;
             *) uci -q delete "$pkg.$sec" 2>/dev/null && changed=1 ;;
         esac
     done
@@ -4101,7 +4122,7 @@ cmd_prune_services() {
     if [ "$changed" = "1" ]; then
         uci -q commit "$pkg" 2>/dev/null || true
         uci -q commit dhcp 2>/dev/null || true
-        /etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
+        safe_dns_restart >/dev/null 2>&1 || true
         logger -t zapret2wizard "оставлены только YouTube и Discord"
     fi
     echo '{"pruned":true}'
@@ -4148,7 +4169,7 @@ cmd_gv_clear() {
     done
     if [ "$changed" = "1" ]; then
         uci -q commit dhcp 2>/dev/null || true
-        /etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
+        safe_dns_restart >/dev/null 2>&1 || true
     fi
     echo "{\"cleared\":$changed}"
 }
@@ -4172,7 +4193,7 @@ cmd_gv_fix() {
                 case "$e" in /googlevideo.com/*) uci -q del_list dhcp.@dnsmasq[0].address="$e" 2>/dev/null ;; esac
             done
             uci commit dhcp 2>/dev/null || true
-            /etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
+            safe_dns_restart >/dev/null 2>&1 || true
         fi
         echo "{\"ok\":true,\"ip\":\"$cip\",\"source\":\"dns\"}"
         return 0
@@ -4188,7 +4209,7 @@ cmd_gv_fix() {
             done
             uci add_list dhcp.@dnsmasq[0].address="/googlevideo.com/$ip" 2>/dev/null
             uci commit dhcp 2>/dev/null || true
-            /etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
+            safe_dns_restart >/dev/null 2>&1 || true
             echo "{\"ok\":true,\"ip\":\"$ip\",\"source\":\"fallback\"}"
             return 0
         fi
@@ -4222,6 +4243,7 @@ cmd_optimize_dns() {
         # Даже без DoH нельзя выходить раньше пина Instagram: иначе DNS
         # провайдера отдаёт 127.0.0.1 и сайт «висит» при рабочей стратегии.
         dns_fix_discord >/dev/null 2>&1 || true
+        dns_fix_instagram >/dev/null 2>&1 || true
         echo "{\"changed\":$alt}"
         return 0
     fi
@@ -4249,9 +4271,10 @@ cmd_optimize_dns() {
     case "$cs" in ''|*[!0-9]*) uci set dhcp.@dnsmasq[0].cachesize='2000'; changed=1 ;; *) [ "$cs" -lt 1000 ] && { uci set dhcp.@dnsmasq[0].cachesize='2000'; changed=1; } ;; esac
     if [ "$changed" = "1" ]; then
         uci commit dhcp
-        /etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
+        safe_dns_restart >/dev/null 2>&1 || true
     fi
     dns_fix_discord >/dev/null 2>&1 || true
+    dns_fix_instagram >/dev/null 2>&1 || true
     echo "{\"changed\":$changed}"
 }
 
@@ -5077,6 +5100,7 @@ cmd_health_tick() {
     # Закреплённые IP Instagram/Discord могли умереть: перепроверяем при
     # каждом тике, не дожидаясь ночной эволюции.
     dns_fix_discord >/dev/null 2>&1 || true
+    dns_fix_instagram >/dev/null 2>&1 || true
 
     # Проверяем все включённые сервисы, а не только YouTube: два сбоя
     # подряд по сервису → L1-запись помечается непроверенной, /24 снимается,
@@ -6197,6 +6221,37 @@ cmd_update() {
 
 # Удаление наших следов: DNS-записи, Reject-QUIC, nft-таблица.
 # Нужно и при uninstall, и как отдельная команда для уже удалённых установок.
+# Безопасный перезапуск dnsmasq: при неудаче возвращаем /etc/config/dhcp,
+# иначе один битый конфиг оставляет всю сеть без DNS.
+safe_dns_restart() {
+    local bak="/tmp/bcw_dhcp.safe" i=0 a rp
+    cp -f /etc/config/dhcp "$bak" 2>/dev/null || true
+    ( eval "/etc/init.d/dnsmasq restart" ) >/dev/null 2>&1 &
+    rp=$!
+    while kill -0 "$rp" 2>/dev/null && [ "$i" -lt 15 ]; do sleep 1; i=$((i + 1)); done
+    kill -9 "$rp" 2>/dev/null || true
+    i=0
+    while [ "$i" -lt 8 ]; do
+        a=$(nslookup www.google.com 127.0.0.1 2>/dev/null | awk '/^Address: /{print $2}' | grep -E '^[0-9.]+$' | head -n1)
+        if pidof dnsmasq >/dev/null 2>&1 && [ -n "$a" ]; then
+            return 0
+        fi
+        sleep 1
+        i=$((i + 1))
+    done
+    if [ -s "$bak" ]; then
+        cp -f "$bak" /etc/config/dhcp 2>/dev/null || true
+        uci -q commit dhcp 2>/dev/null || true
+        ( eval "/etc/init.d/dnsmasq restart" ) >/dev/null 2>&1 &
+        rp=$!
+        i=0
+        while kill -0 "$rp" 2>/dev/null && [ "$i" -lt 10 ]; do sleep 1; i=$((i + 1)); done
+        kill -9 "$rp" 2>/dev/null || true
+    fi
+    logger -t zapret2wizard "dnsmasq restart failed — конфигурация DHCP возвращена"
+    return 1
+}
+
 cleanup_leftovers() {
     local changed=0 s
     if uci -q get dhcp.@dnsmasq[0] >/dev/null 2>&1; then
@@ -6220,7 +6275,7 @@ cleanup_leftovers() {
         done
         if [ "$changed" = "1" ]; then
             uci commit dhcp 2>/dev/null || true
-            /etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
+            safe_dns_restart >/dev/null 2>&1 || true
         fi
     fi
     if uci -q get firewall.reject_quic >/dev/null 2>&1; then
@@ -6701,6 +6756,9 @@ dns_alt) shift; cmd_dns_alt "$@" ;;
 gv_fix) cmd_gv_fix ;;
     gv_clear) cmd_gv_clear ;;
     prune_services) cmd_prune_services ;;
+    ensure_instagram) cmd_ensure_instagram ;;
+    dns_fix_instagram) dns_fix_instagram ;;
+    dns_fix_discord) dns_fix_discord ;;
     client_probe) shift; client_probe_output "$1" ;;
     client_probe_netns) shift; client_probe_netns "$1" ;;
     save_good) shift; cmd_save_good "$1" ;;

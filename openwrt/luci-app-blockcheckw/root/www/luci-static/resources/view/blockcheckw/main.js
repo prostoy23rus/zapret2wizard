@@ -1327,7 +1327,8 @@ return view.extend({
 		// (blockcheckw-helper start --target tcp16) и внутренним вызовам.
 		var quickChipsList = [
 			{ id: 'preset_youtube', icon: '📺', name: 'YouTube' },
-			{ id: 'preset_discord', icon: '💬', name: 'Discord' }
+			{ id: 'preset_discord', icon: '💬', name: 'Discord' },
+			{ id: 'preset_instagram', icon: '📸', name: 'Instagram' }
 		];
 
 		var chipButtonsMap = {};
@@ -2128,7 +2129,7 @@ return view.extend({
 
 		function rebuildHistory() {
 			if (!historyListEl) return;
-			var names = { youtube: 'YouTube', discord: 'Discord' };
+			var names = { youtube: 'YouTube', discord: 'Discord', instagram: 'Instagram' };
 			historyListEl.innerHTML = '';
 			var items = (metricsData.history || []);
 			if (!items.length) {
@@ -2935,7 +2936,8 @@ return view.extend({
 
 		var SERVICES_CONFIG = [
 			{ key: 'youtube', altKey: 'preset_youtube', name: 'YouTube', icon: '📺', uciBase: 'BlockcheckW_YouTube', desc: 'Видеопотоки, превью и плеер', hostlistKey: 'youtube', targetId: 'preset_youtube', portDefault: 'TCP 443' },
-			{ key: 'discord', altKey: 'preset_discord', name: 'Discord', icon: '💬', uciBase: 'BlockcheckW_Discord', desc: 'Чат, медиа и голосовые шлюзы', hostlistKey: 'discord', targetId: 'preset_discord', portDefault: 'TCP 443 + UDP' }
+			{ key: 'discord', altKey: 'preset_discord', name: 'Discord', icon: '💬', uciBase: 'BlockcheckW_Discord', desc: 'Чат, медиа и голосовые шлюзы', hostlistKey: 'discord', targetId: 'preset_discord', portDefault: 'TCP 443 + UDP' },
+			{ key: 'instagram', altKey: 'preset_instagram', name: 'Instagram', icon: '📸', uciBase: 'BlockcheckW_Instagram', desc: 'Лента, Stories, Reels и CDN', hostlistKey: 'instagram', targetId: 'preset_instagram', portDefault: 'TCP 443' }
 		];
 
 		function updateActiveStrategyDisplay() {
@@ -4483,13 +4485,14 @@ return view.extend({
 
 		function showHostlistsModal(hostlists) {
 			var lists = (hostlists || zapretInfo.hostlists || []).filter(function(h) {
-				return h.key === 'youtube' || h.key === 'discord' || h.key === 'exclude';
+				return h.key === 'youtube' || h.key === 'discord' || h.key === 'instagram' || h.key === 'exclude';
 			});
 
 			if (!lists || lists.length === 0) {
 				lists = [
 					{ key: 'youtube', name: 'YouTube', file: '/etc/zapret2wizard/ipset/zapret_hosts_youtube.txt', domains_count: 0, uci_configured: true },
 					{ key: 'discord', name: 'Discord', file: '/etc/zapret2wizard/ipset/zapret_hosts_discord.txt', domains_count: 0, uci_configured: true },
+					{ key: 'instagram', name: 'Instagram', file: '/etc/zapret2wizard/ipset/zapret_hosts_instagram.txt', domains_count: 0, uci_configured: true },
 					{ key: 'exclude', name: 'Исключения (не обходить)', file: '/etc/zapret2wizard/ipset/zapret_hosts_user_exclude.txt', domains_count: 0, uci_configured: true }
 				];
 			}

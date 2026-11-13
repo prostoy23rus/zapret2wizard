@@ -298,6 +298,7 @@ start_service() {
 	# Миграция старой дефолтной circular-стратегии YouTube на fakeddisorder
 	# (SNI-блок обходится, подписанные URL не ломаются). Один раз.
 	[ -x /usr/bin/blockcheckw-helper ] && /usr/bin/blockcheckw-helper fix_defaults >/dev/null 2>&1 || true
+	[ -x /usr/bin/blockcheckw-helper ] && /usr/bin/blockcheckw-helper ensure_instagram >/dev/null 2>&1 || true
 	[ -x /usr/bin/blockcheckw-helper ] && /usr/bin/blockcheckw-helper prune_services >/dev/null 2>&1 || true
 	[ -x /usr/bin/blockcheckw-helper ] && /usr/bin/blockcheckw-helper save_good --if-missing >/dev/null 2>&1 || true
 	# uci2config обязан быть исполняемым: иначе стратегии применяются в UCI,
