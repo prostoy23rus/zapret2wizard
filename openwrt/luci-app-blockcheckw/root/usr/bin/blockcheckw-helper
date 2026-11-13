@@ -2321,6 +2321,122 @@ cmd_restore_good() {
     echo '{"ok":true,"restored":true}'
 }
 
+# Клиентский probe через отдельную output-очередь nfqws: проверяет
+# стратегию на реальном TLS-соединении, а не только curl с роутера.
+client_probe_output() {
+    local target="$1" host="" url="" min=50000 ip out code size pid cmd tpid q=65302
+    case "$target" in
+        preset_youtube|youtube) host="www.youtube.com"; url="https://www.youtube.com/"; min=50000 ;;
+        preset_discord|discord) host="discord.com"; url="https://discord.com/login"; min=50000 ;;
+        preset_instagram|instagram) host="www.instagram.com"; url="https://www.instagram.com/"; min=50000 ;;
+        preset_twitch|twitch) host="www.twitch.tv"; url="https://www.twitch.tv/"; min=30000 ;;
+        preset_x|x) host="x.com"; url="https://x.com/"; min=10000 ;;
+        *) host="$target"; url="https://$target/"; min=1000 ;;
+    esac
+    command -v nft >/dev/null 2>&1 || { echo '{"ok":false,"error":"nft missing"}'; return 1; }
+    command -v curl >/dev/null 2>&1 || { echo '{"ok":false,"error":"curl missing"}'; return 1; }
+    ip=$(nslookup "$host" 127.0.0.1 2>/dev/null | awk '/^Address: /{print $2}' | grep -E '^[0-9.]+$' | head -n1)
+    [ -n "$ip" ] || { echo '{"ok":false,"host":"'"$host"'","error":"no A record"}'; return 1; }
+    pid=$(for c in /proc/[0-9]*/comm; do [ "$(cat "$c" 2>/dev/null)" = nfqws2 ] || continue; p=$(echo "$c" | cut -d/ -f3); tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null | grep -q -- '--qnum=300' && { echo "$p"; break; }; done)
+    [ -n "$pid" ] || { echo '{"ok":false,"error":"nfqws2 qnum=300 not found"}'; return 1; }
+    cmd=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | sed "s/--qnum=300/--qnum=$q/")
+    [ -n "$cmd" ] || { echo '{"ok":false,"error":"empty nfqws cmdline"}'; return 1; }
+    _probe_cleanup() {
+        nft delete table inet bcwprobe 2>/dev/null || true
+        [ -n "$tpid" ] && kill "$tpid" 2>/dev/null || true
+        rm -f /tmp/bcw_probe.lock 2>/dev/null || true
+    }
+    if [ -d /tmp/bcw_probe.lock ]; then
+        local _pp=$(cat /tmp/bcw_probe.lock/pid 2>/dev/null)
+        if [ -n "$_pp" ] && kill -0 "$_pp" 2>/dev/null; then
+            echo '{"ok":false,"error":"probe busy"}'; return 1
+        fi
+        rm -rf /tmp/bcw_probe.lock
+    fi
+    if ! mkdir /tmp/bcw_probe.lock 2>/dev/null; then
+        echo '{"ok":false,"error":"probe busy"}'; return 1
+    fi
+    echo $$ > /tmp/bcw_probe.lock/pid 2>/dev/null || true
+    trap '_probe_cleanup' EXIT INT TERM
+    nft delete table inet bcwprobe 2>/dev/null || true
+    setsid /bin/sh -c "exec $cmd" </dev/null >/tmp/bcw_probe.nfq.log 2>&1 &
+    tpid=$!
+    sleep 1
+    nft add table inet bcwprobe 2>/dev/null || { _probe_cleanup; echo '{"ok":false,"error":"nft table"}'; return 1; }
+    nft add chain inet bcwprobe out '{ type filter hook output priority -150; policy accept; }' 2>/dev/null || true
+    nft add chain inet bcwprobe in '{ type filter hook input priority -150; policy accept; }' 2>/dev/null || true
+    nft add rule inet bcwprobe out ip daddr "$ip" tcp dport 443 queue num "$q" bypass 2>/dev/null || true
+    nft add rule inet bcwprobe in ip saddr "$ip" tcp sport 443 queue num "$q" bypass 2>/dev/null || true
+    sleep 1
+    out=$(curl -4 -sS -o /dev/null -m 25 --resolve "$host:443:$ip" -w '%{http_code} %{size_download}' "$url" 2>/dev/null)
+    code=${out%% *}; size=${out##* }
+    _probe_cleanup
+    trap - EXIT INT TERM
+    if [ -n "$code" ] && [ "$code" -ge 200 ] 2>/dev/null && [ "$code" -lt 400 ] 2>/dev/null && [ "$size" -ge "$min" ] 2>/dev/null; then
+        echo '{"ok":true,"mode":"output","host":"'"$host"'","ip":"'"$ip"'","code":"'"$code"'","bytes":'"$size"',"min":'"$min"'}'
+        return 0
+    fi
+    echo '{"ok":false,"mode":"output","host":"'"$host"'","ip":"'"$ip"'","code":"'"$code"'","bytes":"'"$size"'","min":'"$min"'"}'
+    return 1
+}
+
+# Точный клиентский путь: временный netns + veth, трафик идёт через
+# forward-цепочку и реальную очередь nfqws. Требует kmod-veth.
+client_probe_netns() {
+    local target="$1" host="" url="" min=50000 ip out code size
+    case "$target" in
+        preset_youtube|youtube) host="www.youtube.com"; url="https://www.youtube.com/"; min=50000 ;;
+        preset_discord|discord) host="discord.com"; url="https://discord.com/login"; min=50000 ;;
+        preset_instagram|instagram) host="www.instagram.com"; url="https://www.instagram.com/"; min=50000 ;;
+        preset_twitch|twitch) host="www.twitch.tv"; url="https://www.twitch.tv/"; min=30000 ;;
+        preset_x|x) host="x.com"; url="https://x.com/"; min=10000 ;;
+        *) host="$target"; url="https://$target/"; min=1000 ;;
+    esac
+    command -v ip >/dev/null 2>&1 || { echo '{"ok":false,"error":"ip missing"}'; return 1; }
+    ip=$(nslookup "$host" 127.0.0.1 2>/dev/null | awk '/^Address: /{print $2}' | grep -E '^[0-9.]+$' | head -n1)
+    [ -n "$ip" ] || { echo '{"ok":false,"host":"'"$host"'","error":"no A record"}'; return 1; }
+    NS=bcwprobe; VH=veth-bcwp; VN=veth-bcn
+    _netns_cleanup() {
+        local h
+        for h in $(nft -a list chain inet fw4 forward 2>/dev/null | awk '/bcwprobe/{print $NF}'); do nft delete rule inet fw4 forward handle "$h" 2>/dev/null || true; done
+        for h in $(nft -a list chain inet fw4 input 2>/dev/null | awk '/bcwprobe/{print $NF}'); do nft delete rule inet fw4 input handle "$h" 2>/dev/null || true; done
+        nft delete table ip bcwprobe_nat 2>/dev/null || true
+        ip netns del "$NS" 2>/dev/null || true
+        ip link del "$VH" 2>/dev/null || true
+    }
+    _netns_cleanup
+    if ! ip netns add "$NS" 2>/dev/null; then
+        echo '{"ok":false,"mode":"netns","error":"netns unsupported"}'; return 1
+    fi
+    if ! ip link add "$VH" type veth peer name "$VN" 2>/dev/null; then
+        _netns_cleanup
+        echo '{"ok":false,"mode":"netns","error":"veth unsupported (install kmod-veth)"}'; return 1
+    fi
+    trap '_netns_cleanup' EXIT INT TERM
+    ip link set "$VN" netns "$NS" 2>/dev/null || true
+    ip addr add 10.99.99.1/24 dev "$VH" 2>/dev/null || true
+    ip link set "$VH" up 2>/dev/null || true
+    ip netns exec "$NS" ip addr add 10.99.99.2/24 dev "$VN" 2>/dev/null || true
+    ip netns exec "$NS" ip link set "$VN" up 2>/dev/null || true
+    ip netns exec "$NS" ip link set lo up 2>/dev/null || true
+    ip netns exec "$NS" ip route add default via 10.99.99.1 2>/dev/null || true
+    nft insert rule inet fw4 input ip saddr 10.99.99.0/24 accept comment bcwprobe 2>/dev/null || true
+    nft insert rule inet fw4 forward ip saddr 10.99.99.0/24 accept comment bcwprobe 2>/dev/null || true
+    nft add table ip bcwprobe_nat 2>/dev/null || true
+    nft add chain ip bcwprobe_nat post '{ type nat hook postrouting priority 100; policy accept; }' 2>/dev/null || true
+    nft add rule ip bcwprobe_nat post ip saddr 10.99.99.0/24 masquerade 2>/dev/null || true
+    out=$(ip netns exec "$NS" curl -4 -sS -o /dev/null -m 25 --resolve "$host:443:$ip" -w '%{http_code} %{size_download}' "$url" 2>/dev/null)
+    code=${out%% *}; size=${out##* }
+    _netns_cleanup
+    trap - EXIT INT TERM
+    if [ -n "$code" ] && [ "$code" -ge 200 ] 2>/dev/null && [ "$code" -lt 400 ] 2>/dev/null && [ "$size" -ge "$min" ] 2>/dev/null; then
+        echo '{"ok":true,"mode":"netns","host":"'"$host"'","ip":"'"$ip"'","code":"'"$code"'","bytes":'"$size"',"min":'"$min"'}'
+        return 0
+    fi
+    echo '{"ok":false,"mode":"netns","host":"'"$host"'","ip":"'"$ip"'","code":"'"$code"'","bytes":"'"$size"'","min":'"$min"'}'
+    return 1
+}
+
 cmd_apply() {
     local target=""
     local script_text=""
@@ -2545,6 +2661,16 @@ cmd_apply() {
         [ -n "$extracted_code" ] && http_code="$extracted_code"
     fi
 
+    # Клиентский probe: тот же nfqws, но проверка идёт через output-очередь
+    # с полным телом ответа. Роутерный cmd_test этого не видит.
+    local client_probe_res='{}'
+    if [ "$all_ok_val" = "true" ]; then
+        client_probe_res=$(client_probe_output "$target" 2>/dev/null)
+        if ! echo "$client_probe_res" | grep -q '"ok":true'; then
+            all_ok_val=false
+        fi
+    fi
+
     # Если трафик не подтвердился — возвращаем конфиг, который был до apply.
     local rolled_back=false
     local out_msg="Новая запись стратегии ($sec_name) успешно создана в Zapret2, активирована и проверена!"
@@ -2585,7 +2711,8 @@ cmd_apply() {
   "connected": $([ "$curl_status" = "1" ] && echo "true" || echo "false"),
   "all_ok": $all_ok_val,
   "rolled_back": $rolled_back,
-  "multi_domain": ${multi_res:-"{}"}
+  "multi_domain": ${multi_res:-"{}"},
+  "client_probe": ${client_probe_res:-"{}"}
 }
 EOF
 )
@@ -6534,6 +6661,8 @@ ttl_probe) shift; cmd_ttl_probe "$@" ;;
 dns_alt) shift; cmd_dns_alt "$@" ;;
 gv_fix) cmd_gv_fix ;;
     gv_clear) cmd_gv_clear ;;
+    client_probe) shift; client_probe_output "$1" ;;
+    client_probe_netns) shift; client_probe_netns "$1" ;;
     save_good) shift; cmd_save_good "$1" ;;
     restore_good) cmd_restore_good ;;
     dns_pool) shift; dns_pin_pool "$@" ;;
