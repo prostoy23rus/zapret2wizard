@@ -1,11 +1,10 @@
 {
-  "version": "0.31.0",
+  "version": "0.31.1",
   "release_date": "2026-11-13",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "Исправлен медленный старт YouTube, когда DNS провайдера отдаёт недостижимый GGC-адрес (87.245.x): googlevideo.com переключается на рабочий Google-edge",
-    "Проверка gv_fix в optimize_dns и health_tick: канареечный CDN-хост проверяется, при недоступности добавляется address=/googlevideo.com/<ip>",
-    "Команда gv_fix для ручной проверки"
+    "gv_fix: канарейка спрашивается у upstream-резолвера, а не у dnsmasq — иначе собственный address=override выглядел здоровым и снимался (петля)",
+    "Повторный gv_fix идемпотентен и сохраняет рабочий override"
   ]
 }
