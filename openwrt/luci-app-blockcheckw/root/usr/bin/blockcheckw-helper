@@ -1214,6 +1214,11 @@ cmd_start() {
         esac
     done
 
+    case "$target" in
+        preset_youtube|youtube|preset_discord|discord) ;;
+        *) echo '{"error":"поддерживаются только YouTube и Discord"}'; return 1 ;;
+    esac
+
     # Clean domain if user entered multiple or dirty string
     if [ -n "$domain" ]; then
         domain=$(echo "$domain" | tr ',' ' ' | awk '{print $1}')
@@ -2483,6 +2488,10 @@ cmd_apply() {
         echo '{"success":false,"error":"Missing --target or --script argument"}'
         return 1
     fi
+    case "$target" in
+        preset_youtube|youtube|preset_discord|discord) ;;
+        *) echo '{"success":false,"error":"поддерживаются только YouTube и Discord"}'; return 1 ;;
+    esac
 
     # Backup zapret2 config
     local ts=$(date +%Y%m%d_%H%M%S)

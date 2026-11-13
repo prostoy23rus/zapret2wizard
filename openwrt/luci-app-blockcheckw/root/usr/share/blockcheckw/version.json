@@ -1,11 +1,9 @@
 {
-  "version": "0.35.0",
+  "version": "0.35.1",
   "release_date": "2026-11-13",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "Служба сведена к двум сервисам: YouTube и Discord; остальные стратегии, вкладки и DNS-пины удаляются",
-    "При старте выполняется prune_services: остаются только BlockcheckW_YouTube, BlockcheckW_Discord и голосовая секция",
-    "Удалены Instagram/Twitch/X/General из видимых целей и списков доменов"
+    "Backend отклоняет любые цели, кроме YouTube и Discord"
   ]
 }
