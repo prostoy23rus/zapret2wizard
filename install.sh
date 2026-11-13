@@ -401,7 +401,7 @@ fetch_file "strategies/zapret2_presets.json" /usr/share/blockcheckw/zapret2_pres
 fetch_req "openwrt/version.json" /usr/share/blockcheckw/version.json 8
 fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/luci/menu.d/luci-app-blockcheckw.json" /usr/share/luci/menu.d/luci-app-blockcheckw.json 8 || true
 fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/rpcd/acl.d/luci-app-blockcheckw.json" /usr/share/rpcd/acl.d/luci-app-blockcheckw.json 8 || true
-fetch_req "openwrt/luci-app-blockcheckw/root/www/luci-static/resources/view/blockcheckw/main.js" /www/luci-static/resources/view/blockcheckw/main.js 8
+fetch_req "openwrt/luci-app-blockcheckw/root/www/luci-static/resources/view/blockcheckw/main.js" /www/luci-static/resources/view/blockcheckw/main.js 60
 chmod 644 /www/luci-static/resources/view/blockcheckw/main.js 2>/dev/null || true
 
 # Ключевые файлы обязательны: без них интерфейс не запустится.
@@ -420,6 +420,17 @@ if [ -s /usr/bin/blockcheckw-helper ] && ! sh -n /usr/bin/blockcheckw-helper >/d
 fi
 HELPER_SIZE=$(wc -c < /usr/bin/blockcheckw-helper 2>/dev/null || echo 0)
 MAINJS_SIZE=$(wc -c < /www/luci-static/resources/view/blockcheckw/main.js 2>/dev/null || echo 0)
+# main.js тоже может скачаться частично (CDN/таймаут): проверяем размер и
+# хвостовой маркер, иначе LuCI падает с SyntaxError.
+if [ "${MAINJS_SIZE:-0}" -lt 200000 ] || ! tail -c 80 /www/luci-static/resources/view/blockcheckw/main.js 2>/dev/null | grep -q 'handleReset: null'; then
+    echo -e "${YELLOW}[WARN]${NC} main.js скачался частично — повторная загрузка..."
+    fetch_file "openwrt/luci-app-blockcheckw/root/www/luci-static/resources/view/blockcheckw/main.js" /www/luci-static/resources/view/blockcheckw/main.js 120 || true
+    MAINJS_SIZE=$(wc -c < /www/luci-static/resources/view/blockcheckw/main.js 2>/dev/null || echo 0)
+fi
+if [ "${MAINJS_SIZE:-0}" -lt 200000 ] || ! tail -c 80 /www/luci-static/resources/view/blockcheckw/main.js 2>/dev/null | grep -q 'handleReset: null'; then
+    echo -e "${RED}[ERROR] main.js повреждён или скачан не полностью.${NC}"
+    exit 1
+fi
 if [ "${HELPER_SIZE:-0}" -lt 50000 ] || [ "${MAINJS_SIZE:-0}" -lt 100000 ]; then
     echo -e "${RED}[ERROR] Не удалось скачать helper или main.js с GitHub (получено ${HELPER_SIZE} и ${MAINJS_SIZE} байт).${NC}"
     echo -e "${YELLOW}Установите автономный бандл — в нём все файлы уже внутри:${NC}"
