@@ -1,11 +1,9 @@
 {
-  "version": "0.34.9",
+  "version": "0.34.10",
   "release_date": "2026-11-13",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "P0: клиентский probe через output-очередь nfqws — apply проверяет полное тело ответа и откатывается при провале",
-    "Добавлен точный netns+veth probe (forward-путь) для приёмочных тестов; требует kmod-veth",
-    "Исправлен stale-lock probe: зависший прошлый probe больше не блокирует проверку"
+    "Клиентский probe повторяет DNS-резолв до 4 раз — старт после restart больше не даёт ложный no A record"
   ]
 }
