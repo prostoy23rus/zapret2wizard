@@ -3877,6 +3877,40 @@ _gv_ip_reachable() {
     [ -n "$code" ] && [ "$code" != "000" ]
 }
 
+cmd_fix_defaults() {
+    local marker="/etc/zapret2wizard/.strategy_034"
+    [ -f "$marker" ] && { echo '{"skipped":"done"}'; return 0; }
+    local cur
+    cur=$(uci -q get zapret2wizard.BlockcheckW_YouTube.script 2>/dev/null)
+    if [ -n "$cur" ]; then
+        case "$cur" in
+            *fakeddisorder*) ;;
+            *"hostfakesplit:host=gosuslugi.ru:tcp_ts=-600000:strategy=1"*|*"circular:fails=3:maxtime=20"*)
+                uci -q set zapret2wizard.BlockcheckW_YouTube.script="--payload=tls_client_hello --lua-desync=fakeddisorder:pos=midsld:tcp_md5"
+                uci -q commit zapret2wizard
+                logger -t zapret2wizard "YouTube strategy migrated to fakeddisorder"
+                ;;
+        esac
+    fi
+    mkdir -p /etc/zapret2wizard 2>/dev/null || true
+    touch "$marker" 2>/dev/null || true
+    echo '{"fixed":true}'
+}
+
+cmd_gv_clear() {
+    local e changed=0
+    for e in $(uci -q get dhcp.@dnsmasq[0].address 2>/dev/null); do
+        case "$e" in
+            /googlevideo.com/*) uci -q del_list dhcp.@dnsmasq[0].address="$e" 2>/dev/null && changed=1 ;;
+        esac
+    done
+    if [ "$changed" = "1" ]; then
+        uci -q commit dhcp 2>/dev/null || true
+        /etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
+    fi
+    echo "{\"cleared\":$changed}"
+}
+
 cmd_gv_fix() {
     local cur ip dns_ip e canary cip
     cur=$(uci -q get dhcp.@dnsmasq[0].address 2>/dev/null | tr ' ' '\n' | sed -n 's#^/googlevideo\.com/##p' | head -1)
@@ -3973,7 +4007,6 @@ cmd_optimize_dns() {
         /etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
     fi
     dns_fix_instagram >/dev/null 2>&1 || true
-    cmd_gv_fix >/dev/null 2>&1 || true
     echo "{\"changed\":$changed}"
 }
 
@@ -4799,7 +4832,6 @@ cmd_health_tick() {
     # Закреплённый IP Instagram мог умереть: перепроверяем при каждом тике,
     # не дожидаясь ночной эволюции (сама проверка стоит один curl с -m 6).
     dns_fix_instagram >/dev/null 2>&1 || true
-    cmd_gv_fix >/dev/null 2>&1 || true
 
     # Проверяем все включённые сервисы, а не только YouTube: два сбоя
     # подряд по сервису → L1-запись помечается непроверенной, /24 снимается,
@@ -6422,6 +6454,8 @@ hostlists_merge) cmd_hostlists_merge ;;
 ttl_probe) shift; cmd_ttl_probe "$@" ;;
 dns_alt) shift; cmd_dns_alt "$@" ;;
 gv_fix) cmd_gv_fix ;;
+    gv_clear) cmd_gv_clear ;;
+    fix_defaults) cmd_fix_defaults ;;
 quic_probe) cmd_quic_probe && echo ok || echo fail ;;
 quic_mode) shift; cmd_quic_mode "$@" ;;
 optimize_dns) cmd_optimize_dns ;;

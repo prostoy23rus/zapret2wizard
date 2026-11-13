@@ -295,6 +295,9 @@ start_service() {
 	# modprobe подтянет их, если пакет kmod уже установлен.
 	modprobe nfnetlink_queue 2>/dev/null || true
 	modprobe nft_queue 2>/dev/null || true
+	# Миграция старой дефолтной circular-стратегии YouTube на fakeddisorder
+	# (SNI-блок обходится, подписанные URL не ломаются). Один раз.
+	[ -x /usr/bin/blockcheckw-helper ] && /usr/bin/blockcheckw-helper fix_defaults >/dev/null 2>&1 || true
 	# uci2config обязан быть исполняемым: иначе стратегии применяются в UCI,
 	# но config не пересобирается и движок работает по старому профилю.
 	[ -x /usr/share/zapret2wizard/uci2config ] || chmod 755 /usr/share/zapret2wizard/uci2config 2>/dev/null || true
@@ -303,8 +306,10 @@ start_service() {
 	# DNS-оптимизация может ходить в сеть (DoH/Instagram): не блокируем старт службы.
 	[ -x /usr/bin/blockcheckw-helper ] && ( /usr/bin/blockcheckw-helper optimize_dns >/dev/null 2>&1 & ) || true
 	# На чистой 25.12 dnsmasq может вернуть только AAAA для googlevideo;
-	# gv_fix добавляет рабочий A-адрес независимо от DoH/optimize_dns.
-	[ -x /usr/bin/blockcheckw-helper ] && ( /usr/bin/blockcheckw-helper gv_fix >/dev/null 2>&1 & ) || true
+	# Раньше gv_fix глобально подменял googlevideo на один CDN-edge; это
+	# ломало подписанные URL. Чистим оставшиеся подмены, дальше работает
+	# обычный DNS + desync по SNI.
+	[ -x /usr/bin/blockcheckw-helper ] && /usr/bin/blockcheckw-helper gv_clear >/dev/null 2>&1 || true
 	# QUIC: если UDP/443 реально проходит — не режем его, приложение не ждёт
 	# fallback; если нет — reject + без ICMP-лимита, чтобы падение на TCP было быстрым.
 	# quic_mode делает сетевую пробу UDP/443 и может ждать; не блокируем старт.

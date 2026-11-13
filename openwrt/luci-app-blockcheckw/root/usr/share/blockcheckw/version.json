@@ -1,10 +1,12 @@
 {
-  "version": "0.33.1",
+  "version": "0.34.0",
   "release_date": "2026-11-13",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "На чистом OpenWrt 25.12 dnsmasq может отдать только AAAA для googlevideo; gv_fix теперь запускается при старте службы независимо от optimize_dns",
-    "Чистая установка сразу получает рабочий A-адрес видео-CDN"
+    "YouTube по умолчанию через fakeddisorder:pos=midsld:tcp_md5 — обходит SNI-блок, не ломая подписанные CDN-URL",
+    "Убрана автоматическая подмена DNS googlevideo на один edge: она давала 404 на videoplayback",
+    "Миграция старой circular-стратегии и очистка старых address= при старте",
+    "Проверено: реальный видеопоток играет на ПК без WARP/Amnezia/прокси"
   ]
 }
