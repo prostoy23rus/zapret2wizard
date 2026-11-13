@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.34.3] (2026-11-13)
+
+### Instagram: стабильный DNS-пин
+
+* `www.instagram.com`, `instagram.com`, `i.instagram.com` и `cdninstagram.com`
+  пиннятся на `31.13.72.53`;
+* динамическая проверка с роутера убрана: она шла мимо forward-очереди
+  nfqws и могла выбрать медленный/недоступный IP;
+* лента с картинками проверена в headless Edge.
+
 ## [0.34.2] (2026-11-13)
 
 ### Instagram DNS
