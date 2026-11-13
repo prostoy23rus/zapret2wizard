@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.34.1] (2026-11-13)
+
+### Discord, Instagram и остановка подбора
+
+* Discord: дефолт `hostfakesplit:host=gosuslugi.ru:tcp_ts=-600000`;
+  проверены `discord.com` и `/api/v9/gateway` (200);
+* Instagram: DNS-пин `instagram.com`, `i.instagram.com` и `cdninstagram.com`
+  работает и без DoH; добавлен рабочий Meta-IP, лента с картинками открывается;
+* `cmd_stop` больше не убивает сам себя до очистки pause/restart —
+  после «Остановить подбор» служба поднимается.
+
 ## [0.34.0] (2026-11-13)
 
 ### YouTube: fakeddisorder и отказ от DNS-подмены

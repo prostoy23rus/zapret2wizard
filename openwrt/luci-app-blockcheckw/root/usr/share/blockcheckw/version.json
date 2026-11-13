@@ -1,12 +1,11 @@
 {
-  "version": "0.34.0",
+  "version": "0.34.1",
   "release_date": "2026-11-13",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "YouTube по умолчанию через fakeddisorder:pos=midsld:tcp_md5 — обходит SNI-блок, не ломая подписанные CDN-URL",
-    "Убрана автоматическая подмена DNS googlevideo на один edge: она давала 404 на videoplayback",
-    "Миграция старой circular-стратегии и очистка старых address= при старте",
-    "Проверено: реальный видеопоток играет на ПК без WARP/Amnezia/прокси"
+    "Discord: hostfakesplit вместо multidisorder — веб и gateway открываются, SNI-блок обходится",
+    "Instagram: DNS-пин www/i.instagram.com и cdninstagram.com, включая случай без DoH; картинки больше не висят",
+    "Остановка подбора больше не убивает helper до cleanup — служба не остаётся остановленной"
   ]
 }

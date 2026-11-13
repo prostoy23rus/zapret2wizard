@@ -2265,7 +2265,14 @@ cmd_stop() {
         fi
         rm -f "$PID_FILE"
     fi
-    killall -9 blockcheckw blockcheckw-helper 2>/dev/null
+    # Не убиваем текущий helper: иначе cleanup/restart ниже не выполнится
+    # и служба останется остановленной после «Остановить подбор».
+    local _self=$$
+    local _p
+    for _p in $(ps w 2>/dev/null | awk '/[b]lockcheckw-helper/ {print $1}'); do
+        [ "$_p" = "$_self" ] || kill -9 "$_p" 2>/dev/null
+    done
+    killall -9 blockcheckw 2>/dev/null
     # Keeper-лок мог пережить скан: гасим его явно.
     if [ -d /var/run/bcw_scan.lock ]; then
         local _kp=$(cat /var/run/bcw_scan.lock/pid 2>/dev/null)
@@ -3832,7 +3839,7 @@ dns_fix_instagram() {
         for h in instagram.com i.instagram.com; do
             ips="$ips $(curl -sk -m 6 -H 'accept: application/dns-json' "https://cloudflare-dns.com/dns-query?name=$h&type=A" 2>/dev/null | sed -n 's/.*"data":"\([0-9.]*\)".*/\1/p')"
         done
-        ips="$ips 31.13.71.174 157.240.241.174 157.240.205.63 31.13.72.53"
+        ips="$ips 57.144.248.34 157.240.241.174 31.13.71.174 157.240.205.63 31.13.72.53"
         for ip in $ips; do
             case "$ip" in *[!0-9.]*|"") continue ;; esac
             if dns_ip_works "$host" "$ip"; then
@@ -3842,6 +3849,16 @@ dns_fix_instagram() {
         done
         [ -n "$ip" ] || echo "[blockcheckw-helper] DNS: рабочий IP для $host не найден" >> "$LOG_FILE" 2>/dev/null || true
     done
+    # Картинки/статика Instagram идут с cdninstagram.com. Провайдер отдаёт
+    # NXDOMAIN на часть имён, поэтому пинним родительский домен на рабочий
+    # Meta-IP; иначе страница открывается, а лента висит без изображений.
+    if ! dns_ip_works "scontent.cdninstagram.com" "31.13.72.53"; then
+        for ip in 157.240.241.174 31.13.71.174 157.240.205.63; do
+            dns_ip_works "scontent.cdninstagram.com" "$ip" && { dns_pin_host "cdninstagram.com" "$ip"; break; }
+        done
+    else
+        dns_pin_host "cdninstagram.com" "31.13.72.53"
+    fi
     return 0
 }
 
@@ -3878,20 +3895,32 @@ _gv_ip_reachable() {
 }
 
 cmd_fix_defaults() {
-    local marker="/etc/zapret2wizard/.strategy_034"
+    local marker="/etc/zapret2wizard/.strategy_0341"
     [ -f "$marker" ] && { echo '{"skipped":"done"}'; return 0; }
-    local cur
+    local cur changed=0
     cur=$(uci -q get zapret2wizard.BlockcheckW_YouTube.script 2>/dev/null)
     if [ -n "$cur" ]; then
         case "$cur" in
             *fakeddisorder*) ;;
             *"hostfakesplit:host=gosuslugi.ru:tcp_ts=-600000:strategy=1"*|*"circular:fails=3:maxtime=20"*)
                 uci -q set zapret2wizard.BlockcheckW_YouTube.script="--payload=tls_client_hello --lua-desync=fakeddisorder:pos=midsld:tcp_md5"
-                uci -q commit zapret2wizard
+                changed=1
                 logger -t zapret2wizard "YouTube strategy migrated to fakeddisorder"
                 ;;
         esac
     fi
+    cur=$(uci -q get zapret2wizard.BlockcheckW_Discord.script 2>/dev/null)
+    if [ -n "$cur" ]; then
+        case "$cur" in
+            *hostfakesplit:host=gosuslugi.ru*) ;;
+            *"circular:fails=3:maxtime=20"*|*"multidisorder:pos=midsld"*)
+                uci -q set zapret2wizard.BlockcheckW_Discord.script="--payload=tls_client_hello --lua-desync=hostfakesplit:host=gosuslugi.ru:tcp_ts=-600000"
+                changed=1
+                logger -t zapret2wizard "Discord strategy migrated to hostfakesplit"
+                ;;
+        esac
+    fi
+    [ "$changed" = "1" ] && uci -q commit zapret2wizard
     mkdir -p /etc/zapret2wizard 2>/dev/null || true
     touch "$marker" 2>/dev/null || true
     echo '{"fixed":true}'
@@ -3977,6 +4006,9 @@ cmd_optimize_dns() {
         for d in instagram.com cdninstagram.com discord.com twitch.tv x.com; do
             dns_alt_ensure "$d" && alt=1
         done
+        # Даже без DoH нельзя выходить раньше пина Instagram: иначе DNS
+        # провайдера отдаёт 127.0.0.1 и сайт «висит» при рабочей стратегии.
+        dns_fix_instagram >/dev/null 2>&1 || true
         echo "{\"changed\":$alt}"
         return 0
     fi

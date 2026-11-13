@@ -112,7 +112,7 @@ config strategy 'BlockcheckW_Discord'
 	list filter_l7 'tls'
 	list filter_l7 'discord'
 	list hostlist 'list_hosts_discord'
-	option script '--out-range=-s34228 --payload=tls_client_hello --in-range=-s5556 --lua-desync=circular:fails=3:maxtime=20 --in-range=x --lua-desync=hostfakesplit:host=gosuslugi.ru:tcp_ts=-60000:strategy=1 --lua-desync=multisplit:pos=1:seqovl=1:strategy=2 --lua-desync=multidisorder:pos=1,midsld,1220:strategy=3'
+	option script '--payload=tls_client_hello --lua-desync=hostfakesplit:host=gosuslugi.ru:tcp_ts=-600000'
 
 config strategy 'BlockcheckW_Discord_Voice'
 	option enabled '1'
