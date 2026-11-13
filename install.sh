@@ -759,6 +759,14 @@ if ! wait_zapret_ready; then
     fi
 fi
 
+# Явно применяем DNS-пины после старта: init/health могут сделать это
+# асинхронно, а нам нужен детерминированный результат до проверки.
+if [ -x /usr/bin/blockcheckw-helper ]; then
+    /usr/bin/blockcheckw-helper dns_fix_discord >/dev/null 2>&1 || true
+    /usr/bin/blockcheckw-helper dns_fix_instagram >/dev/null 2>&1 || true
+fi
+sleep 2
+
 # Проверка DNS: не оставляем роутер без резолвера после перезапусков dnsmasq.
 dns_works=0
 for _ in 1 2 3; do
