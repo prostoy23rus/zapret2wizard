@@ -914,6 +914,21 @@ return view.extend({
 			});
 		}
 
+		function rollbackConfig() {
+			fs.exec(HELPER_BIN, ['restore_good']).then(function(res) {
+				var ok = false;
+				try { ok = JSON.parse(res.stdout || '{}').ok === true; } catch(e) {}
+				if (ok) {
+					ui.addNotification(null, E('p', {}, 'Возвращена последняя рабочая конфигурация. Служба перезапускается.'), 'info');
+					setTimeout(function() { location.reload(); }, 2000);
+				} else {
+					ui.addNotification(null, E('p', {}, 'Нет сохранённой рабочей конфигурации — сначала примените стратегию.'), 'warning');
+				}
+			}).catch(function() {
+				ui.addNotification(null, E('p', {}, 'Не удалось вернуть конфигурацию'), 'danger');
+			});
+		}
+
 		function confirmStopService() {
 			bcwShowModal('Остановить службу?', [
 				E('p', { style: 'font-size:13px;color:#abb2bf;' }, 'Обход DPI перестанет работать для всех устройств в сети до следующего запуска. Стратегии и списки доменов сохранятся.')
@@ -949,6 +964,15 @@ return view.extend({
 		}, [
 			E('span', {}, '🩺'),
 			' Диагностика'
+		]);
+
+		var btnRollback = E('button', {
+			class: 'bcw-header-item bcw-header-btn',
+			title: 'Вернуть последнюю рабочую конфигурацию стратегий',
+			click: function() { rollbackConfig(); }
+		}, [
+			E('span', {}, '↩'),
+			' Откат'
 		]);
 
 		var btnFeedback = E('a', {
@@ -990,6 +1014,7 @@ return view.extend({
 			btnSvcStop,
 			btnSvcRestart,
 			btnDiagnostics,
+			btnRollback,
 			btnCheckUpdate,
 			btnFeedback,
 			btnUninstall

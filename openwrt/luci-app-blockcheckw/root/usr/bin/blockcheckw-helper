@@ -2295,6 +2295,32 @@ cmd_stop() {
     echo '{"status":"stopped"}'
 }
 
+GOOD_CONFIG="/etc/zapret2wizard/.last_good_config"
+
+cmd_save_good() {
+    local if_missing="$1"
+    mkdir -p /etc/zapret2wizard 2>/dev/null || true
+    if [ -s "$GOOD_CONFIG" ] && [ "$if_missing" = "--if-missing" ]; then
+        echo '{"saved":false,"reason":"exists"}'
+        return 0
+    fi
+    cp -f /etc/config/zapret2wizard "$GOOD_CONFIG" 2>/dev/null || return 1
+    chmod 600 "$GOOD_CONFIG" 2>/dev/null || true
+    echo '{"saved":true}'
+}
+
+cmd_restore_good() {
+    if [ ! -s "$GOOD_CONFIG" ]; then
+        echo '{"ok":false,"error":"нет сохранённой рабочей конфигурации"}'
+        return 1
+    fi
+    cp -f "$GOOD_CONFIG" /etc/config/zapret2wizard 2>/dev/null || return 1
+    uci -q commit zapret2wizard 2>/dev/null || true
+    logger -t zapret2wizard "восстановлена последняя рабочая конфигурация"
+    ( /etc/init.d/zapret2wizard restart >/dev/null 2>&1 & )
+    echo '{"ok":true,"restored":true}'
+}
+
 cmd_apply() {
     local target=""
     local script_text=""
@@ -2313,6 +2339,7 @@ cmd_apply() {
         script_text=$(cat "$script_file")
     fi
 
+    cmd_save_good >/dev/null 2>&1 || true
     # Иногда в файл попадает целая строка лога blockcheck2 вида
     # "curl_test_https_tls12 ipv4 discord.com : nfqws2 --payload=...". Оставляем только аргументы.
     case "$script_text" in
@@ -6507,6 +6534,8 @@ ttl_probe) shift; cmd_ttl_probe "$@" ;;
 dns_alt) shift; cmd_dns_alt "$@" ;;
 gv_fix) cmd_gv_fix ;;
     gv_clear) cmd_gv_clear ;;
+    save_good) shift; cmd_save_good "$1" ;;
+    restore_good) cmd_restore_good ;;
     dns_pool) shift; dns_pin_pool "$@" ;;
     fix_defaults) cmd_fix_defaults ;;
 quic_probe) cmd_quic_probe && echo ok || echo fail ;;
