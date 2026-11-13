@@ -3899,7 +3899,17 @@ cmd_quic_mode() {
                 want=1; mode="reject"
             fi
             ;;
-        *) cmd_quic_probe && want=0 || want=1 ;;
+        *)
+            # auto: для активной YouTube-стратегии QUIC не лечится desync
+            # (служба режет только TCP), поэтому по умолчанию reject.
+            if uci -q get zapret2wizard.BlockcheckW_YouTube >/dev/null 2>&1 || \
+               uci -q get zapret2wizard.youtube >/dev/null 2>&1 || \
+               uci -q get zapret2wizard.BlockcheckW_General >/dev/null 2>&1; then
+                want=1
+            else
+                cmd_quic_probe && want=0 || want=1
+            fi
+            ;;
     esac
 
     local cur=$(uci -q get firewall.reject_quic.enabled 2>/dev/null)

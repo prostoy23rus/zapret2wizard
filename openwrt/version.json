@@ -1,12 +1,10 @@
 {
-  "version": "0.32.0",
+  "version": "0.32.1",
   "release_date": "2026-11-13",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "Ранний Reject-QUIC: отдельная nft-таблица bcw_quic с hook forward priority -10 режет UDP/443 до проверки established",
-    "Правило сохраняется через firewall include и переживает reload/reboot",
-    "quic_mode=reject/allow применяет и снимает таблицу при старте/остановке службы",
-    "Исправлены телефоны, которые зависали на QUIC, пока ПК работал по TCP"
+    "quic_mode=auto теперь выбирает reject при активной YouTube-стратегии: служба десинхронизирует только TCP, QUIC-потоки зависают",
+    "Ранний Reject-QUIC из 0.32.0 применяется автоматически у всех, у кого настроен YouTube"
   ]
 }
