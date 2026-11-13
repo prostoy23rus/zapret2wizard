@@ -1,11 +1,10 @@
 {
-  "version": "0.34.1",
+  "version": "0.34.2",
   "release_date": "2026-11-13",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "Discord: hostfakesplit вместо multidisorder — веб и gateway открываются, SNI-блок обходится",
-    "Instagram: DNS-пин www/i.instagram.com и cdninstagram.com, включая случай без DoH; картинки больше не висят",
-    "Остановка подбора больше не убивает helper до cleanup — служба не остаётся остановленной"
+    "Instagram: пин www/instagram.com/i.instagram.com и cdninstagram.com на проверенный Meta-IP",
+    "Лента Instagram открывается с картинками; проверено в headless Edge"
   ]
 }

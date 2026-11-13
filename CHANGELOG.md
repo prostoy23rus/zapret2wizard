@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.34.2] (2026-11-13)
+
+### Instagram DNS
+
+* пин `www.instagram.com`, `instagram.com`, `i.instagram.com` и `cdninstagram.com`
+  на проверенный Meta-IP;
+* порядок кандидатов: сначала рабочий 31.13.72.53, затем остальные;
+* лента Instagram с картинками проверена в headless Edge.
+
 ## [0.34.1] (2026-11-13)
 
 ### Discord, Instagram и остановка подбора
