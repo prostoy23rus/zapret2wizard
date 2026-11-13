@@ -3750,6 +3750,52 @@ dns_alt_ensure() {
     done
     return 1
 }
+# Проверка достижимости IP и подмена googlevideo на рабочий Google-edge.
+# GGC-адреса вида 87.245.x у части провайдеров не отвечают, из-за чего
+# YouTube-плеер зависает на старте (SYN без ответа).
+_gv_ip_reachable() {
+    local ip="$1" code
+    [ -n "$ip" ] || return 1
+    code=$(curl -4 -s -o /dev/null -m 4 --resolve "redirector.googlevideo.com:443:$ip" -w '%{http_code}' https://redirector.googlevideo.com/ 2>/dev/null)
+    [ -n "$code" ] && [ "$code" != "000" ]
+}
+
+cmd_gv_fix() {
+    local cur ip dns_ip e canary cip
+    cur=$(uci -q get dhcp.@dnsmasq[0].address 2>/dev/null | tr ' ' '\n' | sed -n 's#^/googlevideo\.com/##p' | head -1)
+    # Канарейка: типичный CDN-хост, который выдаёт этот провайдер.
+    canary="rr1---sn-gxuo03g-ig3s.googlevideo.com"
+    cip=$(nslookup "$canary" 127.0.0.1 2>/dev/null | awk '/^Address: /{print $2; exit}')
+    if [ -n "$cip" ] && _gv_ip_reachable "$cip"; then
+        if [ -n "$cur" ]; then
+            for e in $(uci -q get dhcp.@dnsmasq[0].address 2>/dev/null); do
+                case "$e" in /googlevideo.com/*) uci -q del_list dhcp.@dnsmasq[0].address="$e" 2>/dev/null ;; esac
+            done
+            uci commit dhcp 2>/dev/null || true
+            /etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
+        fi
+        echo "{\"ok\":true,\"ip\":\"$cip\",\"source\":\"dns\"}"
+        return 0
+    fi
+    [ -n "$cip" ] || { echo '{"ok":true,"source":"no-canary"}'; return 0; }
+    [ -n "$cur" ] && _gv_ip_reachable "$cur" && { echo "{\"ok\":true,\"ip\":\"$cur\",\"source\":\"existing\"}"; return 0; }
+    dns_ip=$(nslookup redirector.googlevideo.com 127.0.0.1 2>/dev/null | awk '/^Address: /{print $2; exit}')
+    for ip in "$dns_ip" 142.250.178.46 192.178.183.102 142.250.74.138 142.251.156.4; do
+        [ -n "$ip" ] || continue
+        if _gv_ip_reachable "$ip"; then
+            for e in $(uci -q get dhcp.@dnsmasq[0].address 2>/dev/null); do
+                case "$e" in /googlevideo.com/*) uci -q del_list dhcp.@dnsmasq[0].address="$e" 2>/dev/null ;; esac
+            done
+            uci add_list dhcp.@dnsmasq[0].address="/googlevideo.com/$ip" 2>/dev/null
+            uci commit dhcp 2>/dev/null || true
+            /etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
+            echo "{\"ok\":true,\"ip\":\"$ip\",\"source\":\"fallback\"}"
+            return 0
+        fi
+    done
+    echo '{"ok":false}'
+}
+
 cmd_optimize_dns() {
     local changed=0 entry dom cs
     # Один прогон за раз: при старте службы оптимизация запускается в фоне,
@@ -3803,6 +3849,7 @@ cmd_optimize_dns() {
         /etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
     fi
     dns_fix_instagram >/dev/null 2>&1 || true
+    cmd_gv_fix >/dev/null 2>&1 || true
     echo "{\"changed\":$changed}"
 }
 
@@ -4611,6 +4658,7 @@ cmd_health_tick() {
     # Закреплённый IP Instagram мог умереть: перепроверяем при каждом тике,
     # не дожидаясь ночной эволюции (сама проверка стоит один curl с -m 6).
     dns_fix_instagram >/dev/null 2>&1 || true
+    cmd_gv_fix >/dev/null 2>&1 || true
 
     # Проверяем все включённые сервисы, а не только YouTube: два сбоя
     # подряд по сервису → L1-запись помечается непроверенной, /24 снимается,
@@ -6231,6 +6279,7 @@ ensure_lua) cmd_ensure_lua ;;
 hostlists_merge) cmd_hostlists_merge ;;
 ttl_probe) shift; cmd_ttl_probe "$@" ;;
 dns_alt) shift; cmd_dns_alt "$@" ;;
+gv_fix) cmd_gv_fix ;;
 quic_probe) cmd_quic_probe && echo ok || echo fail ;;
 quic_mode) shift; cmd_quic_mode "$@" ;;
 optimize_dns) cmd_optimize_dns ;;

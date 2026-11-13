@@ -1,12 +1,11 @@
 {
-  "version": "0.30.0",
+  "version": "0.31.0",
   "release_date": "2026-11-13",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "Корпус пополнен семействами из youtubeUnblock: IP-фрагментация (ipfrag, ipfrag_disorder), обратный порядок фрагментов, задержка",
-    "syndata теперь отправляет фейковый TLS ClientHello с SNI, а не 16 нулевых байт",
-    "OOB-кандидаты с явными char/byte/urp вместо одного urp=midsld",
-    "Адаптивный корпус распознаёт ipfrag/reverse и добавляет свои варианты"
+    "Исправлен медленный старт YouTube, когда DNS провайдера отдаёт недостижимый GGC-адрес (87.245.x): googlevideo.com переключается на рабочий Google-edge",
+    "Проверка gv_fix в optimize_dns и health_tick: канареечный CDN-хост проверяется, при недоступности добавляется address=/googlevideo.com/<ip>",
+    "Команда gv_fix для ручной проверки"
   ]
 }
