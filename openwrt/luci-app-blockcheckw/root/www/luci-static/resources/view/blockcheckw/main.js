@@ -3497,6 +3497,14 @@ return view.extend({
 					try {
 						var parsed = JSON.parse(res.stdout);
 						if (parsed.error) {
+							// Повторный клик во время уже идущего подбора — не ошибка:
+							// подхватываем существующий скан, иначе UI застревает на 10%.
+							if (/уже/i.test(parsed.error)) {
+								ui.addNotification(null, E('p', {}, 'Подбор уже идёт — продолжаем следить за прогрессом.'), 'info');
+								isRunning = true;
+								startPolling();
+								return;
+							}
 							ui.addNotification(null, E('p', {}, 'Ошибка запуска: ' + parsed.error), 'danger');
 							resetScanUI();
 							return;

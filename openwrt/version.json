@@ -1,10 +1,9 @@
 {
-  "version": "0.34.3",
+  "version": "0.34.4",
   "release_date": "2026-11-13",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "Instagram: стабильный Meta-edge 31.13.72.53 для www/instagram.com/i.instagram.com/cdninstagram.com",
-    "Пин не зависит от curl с роутера, который идёт мимо forward-очереди nfqws"
+    "Повторный запуск подбора во время уже идущего скана больше не сбрасывает UI на 10% — прогресс продолжает обновляться"
   ]
 }
