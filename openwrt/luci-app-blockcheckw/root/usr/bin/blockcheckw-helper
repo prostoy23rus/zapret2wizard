@@ -3829,28 +3829,53 @@ dns_ip_works() {
     case "$code" in 2*|3*) return 0 ;; *) return 1 ;; esac
 }
 
+# Пул кандидатов вместо магического IP. Проверяем полный ответ (размер тела),
+# а не только заголовок: битые edge отдают 200 и обрываются на 16–19 КБ.
+# Динамические A-записи из 1.1.1.1 идут первыми, статические — fallback.
+dns_pin_pool() {
+    local host="$1" url="$2" min="$3" ip out code size best="" dyn seen=" "
+    shift 3
+    dyn=$(nslookup "$host" 1.1.1.1 2>/dev/null | awk '/^Address: /{print $2}' | grep -E '^[0-9.]+$' | head -8)
+    for ip in $dyn "$@"; do
+        case "$seen" in *" $ip "*) continue ;; esac
+        seen="$seen$ip "
+        out=$(curl -4 -sk -o /dev/null -m 7 --resolve "$host:443:$ip" -w '%{http_code} %{size_download}' "$url" 2>/dev/null)
+        code=${out%% *}; size=${out##* }
+        case "$code" in 2*|3*) ;; *) continue ;; esac
+        [ -n "$size" ] && [ "$size" -ge "$min" ] 2>/dev/null || continue
+        best="$ip"; break
+    done
+    if [ -n "$best" ]; then
+        dns_pin_host "$host" "$best"
+        echo "$best"
+        return 0
+    fi
+    echo "[blockcheckw-helper] DNS: нет живого edge для $host, оставляем прежний" >> "$LOG_FILE" 2>/dev/null || true
+    return 1
+}
+
 dns_fix_discord() {
     uci -q get zapret2wizard.BlockcheckW_Discord.enabled 2>/dev/null | grep -q '^1$' || return 0
-    # Cloudflare edge 162.159.136.232 отдаёт полный HTML/ассеты Discord;
-    # соседние 162.159.13x обрывают поток на ~16–19 КБ.
-    local host
-    for host in discord.com discordapp.com gateway.discord.gg; do
-        dns_pin_host "$host" "162.159.136.232"
-    done
+    local ip
+    ip=$(dns_pin_pool "discord.com" "https://discord.com/login" 50000 \
+        162.159.136.232 162.159.135.232 162.159.128.233 162.159.137.232 162.159.138.232 2>/dev/null | tail -1)
+    [ -n "$ip" ] || return 0
+    dns_pin_host "discordapp.com" "$ip"
+    dns_pin_host "gateway.discord.gg" "$ip"
     return 0
 }
 
 dns_fix_instagram() {
     uci -q get zapret2wizard.BlockcheckW_Instagram.enabled 2>/dev/null | grep -q '^1$' || return 0
-    # Проверка curl с роутера идёт мимо forward-очереди nfqws, поэтому может
-    # забраковать рабочий для клиентов IP и выбрать медленный. Для Meta
-    # используем стабильный проверенный edge; при смене сети health/scan
-    # обновит стратегию, а DNS-пин останется предсказуемым.
-    local meta_ip="31.13.72.53"
-    local host
-    for host in www.instagram.com instagram.com i.instagram.com cdninstagram.com; do
-        dns_pin_host "$host" "$meta_ip"
-    done
+    local ip cdn
+    ip=$(dns_pin_pool "www.instagram.com" "https://www.instagram.com/" 50000 \
+        31.13.72.53 57.144.248.34 157.240.241.174 31.13.71.174 157.240.205.63 2>/dev/null | tail -1)
+    [ -n "$ip" ] || return 0
+    dns_pin_host "instagram.com" "$ip"
+    dns_pin_host "i.instagram.com" "$ip"
+    cdn=$(dns_pin_pool "scontent.cdninstagram.com" "https://scontent.cdninstagram.com/" 0 \
+        31.13.72.53 157.240.241.174 31.13.71.174 157.240.205.63 2>/dev/null | tail -1)
+    [ -n "$cdn" ] && dns_pin_host "cdninstagram.com" "$cdn"
     return 0
 }
 
@@ -6482,6 +6507,7 @@ ttl_probe) shift; cmd_ttl_probe "$@" ;;
 dns_alt) shift; cmd_dns_alt "$@" ;;
 gv_fix) cmd_gv_fix ;;
     gv_clear) cmd_gv_clear ;;
+    dns_pool) shift; dns_pin_pool "$@" ;;
     fix_defaults) cmd_fix_defaults ;;
 quic_probe) cmd_quic_probe && echo ok || echo fail ;;
 quic_mode) shift; cmd_quic_mode "$@" ;;

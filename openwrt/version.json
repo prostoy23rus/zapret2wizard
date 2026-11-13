@@ -1,10 +1,11 @@
 {
-  "version": "0.34.5",
+  "version": "0.34.6",
   "release_date": "2026-11-13",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "Discord: DNS-пин discord.com/discordapp.com/gateway.discord.gg на Cloudflare edge 162.159.136.232 — полный HTML и ассеты, веб-вход работает",
-    "Discord: стратегия hostfakesplit, проверено в headless Edge без ошибок загрузки"
+    "DNS/CDN: пул кандидатов с проверкой полного тела ответа вместо жёстких IP",
+    "Discord/Instagram: динамические A-записи 1.1.1.1 первыми, статические edge — fallback",
+    "Если ни один кандидат не проходит — сохраняется прежний рабочий пин"
   ]
 }
