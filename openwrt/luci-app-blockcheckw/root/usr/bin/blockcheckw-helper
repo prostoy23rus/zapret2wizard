@@ -3829,6 +3829,17 @@ dns_ip_works() {
     case "$code" in 2*|3*) return 0 ;; *) return 1 ;; esac
 }
 
+dns_fix_discord() {
+    uci -q get zapret2wizard.BlockcheckW_Discord.enabled 2>/dev/null | grep -q '^1$' || return 0
+    # Cloudflare edge 162.159.136.232 отдаёт полный HTML/ассеты Discord;
+    # соседние 162.159.13x обрывают поток на ~16–19 КБ.
+    local host
+    for host in discord.com discordapp.com gateway.discord.gg; do
+        dns_pin_host "$host" "162.159.136.232"
+    done
+    return 0
+}
+
 dns_fix_instagram() {
     uci -q get zapret2wizard.BlockcheckW_Instagram.enabled 2>/dev/null | grep -q '^1$' || return 0
     # Проверка curl с роутера идёт мимо forward-очереди nfqws, поэтому может
@@ -3990,6 +4001,7 @@ cmd_optimize_dns() {
         # Даже без DoH нельзя выходить раньше пина Instagram: иначе DNS
         # провайдера отдаёт 127.0.0.1 и сайт «висит» при рабочей стратегии.
         dns_fix_instagram >/dev/null 2>&1 || true
+        dns_fix_discord >/dev/null 2>&1 || true
         echo "{\"changed\":$alt}"
         return 0
     fi
@@ -4020,6 +4032,7 @@ cmd_optimize_dns() {
         /etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
     fi
     dns_fix_instagram >/dev/null 2>&1 || true
+    dns_fix_discord >/dev/null 2>&1 || true
     echo "{\"changed\":$changed}"
 }
 
@@ -4842,9 +4855,10 @@ cmd_health_tick() {
         return 0
     fi
 
-    # Закреплённый IP Instagram мог умереть: перепроверяем при каждом тике,
-    # не дожидаясь ночной эволюции (сама проверка стоит один curl с -m 6).
+    # Закреплённые IP Instagram/Discord могли умереть: перепроверяем при
+    # каждом тике, не дожидаясь ночной эволюции.
     dns_fix_instagram >/dev/null 2>&1 || true
+    dns_fix_discord >/dev/null 2>&1 || true
 
     # Проверяем все включённые сервисы, а не только YouTube: два сбоя
     # подряд по сервису → L1-запись помечается непроверенной, /24 снимается,

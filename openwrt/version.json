@@ -1,9 +1,10 @@
 {
-  "version": "0.34.4",
+  "version": "0.34.5",
   "release_date": "2026-11-13",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "Повторный запуск подбора во время уже идущего скана больше не сбрасывает UI на 10% — прогресс продолжает обновляться"
+    "Discord: DNS-пин discord.com/discordapp.com/gateway.discord.gg на Cloudflare edge 162.159.136.232 — полный HTML и ассеты, веб-вход работает",
+    "Discord: стратегия hostfakesplit, проверено в headless Edge без ошибок загрузки"
   ]
 }
