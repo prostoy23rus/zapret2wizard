@@ -388,7 +388,7 @@ mkdir -p /usr/bin /usr/share/blockcheckw /usr/share/luci/menu.d /usr/share/rpcd/
 mkdir -p /usr/share/zapret2wizard/lua /usr/share/zapret2wizard/fake /usr/share/zapret2wizard/ipset /etc/zapret2wizard/ipset /etc/config /etc/init.d
 chmod 755 /www/luci-static/resources/view/blockcheckw /usr/share/blockcheckw /usr/share/zapret2wizard 2>/dev/null || true
 
-fetch_req "openwrt/luci-app-blockcheckw/root/usr/bin/blockcheckw-helper" /usr/bin/blockcheckw-helper 8
+fetch_req "openwrt/luci-app-blockcheckw/root/usr/bin/blockcheckw-helper" /usr/bin/blockcheckw-helper 60
 chmod +x /usr/bin/blockcheckw-helper 2>/dev/null || true
 fetch_file "openwrt/luci-app-blockcheckw/root/usr/bin/circular-builder.lua" /usr/bin/circular-builder.lua 8 || true
 fetch_req "openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/uci2config" /usr/share/zapret2wizard/uci2config 8
@@ -406,6 +406,18 @@ chmod 644 /www/luci-static/resources/view/blockcheckw/main.js 2>/dev/null || tru
 
 # Ключевые файлы обязательны: без них интерфейс не запустится.
 chmod +x /usr/bin/blockcheckw-helper 2>/dev/null || true
+# Частично скачанный helper может быть непустым и даже >50 КБ, но
+# обрываться на середине функции. Проверяем синтаксис, а не только размер.
+if [ -s /usr/bin/blockcheckw-helper ] && ! sh -n /usr/bin/blockcheckw-helper >/dev/null 2>&1; then
+    echo -e "${YELLOW}[WARN]${NC} helper скачался частично — повторная загрузка..."
+    rm -f /usr/bin/blockcheckw-helper
+    fetch_file "openwrt/luci-app-blockcheckw/root/usr/bin/blockcheckw-helper" /usr/bin/blockcheckw-helper 120 || true
+    chmod +x /usr/bin/blockcheckw-helper 2>/dev/null || true
+fi
+if [ -s /usr/bin/blockcheckw-helper ] && ! sh -n /usr/bin/blockcheckw-helper >/dev/null 2>&1; then
+    echo -e "${RED}[ERROR] helper повреждён после повторной загрузки.${NC}"
+    exit 1
+fi
 HELPER_SIZE=$(wc -c < /usr/bin/blockcheckw-helper 2>/dev/null || echo 0)
 MAINJS_SIZE=$(wc -c < /www/luci-static/resources/view/blockcheckw/main.js 2>/dev/null || echo 0)
 if [ "${HELPER_SIZE:-0}" -lt 50000 ] || [ "${MAINJS_SIZE:-0}" -lt 100000 ]; then
