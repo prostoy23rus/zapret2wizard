@@ -1726,11 +1726,24 @@ return view.extend({
 			E('span', {}, 'Замер скорости')
 		]);
 
+		var btnScanSettings = E('button', {
+			class: 'bcw-action-btn bcw-action-btn-secondary',
+			title: 'Показать/скрыть настройки подбора',
+			click: function() {
+				if (!unifiedScanCard) return;
+				unifiedScanCard.style.display = (unifiedScanCard.style.display === 'none' || !unifiedScanCard.style.display) ? 'block' : 'none';
+			}
+		}, [
+			E('span', {}, '⚙'),
+			E('span', {}, 'Настройки')
+		]);
+
 		var actionsGridEl = E('div', { class: 'bcw-actions-grid' }, [
 			btnStartScan,
 			btnStopScan,
 			btnTestConn,
-			btnSpeedTest
+			btnSpeedTest,
+			btnScanSettings
 		]);
 		var quickActionsBar = E('div', { class: 'bcw-quick-actions' }, [actionsGridEl]);
 		mainLayout.insertBefore(quickActionsBar, targetSectionCard);
