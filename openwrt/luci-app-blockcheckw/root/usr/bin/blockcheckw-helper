@@ -4449,10 +4449,16 @@ cmd_fix_ytapi() {
 cmd_ensure_ytapi() {
     local code
     [ -f /tmp/bcw_ytapi.lock ] && return 0
+    # Уже есть профиль (в том числе disabled после неудачного подбора) —
+    # не перезапускаем службу повторно при каждом старте: это давало цикл
+    # restart → ensure_ytapi → fix_ytapi → restart.
+    uci -q get zapret2wizard.YTApi >/dev/null 2>&1 && return 0
+    [ -f /tmp/bcw_ytapi.attempted ] && return 0
     uci -q get zapret2wizard.BlockcheckW_YouTube.enabled 2>/dev/null | grep -q '^1$' || return 0
     code=$(curl -4 -s -o /dev/null -m 6 -w '%{http_code}' https://youtubei.googleapis.com/ 2>/dev/null)
     [ "$code" = "000" ] || return 0
     : > /tmp/bcw_ytapi.lock
+    : > /tmp/bcw_ytapi.attempted
     cmd_fix_ytapi >/dev/null 2>&1 || true
     rm -f /tmp/bcw_ytapi.lock
     return 0

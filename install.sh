@@ -259,6 +259,17 @@ fi
 # 5. Скачивание скомпилированного бинарника blockcheckw
 TMP_DIR="/tmp/bcw_install_$$"
 mkdir -p "$TMP_DIR"
+INSTALL_BACKUP="$TMP_DIR/preinstall"
+mkdir -p "$INSTALL_BACKUP"
+# Страховка: если после установки служба/DNS не поднимется, вернём эти файлы.
+[ -f /etc/config/zapret2wizard ] && cp -f /etc/config/zapret2wizard "$INSTALL_BACKUP/zapret2wizard.config" 2>/dev/null || true
+[ -f /etc/config/dhcp ] && cp -f /etc/config/dhcp "$INSTALL_BACKUP/dhcp" 2>/dev/null || true
+[ -f /etc/config/network ] && cp -f /etc/config/network "$INSTALL_BACKUP/network" 2>/dev/null || true
+[ -f /etc/config/firewall ] && cp -f /etc/config/firewall "$INSTALL_BACKUP/firewall" 2>/dev/null || true
+[ -f /usr/bin/blockcheckw-helper ] && cp -f /usr/bin/blockcheckw-helper "$INSTALL_BACKUP/blockcheckw-helper" 2>/dev/null || true
+[ -f /etc/init.d/zapret2wizard ] && cp -f /etc/init.d/zapret2wizard "$INSTALL_BACKUP/zapret2wizard.init" 2>/dev/null || true
+[ -f /www/luci-static/resources/view/blockcheckw/main.js ] && cp -f /www/luci-static/resources/view/blockcheckw/main.js "$INSTALL_BACKUP/main.js" 2>/dev/null || true
+[ -f /usr/share/blockcheckw/version.json ] && cp -f /usr/share/blockcheckw/version.json "$INSTALL_BACKUP/version.json" 2>/dev/null || true
 cd "$TMP_DIR"
 
 BIN_NAME="blockcheckw-linux-${ARCH}.tar.gz"
@@ -696,12 +707,77 @@ rm -rf /tmp/luci-indexcache* /tmp/luci-modulecache*
 /etc/init.d/lighttpd restart >/dev/null 2>&1 || true
 ubus call luci reload >/dev/null 2>&1 || true
 
+wait_zapret_ready() {
+    local i=0
+    while [ "$i" -lt 45 ]; do
+        if pidof nfqws2 >/dev/null 2>&1 && nft list tables 2>/dev/null | grep -q 'zapret2wizard'; then
+            return 0
+        fi
+        sleep 1
+        i=$((i + 1))
+    done
+    return 1
+}
+
+restore_preinstall() {
+    local f
+    for f in zapret2wizard.config zapret2wizard.init blockcheckw-helper main.js version.json; do
+        [ -f "$INSTALL_BACKUP/$f" ] || continue
+        case "$f" in
+            zapret2wizard.config) cp -f "$INSTALL_BACKUP/$f" /etc/config/zapret2wizard ;;
+            zapret2wizard.init) cp -f "$INSTALL_BACKUP/$f" /etc/init.d/zapret2wizard ;;
+            blockcheckw-helper) cp -f "$INSTALL_BACKUP/$f" /usr/bin/blockcheckw-helper ;;
+            main.js) cp -f "$INSTALL_BACKUP/$f" /www/luci-static/resources/view/blockcheckw/main.js ;;
+            version.json) cp -f "$INSTALL_BACKUP/$f" /usr/share/blockcheckw/version.json ;;
+        esac
+        chmod +x /usr/bin/blockcheckw-helper /etc/init.d/zapret2wizard 2>/dev/null || true
+    done
+    [ -f "$INSTALL_BACKUP/dhcp" ] && cp -f "$INSTALL_BACKUP/dhcp" /etc/config/dhcp 2>/dev/null || true
+    [ -f "$INSTALL_BACKUP/network" ] && cp -f "$INSTALL_BACKUP/network" /etc/config/network 2>/dev/null || true
+    [ -f "$INSTALL_BACKUP/firewall" ] && cp -f "$INSTALL_BACKUP/firewall" /etc/config/firewall 2>/dev/null || true
+    uci -q commit zapret2wizard 2>/dev/null || true
+    uci -q commit dhcp 2>/dev/null || true
+    uci -q commit network 2>/dev/null || true
+    uci -q commit firewall 2>/dev/null || true
+    /etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
+    /etc/init.d/zapret2wizard restart >/dev/null 2>&1 || true
+}
+
 # 9. Автозапуск и проверка конфликтов с другими DPI-службами
 echo -e "${BLUE}ℹ${NC} Включение автозапуска и проверка конфликтов..."
 /etc/init.d/zapret2wizard enable >/dev/null 2>&1 || true
 /usr/bin/blockcheckw-helper cron_install >/dev/null 2>&1 || true
 ( /etc/init.d/zapret2wizard restart >/dev/null 2>&1 </dev/null & )
-sleep 2
+if ! wait_zapret_ready; then
+    echo "Служба не поднялась сразу — повторный запуск..."
+    /etc/init.d/zapret2wizard start >/dev/null 2>&1 || true
+    if ! wait_zapret_ready; then
+        echo "ОШИБКА: nfqws2/таблица не поднялись после установки."
+        echo "Возвращаю предыдущую конфигурацию..."
+        restore_preinstall
+        exit 1
+    fi
+fi
+
+# Проверка DNS: не оставляем роутер без резолвера после перезапусков dnsmasq.
+dns_works=0
+for _ in 1 2 3; do
+    if nslookup www.google.com 127.0.0.1 >/dev/null 2>&1 || nslookup ya.ru 127.0.0.1 >/dev/null 2>&1; then
+        dns_works=1
+        break
+    fi
+    sleep 1
+done
+if [ "$dns_works" != "1" ]; then
+    echo "DNS не отвечает — возвращаю конфигурацию dnsmasq..."
+    restore_preinstall
+    sleep 2
+    if ! nslookup www.google.com 127.0.0.1 >/dev/null 2>&1 && ! nslookup ya.ru 127.0.0.1 >/dev/null 2>&1; then
+        echo "ОШИБКА: DNS всё ещё не отвечает. Проверьте WAN/резолвер вручную."
+        exit 1
+    fi
+fi
+
 if [ -x /usr/bin/blockcheckw-helper ]; then
     CONFLICTS=$(/usr/bin/blockcheckw-helper conflicts 2>/dev/null)
     case "$CONFLICTS" in

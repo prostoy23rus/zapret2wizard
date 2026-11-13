@@ -2,7 +2,7 @@
 
 **Автономный обход DPI/ТСПУ для OpenWrt:** движок `zapret2 (nfqws2)`, собственный сканер стратегий, подбор под конкретного провайдера и веб-интерфейс LuCI. Ставится одним пакетом, работает без сторонних зависимостей и без интернета после установки.
 
-[![Version](https://img.shields.io/badge/version-0.36.0-00d1b2?style=flat-square)](https://github.com/prostoy23rus/zapret2wizard/releases)
+[![Version](https://img.shields.io/badge/version-0.36.1-00d1b2?style=flat-square)](https://github.com/prostoy23rus/zapret2wizard/releases)
 [![OpenWrt](https://img.shields.io/badge/OpenWrt-23.05%20|%2024.10%20|%2025.x-blue?style=flat-square)](https://openwrt.org)
 [![Arch](https://img.shields.io/badge/arch-aarch64%20|%20arm%20|%20x86__64%20|%20mips%20|%20mipsel%20|%20riscv64-success?style=flat-square)](#поддерживаемые-архитектуры)
 [![License](https://img.shields.io/badge/license-MIT-yellow?style=flat-square)](LICENSE)
