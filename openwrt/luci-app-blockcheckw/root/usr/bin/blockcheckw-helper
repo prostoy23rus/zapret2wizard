@@ -3454,6 +3454,46 @@ cmd_toggle_service() {
 }
 
 # Проверка конфликтов: чужие DPI-службы, посторонние движки, автозапуск.
+# --- Конфликты с чужими обходами -------------------------------------------
+# Наша служба не должна делить forward/queue/marks с другим zapret. Эти
+# функции только собирают факты; решение (disable/remove/keep) — за командой
+# conflicts_resolve и интерфейсом.
+_conflict_service_names() {
+    echo "zapret2 zapret zapret-manager blockcheck"
+}
+
+_conflict_engine_pid_list() {
+    local c p cmd name
+    for c in /proc/[0-9]*/comm; do
+        [ -r "$c" ] || continue
+        name=$(cat "$c" 2>/dev/null)
+        case "$name" in nfqws|nfqws2) ;; *) continue ;; esac
+        p=${c#/proc/}; p=${p%/comm}
+        cmd=$(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null)
+        case "$cmd" in
+            *zapret2wizard*|*--uid=65534*) continue ;;
+        esac
+        echo "$p"
+    done
+}
+
+_conflict_table_list() {
+    local fam name
+    nft list tables 2>/dev/null | while read -r _ fam name; do
+        [ "$name" = "zapret2wizard" ] && continue
+        case "$name" in zapret|zapret2|blockcheck|byedpi|ciadpi) ;; *) continue ;; esac
+        nft list table "$fam" "$name" 2>/dev/null | grep -q 'queue' && echo "$fam $name"
+    done
+}
+
+_conflict_pkg_list() {
+    if command -v opkg >/dev/null 2>&1; then
+        opkg list-installed 2>/dev/null | awk '{print $1}'
+    elif command -v apk >/dev/null 2>&1; then
+        apk info 2>/dev/null
+    fi | grep -E '^(zapret2|zapret|zapret-manager|luci-app-zapret2|luci-app-zapret|blockcheck)$' | sort -u
+}
+
 cmd_conflicts() {
     local services="" svc run svc_running=0
     for svc in zapret2 zapret zapret-manager blockcheck; do
@@ -3487,14 +3527,90 @@ cmd_conflicts() {
     nft list tables 2>/dev/null | grep -q 'inet zapret2wizard' && table=1
     ls /etc/rc.d/ 2>/dev/null | grep -q 'zapret2wizard' && autostart=1
 
+    local pids tables pkgs disabled_by_us
+    pids=$(_conflict_engine_pid_list 2>/dev/null | tr '\n' ' ')
+    disabled_by_us=$(cat /etc/zapret2wizard/.disabled_foreign 2>/dev/null | tr '\n' ' ')
+    tables=$(_conflict_table_list 2>/dev/null | tr '\n' ';')
+    pkgs=$(_conflict_pkg_list 2>/dev/null | tr '\n' ' ')
+
     local ok=true
     # Чужие движки — информация, а не ошибка: мы их не трогаем.
     [ "$svc_running" -eq 0 ] || ok=false
     [ "$table" -eq 1 ] || ok=false
     [ "$autostart" -eq 1 ] || ok=false
 
-    printf '{"success":true,"services":%s,"engines":{"ours":%s,"foreign":%s,"scanner":%s},"nft_table":%s,"autostart":%s,"conflict_running":%s,"ok":%s}\n' \
-        "$services" "$ours" "$foreign" "$scanner" "$table" "$autostart" "$svc_running" "$ok"
+    printf '{"success":true,"services":%s,"engines":{"ours":%s,"foreign":%s,"scanner":%s},"foreign_pids":"%s","tables":"%s","packages":"%s","disabled_by_us":"%s","nft_table":%s,"autostart":%s,"conflict_running":%s,"ok":%s}\n' \
+        "$services" "$ours" "$foreign" "$scanner" "$pids" "$tables" "$pkgs" "$disabled_by_us" "$table" "$autostart" "$svc_running" "$ok"
+}
+
+cmd_conflicts_resolve() {
+    local action="disable" auto=0
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --action) action="$2"; shift 2 ;;
+            --auto) auto=1; shift ;;
+            *) shift ;;
+        esac
+    done
+    case "$action" in disable|remove|keep) ;; *) action="disable" ;; esac
+
+    local stopped="" disabled="" killed="" removed="" tables_deleted=""
+    if [ "$action" != "keep" ]; then
+        local svc
+        for svc in $(_conflict_service_names); do
+            [ -x "/etc/init.d/$svc" ] || continue
+            local _was_run=0 _was_en=0
+            /etc/init.d/"$svc" running >/dev/null 2>&1 && _was_run=1
+            ls /etc/rc.d/S*"$svc" >/dev/null 2>&1 && _was_en=1
+            if [ "$_was_run" = "1" ]; then
+                /etc/init.d/"$svc" stop >/dev/null 2>&1 || true
+                stopped="$stopped $svc"
+            fi
+            if [ "$_was_run" = "1" ] || [ "$_was_en" = "1" ]; then
+                /etc/init.d/"$svc" disable >/dev/null 2>&1 || true
+                disabled="$disabled $svc"
+            fi
+        done
+
+        local p
+        for p in $(_conflict_engine_pid_list); do
+            kill "$p" >/dev/null 2>&1 || true
+            sleep 0.2
+            kill -9 "$p" >/dev/null 2>&1 || true
+            killed="$killed $p"
+        done
+
+        local t
+        for t in $(_conflict_table_list); do
+            set -- $t
+            nft delete table "$1" "$2" >/dev/null 2>&1 && tables_deleted="$tables_deleted $1/$2"
+        done
+
+        if [ "$action" = "remove" ]; then
+            local pkg
+            for pkg in $(_conflict_pkg_list); do
+                if command -v opkg >/dev/null 2>&1; then
+                    opkg remove --force-depends "$pkg" >/dev/null 2>&1 && removed="$removed $pkg"
+                elif command -v apk >/dev/null 2>&1; then
+                    apk del "$pkg" >/dev/null 2>&1 && removed="$removed $pkg"
+                fi
+            done
+        fi
+    fi
+
+    if [ -n "$disabled" ]; then
+        mkdir -p /etc/zapret2wizard 2>/dev/null || true
+        printf '%s\n' "$disabled" > /etc/zapret2wizard/.disabled_foreign 2>/dev/null || true
+    fi
+    if [ "$action" = "remove" ] || [ "$action" = "keep" ]; then
+        rm -f /etc/zapret2wizard/.disabled_foreign 2>/dev/null || true
+    fi
+
+    local remaining=0 remaining_tables=0
+    remaining=$(_conflict_engine_pid_list | wc -l | tr -d ' ')
+    remaining_tables=$(_conflict_table_list | wc -l | tr -d ' ')
+    printf '{"success":true,"action":"%s","auto":%s,"stopped":"%s","disabled":"%s","killed":"%s","tables":"%s","removed":"%s","remaining_foreign":%s,"remaining_tables":%s}\n' \
+        "$action" "$auto" "$stopped" "$disabled" "$killed" "$tables_deleted" "$removed" "$remaining" "$remaining_tables"
 }
 
 # Доустановка модулей ядра, без которых nfqws2 не стартует.
@@ -6292,6 +6408,7 @@ case "$1" in
     metrics) cmd_metrics ;;
     toggle) shift; cmd_toggle_service "$@" ;;
     conflicts) cmd_conflicts ;;
+    conflicts_resolve) shift; cmd_conflicts_resolve "$@" ;;
     doctor) shift; cmd_doctor "$@" ;;
 kmods_install) cmd_kmods_install ;;
 kmods_modprobe) cmd_kmods_modprobe ;;

@@ -406,6 +406,55 @@ function bcwShowModal(titleText, bodyNodes, actions) {
 	return dlg;
 }
 
+function getConflicts() {
+	return withTimeout(fs.exec(HELPER_BIN, ['conflicts']), 8000, null).then(function(res) {
+		var out = (res && res.stdout) ? res.stdout : '';
+		var line = out.split('\n').filter(function(l) { return l.trim().charAt(0) === '{'; }).pop();
+		if (!line) return null;
+		try { return JSON.parse(line); } catch (e) { return null; }
+	}).catch(function() { return null; });
+}
+
+// Карточка конфликтов: отключить/удалить чужой zapret или оставить.
+function bcwConflictBanner(c) {
+	if (!c) return null;
+	var foreign = (c.engines && c.engines.foreign) || 0;
+	var tables = (c.tables || '').trim();
+	var pkgs = (c.packages || '').trim();
+	var disabledByUs = (c.disabled_by_us || '').trim();
+	var running = c.conflict_running || foreign > 0 || tables.length > 0 || disabledByUs.length > 0;
+	if (!running) return null;
+	if (localStorage.getItem('bcw_conflicts_ignored') === '1') return null;
+
+	function act(action) {
+		if (action === 'remove' && !confirm('Удалить пакеты сторонних обходов? Это необратимо.')) return;
+		fs.exec(HELPER_BIN, ['conflicts_resolve', '--action', action]).then(function() {
+			if (action === 'keep') localStorage.setItem('bcw_conflicts_ignored', '1');
+			location.reload();
+		}).catch(function() {});
+	}
+
+	var details = [];
+	if (tables) details.push('nft: ' + tables);
+	if (pkgs) details.push('пакеты: ' + pkgs);
+	if (foreign) details.push('движков: ' + foreign);
+	if (disabledByUs) details.push('отключены: ' + disabledByUs);
+
+	return E('div', {
+		class: 'bcw-card',
+		style: 'border:1px solid #d97706; background:rgba(217,119,6,.08); margin-bottom:14px;'
+	}, [
+		E('div', { style: 'font-weight:bold; color:#d97706; margin-bottom:6px;' }, '⚠ Найдены сторонние обходы DPI'),
+		E('div', { style: 'font-size:13px; line-height:1.45;' }, 'Они могут конфликтовать с нашей службой (queue/маркировки/общие файлы). Рекомендуется отключить или удалить.'),
+		details.length ? E('div', { style: 'font-size:12px; opacity:.8; margin-top:6px;' }, details.join(' · ')) : null,
+		E('div', { style: 'display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;' }, [
+			E('button', { class: 'btn cbi-button cbi-button-action', type: 'button', click: function() { act('disable'); } }, 'Отключить'),
+			E('button', { class: 'btn cbi-button cbi-button-remove', type: 'button', click: function() { act('remove'); } }, 'Удалить пакеты'),
+			E('button', { class: 'btn cbi-button', type: 'button', click: function() { act('keep'); } }, 'Скрыть')
+		])
+	]);
+}
+
 return view.extend({
 	load: function() {
 		// Сначала создаём списки доменов (на чистой установке их ещё нет),
@@ -432,7 +481,8 @@ return view.extend({
 				checkHelperStatus(),
 				getZapretInfoRetry(3),
 				getMetrics(),
-				getDoctor()
+				getDoctor(),
+				getConflicts()
 			]);
 		});
 	},
@@ -442,6 +492,7 @@ return view.extend({
 		var zapretInfo = data[1] || {};
 		var metricsData = data[2] || { tests: {}, history: [] };
 		var doctorInfo = data[3] || null;
+		var conflictsData = data[4] || null;
 		var logsData = { scanner_log: 'Загрузка логов...', zapret2_log: 'Загрузка логов...', daemons: '' };
 		var curVer = zapretInfo.version || '0.15.12';
 		var versionInfo = {
@@ -957,6 +1008,8 @@ return view.extend({
 				headerRightActions
 			])
 		]);
+		var conflictsBanner = bcwConflictBanner(conflictsData);
+		if (conflictsBanner) mainLayout.appendChild(conflictsBanner);
 		mainLayout.appendChild(headerCard);
 		// Статус службы мог измениться после подбора (она останавливается на время скана).
 		// Обновляем бейдж и, если служба поднялась, перечитываем данные страницы.

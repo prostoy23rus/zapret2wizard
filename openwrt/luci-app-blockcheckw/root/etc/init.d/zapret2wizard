@@ -324,6 +324,17 @@ start_service() {
 	}
 
 	# Приоритет службы: чужие DPI-демоны не должны держать наши очереди.
+	# Полное отключение чужих zapret-служб (без удаления пакетов) — чтобы
+	# наши queue/marks не делились с другим обходом. Удаление — только по
+	# явной команде пользователя из UI.
+	local _conf_json=""
+	if [ -x /usr/bin/blockcheckw-helper ]; then
+		_conf_json=$(/usr/bin/blockcheckw-helper conflicts_resolve --action disable --auto 2>/dev/null)
+		case "$_conf_json" in
+			*'"remaining_foreign":0,"remaining_tables":0'*) ;;
+			*) logger -t zapret2wizard "осторожно: сторонние nfqws2 всё ещё работают — возможен конфликт queue/marks" ;;
+		esac
+	fi
 	guard_conflicts
 
 	[ -x "$NFQWS_BIN" ] || {
