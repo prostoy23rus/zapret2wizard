@@ -1125,6 +1125,32 @@ return view.extend({
 			'.bcw-matrix-code{margin:0;background:#0c1016;border:1px solid var(--bcw-border-divider,#2a313d);border-radius:9px;padding:12px;font:12px/1.5 ui-monospace,monospace;color:#a9bcd8;white-space:pre-wrap;}',
 			'.bcw-matrix-actions{display:flex;flex-direction:column;gap:8px;}',
 			'.bcw-matrix-check{font-size:12.5px;color:var(--bcw-text-muted,#93a0b4);white-space:nowrap;}',
+			'#bcw-target-section{padding:0!important;border:0!important;background:transparent!important;}',
+			'#bcw-target-section > .bcw-target-summary,#bcw-target-section > #bcw-compact-summary{display:none!important;}',
+			'#bcw-target-section > .bcw-card{margin:0!important;}',
+			'.bcw-dash-row{display:block!important;}',
+			'.bcw-quick-actions{margin:0 0 12px!important;}',
+			'.bcw-quick-actions .bcw-actions-grid{display:flex!important;flex-wrap:wrap!important;gap:8px!important;}',
+			'.bcw-quick-actions .bcw-action-btn{width:auto!important;min-width:150px!important;min-height:36px!important;font-size:12.5px!important;padding:0 14px!important;}',
+			'.bcw-quick-actions .bcw-action-btn-primary{flex:1 1 220px!important;}',
+			'.bcw-services-hub-card{padding:0!important;}',
+			'#bcw-active-strat-card .bcw-card-header{padding:10px 12px 4px!important;margin:0!important;}',
+			'#bcw-active-strat-card .bcw-card-header .bcw-header-sub{display:none!important;}',
+			'#bcw-active-strat-card .bcw-card-header button{height:26px!important;font-size:11px!important;padding:0 8px!important;}',
+			'.bcw-matrix-table th,.bcw-matrix-table td{padding:7px 9px!important;}',
+			'.bcw-matrix-table th{font-size:10px!important;}',
+			'.bcw-matrix-name{font-size:12.5px!important;}',
+			'.bcw-matrix-strategy{max-width:250px!important;font-size:11px!important;}',
+			'.bcw-matrix-row.active td{background:rgba(76,141,255,.10);}',
+			'.bcw-line-params-box,.bcw-dpi-fingerprint-row{display:none!important;}',
+			'.bcw-applied-banner{display:none!important;}',
+			'#bcw-scan-card{padding:10px!important;}',
+			'#bcw-scan-card .bcw-actions-grid{display:grid!important;grid-template-columns:1fr 1fr!important;gap:6px!important;}',
+			'#bcw-scan-card .bcw-action-btn{width:auto!important;min-height:34px!important;font-size:12px!important;padding:0 8px!important;}',
+			'#bcw-scan-card .bcw-action-btn:first-child{grid-column:span 2;}',
+			'.bcw-stats{margin-bottom:10px!important;}',
+			'.bcw-stat{padding:9px 12px!important;}',
+			'#bcw-results-card{padding:10px!important;margin-bottom:10px!important;}',
 			'.bcw-matrix-status-cell{display:flex;align-items:center;gap:10px;}',
 			'.bcw-switch{width:36px;height:20px;border-radius:999px;background:var(--bcw-bg-card-sub,#1d232d);border:1px solid var(--bcw-border-divider,#2a313d);position:relative;cursor:pointer;display:inline-block;vertical-align:middle;transition:.15s;}',
 			'.bcw-switch.on{background:rgba(53,192,122,.25);border-color:rgba(53,192,122,.5);}',
@@ -1621,7 +1647,7 @@ return view.extend({
 		]);
 
 		var compactSummaryEl = E('div', { id: 'bcw-compact-summary', style: 'font-size: 12px; color: var(--bcw-text-muted); padding: 0 0 10px;' }, 'Загрузка…');
-		var targetSectionCard = E('div', { class: 'bcw-card' }, [
+		var targetSectionCard = E('div', { id: 'bcw-target-section', class: 'bcw-card' }, [
 			compactSummaryEl,
 			tilesGridEl,
 			customDomainRow,
@@ -1706,6 +1732,8 @@ return view.extend({
 			btnTestConn,
 			btnSpeedTest
 		]);
+		var quickActionsBar = E('div', { class: 'bcw-quick-actions' }, [actionsGridEl]);
+		mainLayout.insertBefore(quickActionsBar, targetSectionCard);
 
 		// Active Strategy Inspector Card
 		// Active Services & Protection Hub (Variant 1: Footstrap Unified Dashboard)
@@ -1872,9 +1900,8 @@ return view.extend({
 			btnCopyDiagOnError
 		]);
 
-		var unifiedScanCard = E('div', { class: 'bcw-card' }, [
+		var unifiedScanCard = E('div', { id: 'bcw-scan-card', class: 'bcw-card', style: 'display:none;' }, [
 			circularToggleBox,
-			actionsGridEl,
 			monitorCard
 		]);
 		mainLayout.appendChild(unifiedScanCard);
@@ -1959,7 +1986,7 @@ return view.extend({
 			toggleStrategiesSpoiler();
 		});
 
-		var resultsCard = E('div', { class: 'bcw-card', style: 'display: none;' }, [
+		var resultsCard = E('div', { id: 'bcw-results-card', class: 'bcw-card', style: 'display: none;' }, [
 			resultsCardHeader,
 			strategiesListEl
 		]);
@@ -2150,7 +2177,9 @@ return view.extend({
 			dashRow.appendChild(dashLeft);
 			dashRow.appendChild(dashRight);
 			scanPanel.appendChild(dashRow);
-			dashRight.appendChild(buildAuditCard());
+			var _auditCard = buildAuditCard();
+			if (_auditCard) _auditCard.style.display = 'none';
+			dashRight.appendChild(_auditCard);
 			// «Что применяется сейчас» и результаты — внутрь того же блока целей,
 			// чтобы это был один раздел, а не отдельная карточка
 			for (var ci = 2; ci < cards.length; ci++) {
@@ -2995,6 +3024,7 @@ return view.extend({
 				var row = E('tr', {
 					class: 'bcw-matrix-row',
 					click: function() {
+						selectTarget(svc.targetId);
 						var open = detailsRow.style.display !== 'none';
 						detailsRow.style.display = open ? 'none' : '';
 						chev.textContent = open ? '▸' : '▾';
@@ -3020,6 +3050,7 @@ return view.extend({
 					E('td', {}, [chev])
 				]);
 
+				if (currentTarget === svc.targetId) row.classList.add('active');
 				tbody.appendChild(row);
 				tbody.appendChild(detailsRow);
 			});
@@ -3456,6 +3487,7 @@ return view.extend({
 
 			btnStartScan.style.display = 'none';
 			btnStopScan.style.display = 'inline-flex';
+			if (unifiedScanCard) unifiedScanCard.style.display = 'block';
 			monitorCard.style.display = 'block';
 			circularCard.style.display = 'none';
 			resultsCard.style.display = 'none';
@@ -3538,6 +3570,7 @@ return view.extend({
 
 		function resetScanUI() {
 			isRunning = false;
+			if (unifiedScanCard) unifiedScanCard.style.display = 'none';
 			if (pollInterval) {
 				clearInterval(pollInterval);
 				pollInterval = null;

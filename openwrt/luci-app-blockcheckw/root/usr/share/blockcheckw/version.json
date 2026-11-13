@@ -1,9 +1,9 @@
 {
-  "version": "0.35.1",
+  "version": "0.35.2",
   "release_date": "2026-11-13",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "Backend отклоняет любые цели, кроме YouTube и Discord"
+    "Компактный дашборд: YouTube/Discord в одну колонку, быстрые действия сверху, прогресс и настройки сканера скрыты до запуска"
   ]
 }
