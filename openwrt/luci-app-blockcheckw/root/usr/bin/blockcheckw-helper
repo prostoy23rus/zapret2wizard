@@ -6230,7 +6230,25 @@ cmd_update() {
 # Безопасный перезапуск dnsmasq: при неудаче возвращаем /etc/config/dhcp,
 # иначе один битый конфиг оставляет всю сеть без DNS.
 safe_dns_restart() {
-    local bak="/tmp/bcw_dhcp.safe" i=0 a rp
+    local bak="/tmp/bcw_dhcp.safe.$$" i=0 a rp lock="/tmp/bcw_dns_restart.lock"
+    # Сериализуем перезапуски dnsmasq: optimize/health/init могли делать это
+    # одновременно, затирая бэкап друг друга и оставляя сеть без DNS.
+    while ! mkdir "$lock" 2>/dev/null; do
+        if [ -f "$lock/pid" ]; then
+            local lpid
+            lpid=$(cat "$lock/pid" 2>/dev/null)
+            if [ -n "$lpid" ] && ! kill -0 "$lpid" 2>/dev/null; then
+                rm -rf "$lock" 2>/dev/null || true
+                continue
+            fi
+        fi
+        i=$((i + 1))
+        [ "$i" -gt 30 ] && { rm -rf "$lock" 2>/dev/null || true; break; }
+        sleep 1
+    done
+    echo $$ > "$lock/pid" 2>/dev/null || true
+    trap 'rm -rf "$lock" "$bak" 2>/dev/null || true' EXIT INT TERM
+    i=0
     cp -f /etc/config/dhcp "$bak" 2>/dev/null || true
     ( eval "/etc/init.d/dnsmasq restart" ) >/dev/null 2>&1 &
     rp=$!
@@ -6240,6 +6258,8 @@ safe_dns_restart() {
     while [ "$i" -lt 8 ]; do
         a=$(nslookup www.google.com 127.0.0.1 2>/dev/null | awk '/^Address: /{print $2}' | grep -E '^[0-9.]+$' | head -n1)
         if pidof dnsmasq >/dev/null 2>&1 && [ -n "$a" ]; then
+            rm -rf "$lock" "$bak" 2>/dev/null || true
+            trap - EXIT INT TERM
             return 0
         fi
         sleep 1
@@ -6255,6 +6275,8 @@ safe_dns_restart() {
         kill -9 "$rp" 2>/dev/null || true
     fi
     logger -t zapret2wizard "dnsmasq restart failed — конфигурация DHCP возвращена"
+    rm -rf "$lock" "$bak" 2>/dev/null || true
+    trap - EXIT INT TERM
     return 1
 }
 
