@@ -1,9 +1,11 @@
 {
-  "version": "0.34.10",
+  "version": "0.35.0",
   "release_date": "2026-11-13",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "Клиентский probe повторяет DNS-резолв до 4 раз — старт после restart больше не даёт ложный no A record"
+    "Служба сведена к двум сервисам: YouTube и Discord; остальные стратегии, вкладки и DNS-пины удаляются",
+    "При старте выполняется prune_services: остаются только BlockcheckW_YouTube, BlockcheckW_Discord и голосовая секция",
+    "Удалены Instagram/Twitch/X/General из видимых целей и списков доменов"
   ]
 }

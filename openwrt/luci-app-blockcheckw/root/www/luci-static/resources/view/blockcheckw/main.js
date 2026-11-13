@@ -1301,12 +1301,7 @@ return view.extend({
 		// (blockcheckw-helper start --target tcp16) и внутренним вызовам.
 		var quickChipsList = [
 			{ id: 'preset_youtube', icon: '📺', name: 'YouTube' },
-			{ id: 'preset_discord', icon: '💬', name: 'Discord' },
-			{ id: 'preset_twitch', icon: '🎮', name: 'Twitch' },
-			{ id: 'preset_x', icon: '🐦', name: 'X / Twitter' },
-			{ id: 'preset_instagram', icon: '📸', name: 'Instagram' },
-			{ id: 'builtin', icon: '🌐', name: 'Встроенные хосты (33)' },
-			{ id: 'domains', icon: '🎯', name: 'Свои домены' }
+			{ id: 'preset_discord', icon: '💬', name: 'Discord' }
 		];
 
 		var chipButtonsMap = {};
@@ -2093,7 +2088,7 @@ return view.extend({
 
 		function rebuildHistory() {
 			if (!historyListEl) return;
-			var names = { youtube: 'YouTube', discord: 'Discord', instagram: 'Instagram', x: 'X / Twitter', twitch: 'Twitch', general: 'Общие сайты' };
+			var names = { youtube: 'YouTube', discord: 'Discord' };
 			historyListEl.innerHTML = '';
 			var items = (metricsData.history || []);
 			if (!items.length) {
@@ -2329,10 +2324,7 @@ return view.extend({
 			var summary = E('div', { id: 'bcw-evo-summary', style: 'font-size: 12px; color: #abb2bf; margin-top: 4px;' }, 'Загрузка...');
 			var targetSel = E('select', { id: 'bcw-evo-target', class: 'cbi-input-select', style: 'height: 34px;' }, [
 				E('option', { value: 'preset_youtube' }, 'YouTube'),
-				E('option', { value: 'preset_discord' }, 'Discord'),
-				E('option', { value: 'preset_twitch' }, 'Twitch'),
-				E('option', { value: 'preset_x' }, 'X (Twitter)'),
-				E('option', { value: 'preset_instagram' }, 'Instagram'),
+				E('option', { value: 'preset_discord' }, 'Discord')
 			]);
 			var startBtn = E('button', { class: 'bcw-btn-launch', style: 'height: 34px;' }, '🧬 Запустить эволюцию');
 			var histBtn = E('button', { class: 'bcw-btn-secondary', style: 'height: 34px;' }, '🕓 Установить ночное обучение');
@@ -2513,11 +2505,7 @@ return view.extend({
 
 			var targetSel = E('select', { class: 'cbi-input-select', style: 'height:32px;margin-top:8px;' }, [
 				E('option', { value: 'preset_youtube' }, 'YouTube'),
-				E('option', { value: 'preset_discord' }, 'Discord'),
-				E('option', { value: 'preset_x' }, 'X (Twitter)'),
-				E('option', { value: 'preset_instagram' }, 'Instagram'),
-				E('option', { value: 'preset_twitch' }, 'Twitch'),
-				E('option', { value: 'builtin' }, 'Свои домены')
+				E('option', { value: 'preset_discord' }, 'Discord')
 			]);
 
 			var stats = E('div', { style: 'font-size:12px;color:#abb2bf;margin-bottom:8px;' },
@@ -2904,12 +2892,8 @@ return view.extend({
 		}
 
 		var SERVICES_CONFIG = [
-			{ key: 'youtube', altKey: 'preset_youtube', name: 'YouTube', icon: '📺', uciBase: 'BlockcheckW_YouTube', desc: 'Видеопотоки 1080p-4K, превью и плеер', hostlistKey: 'youtube', targetId: 'preset_youtube', portDefault: 'TCP 443' },
-			{ key: 'discord', altKey: 'preset_discord', name: 'Discord (Dual-Circuit)', icon: '💬', uciBase: 'BlockcheckW_Discord', desc: 'Чат, медиа (TCP) + голосовые шлюзы VoiceFlow (UDP)', hostlistKey: 'discord', targetId: 'preset_discord', portDefault: 'TCP 443 + UDP' },
-			{ key: 'instagram', altKey: 'preset_instagram', name: 'Instagram', icon: '📸', uciBase: 'BlockcheckW_Instagram', desc: 'Лента, сторис, Reels и CDN контента', hostlistKey: 'instagram', targetId: 'preset_instagram', portDefault: 'TCP 443' },
-			{ key: 'x', altKey: 'preset_x', name: 'X (Twitter)', icon: '🐦', uciBase: 'BlockcheckW_X', desc: 'Лента, видео, медиа и CDN t.co', hostlistKey: 'x', targetId: 'preset_x', portDefault: 'TCP 443' },
-			{ key: 'general', altKey: 'builtin', name: 'Общие сайты (User)', icon: '🌐', uciBase: 'BlockcheckW_General', desc: '33 встроенных хоста + добавленные пользователем', hostlistKey: 'user', targetId: 'builtin', portDefault: 'TCP 80, 443' },
-			{ key: 'twitch', altKey: 'preset_twitch', name: 'Twitch', icon: '🎮', uciBase: 'BlockcheckW_Twitch', desc: 'Прямые трансляции и веб-плеер', hostlistKey: 'twitch', targetId: 'preset_twitch', portDefault: 'TCP 443' },
+			{ key: 'youtube', altKey: 'preset_youtube', name: 'YouTube', icon: '📺', uciBase: 'BlockcheckW_YouTube', desc: 'Видеопотоки, превью и плеер', hostlistKey: 'youtube', targetId: 'preset_youtube', portDefault: 'TCP 443' },
+			{ key: 'discord', altKey: 'preset_discord', name: 'Discord', icon: '💬', uciBase: 'BlockcheckW_Discord', desc: 'Чат, медиа и голосовые шлюзы', hostlistKey: 'discord', targetId: 'preset_discord', portDefault: 'TCP 443 + UDP' }
 		];
 
 		function updateActiveStrategyDisplay() {
@@ -4452,16 +4436,14 @@ return view.extend({
 		}
 
 		function showHostlistsModal(hostlists) {
-			var lists = (hostlists || zapretInfo.hostlists || []).slice();
+			var lists = (hostlists || zapretInfo.hostlists || []).filter(function(h) {
+				return h.key === 'youtube' || h.key === 'discord' || h.key === 'exclude';
+			});
 
 			if (!lists || lists.length === 0) {
 				lists = [
 					{ key: 'youtube', name: 'YouTube', file: '/etc/zapret2wizard/ipset/zapret_hosts_youtube.txt', domains_count: 0, uci_configured: true },
 					{ key: 'discord', name: 'Discord', file: '/etc/zapret2wizard/ipset/zapret_hosts_discord.txt', domains_count: 0, uci_configured: true },
-					{ key: 'x', name: 'X (Twitter)', file: '/etc/zapret2wizard/ipset/zapret_hosts_x.txt', domains_count: 0, uci_configured: true },
-					{ key: 'instagram', name: 'Instagram', file: '/etc/zapret2wizard/ipset/zapret_hosts_instagram.txt', domains_count: 0, uci_configured: true },
-					{ key: 'twitch', name: 'Twitch', file: '/etc/zapret2wizard/ipset/zapret_hosts_twitch.txt', domains_count: 0, uci_configured: true },
-					{ key: 'user', name: 'Общие сайты (User)', file: '/etc/zapret2wizard/ipset/zapret_hosts_user.txt', domains_count: 0, uci_configured: true },
 					{ key: 'exclude', name: 'Исключения (не обходить)', file: '/etc/zapret2wizard/ipset/zapret_hosts_user_exclude.txt', domains_count: 0, uci_configured: true }
 				];
 			}

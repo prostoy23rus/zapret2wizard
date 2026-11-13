@@ -4075,6 +4075,29 @@ _gv_ip_reachable() {
     [ -n "$code" ] && [ "$code" != "000" ]
 }
 
+cmd_prune_services() {
+    local pkg=zapret2wizard changed=0 sec e
+    for sec in $(uci show "$pkg" 2>/dev/null | sed -n 's/^zapret2wizard\.\([^.=]*\)=strategy$/\1/p'); do
+        case "$sec" in
+            BlockcheckW_YouTube|BlockcheckW_Discord|BlockcheckW_Discord_Voice) ;;
+            *) uci -q delete "$pkg.$sec" 2>/dev/null && changed=1 ;;
+        esac
+    done
+    for e in $(uci -q get dhcp.@dnsmasq[0].address 2>/dev/null); do
+        case "$e" in *instagram*) uci -q del_list dhcp.@dnsmasq[0].address="$e" 2>/dev/null && changed=1 ;; esac
+    done
+    for e in $(uci -q get dhcp.@dnsmasq[0].server 2>/dev/null); do
+        case "$e" in *instagram*) uci -q del_list dhcp.@dnsmasq[0].server="$e" 2>/dev/null && changed=1 ;; esac
+    done
+    if [ "$changed" = "1" ]; then
+        uci -q commit "$pkg" 2>/dev/null || true
+        uci -q commit dhcp 2>/dev/null || true
+        /etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
+        logger -t zapret2wizard "оставлены только YouTube и Discord"
+    fi
+    echo '{"pruned":true}'
+}
+
 cmd_fix_defaults() {
     local marker="/etc/zapret2wizard/.strategy_0341"
     [ -f "$marker" ] && { echo '{"skipped":"done"}'; return 0; }
@@ -4189,7 +4212,6 @@ cmd_optimize_dns() {
         done
         # Даже без DoH нельзя выходить раньше пина Instagram: иначе DNS
         # провайдера отдаёт 127.0.0.1 и сайт «висит» при рабочей стратегии.
-        dns_fix_instagram >/dev/null 2>&1 || true
         dns_fix_discord >/dev/null 2>&1 || true
         echo "{\"changed\":$alt}"
         return 0
@@ -4220,7 +4242,6 @@ cmd_optimize_dns() {
         uci commit dhcp
         /etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
     fi
-    dns_fix_instagram >/dev/null 2>&1 || true
     dns_fix_discord >/dev/null 2>&1 || true
     echo "{\"changed\":$changed}"
 }
@@ -5046,7 +5067,6 @@ cmd_health_tick() {
 
     # Закреплённые IP Instagram/Discord могли умереть: перепроверяем при
     # каждом тике, не дожидаясь ночной эволюции.
-    dns_fix_instagram >/dev/null 2>&1 || true
     dns_fix_discord >/dev/null 2>&1 || true
 
     # Проверяем все включённые сервисы, а не только YouTube: два сбоя
@@ -6671,6 +6691,7 @@ ttl_probe) shift; cmd_ttl_probe "$@" ;;
 dns_alt) shift; cmd_dns_alt "$@" ;;
 gv_fix) cmd_gv_fix ;;
     gv_clear) cmd_gv_clear ;;
+    prune_services) cmd_prune_services ;;
     client_probe) shift; client_probe_output "$1" ;;
     client_probe_netns) shift; client_probe_netns "$1" ;;
     save_good) shift; cmd_save_good "$1" ;;

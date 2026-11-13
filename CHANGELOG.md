@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.35.0] (2026-11-13)
+
+### Только YouTube и Discord
+
+* из службы удалены Instagram, Twitch, X/Twitter, General и custom-цели;
+* `prune_services` оставляет только YouTube, Discord и голосовую секцию;
+* удалены Instagram DNS-пины и видимые списки доменов;
+* UI показывает только две цели.
+
 ## [0.34.10] (2026-11-13)
 
 ### Probe: DNS retry
