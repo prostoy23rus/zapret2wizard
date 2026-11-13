@@ -1,9 +1,12 @@
 {
-  "version": "0.29.2",
+  "version": "0.30.0",
   "release_date": "2026-11-13",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "Очистка памяти от удалённых AI/Spotify выполняется отдельным маркером и срабатывает даже если секции уже были удалены ранее"
+    "Корпус пополнен семействами из youtubeUnblock: IP-фрагментация (ipfrag, ipfrag_disorder), обратный порядок фрагментов, задержка",
+    "syndata теперь отправляет фейковый TLS ClientHello с SNI, а не 16 нулевых байт",
+    "OOB-кандидаты с явными char/byte/urp вместо одного urp=midsld",
+    "Адаптивный корпус распознаёт ipfrag/reverse и добавляет свои варианты"
   ]
 }

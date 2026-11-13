@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.30.0] (2026-11-13)
+
+### Векторы из youtubeUnblock в корпусе
+
+* **ipfrag**: `multisplit` + `ipfrag:ipfrag_pos_tcp=32`, `ipfrag_disorder`,
+  `send:ipfrag` — DPI, собирающий TCP, но не IP, ломается на фрагментах;
+* **syndata**: вместо 16 нулей отправляется fake ClientHello
+  (`blob=fake_default_tls`/`blob_tls_clienthello_www_google_com`,
+  `tls_mod=sni=www.google.com`);
+* **oob**: варианты `urp=b/e` + `char=0x00`/`byte=0`;
+* **reverse/delay**: `multidisorder:pos=midsld,1` и
+  `multisplit:pos=midsld:send:delay=50`;
+* адаптивный корпус распознаёт `ipfrag`/`reverse` и добавляет варианты.
+
+Проверено на домашнем роутере: YouTube-скан — 49 кандидатов, 0 ошибок,
+42 стратегии; в результаты вошли новый syndata-fake-CH и обратный
+`multidisorder`. ipfrag/oob на этом провайдере не прошли, но остаются в
+корпусе для других сетей.
+
 ## [0.29.2] (2026-11-13)
 
 ### Очистка памяти на уже пропатченных установках

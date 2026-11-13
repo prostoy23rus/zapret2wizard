@@ -760,8 +760,10 @@ curl_test_https_tls13 ipv4 $domain : nfqws2 --payload=tls_client_hello --lua-des
 curl_test_https_tls13 ipv4 $domain : nfqws2 --payload=tls_client_hello --lua-desync=fake:badsum:tcp_seq=-10000:repeats=2 --lua-desync=multisplit:pos=1,midsld
 
 # --- Family 6: Out-of-Band (OOB) & SYN-Data Early Injection ---
-curl_test_https_tls13 ipv4 $domain : nfqws2 --in-range=-s1 --lua-desync=oob:urp=midsld
-curl_test_https_tls13 ipv4 $domain : nfqws2 --lua-desync=syndata --payload=tls_client_hello --lua-desync=multisplit:pos=1,midsld
+curl_test_https_tls13 ipv4 $domain : nfqws2 --in-range=-s1 --lua-desync=oob:urp=b:char=0x00
+curl_test_https_tls13 ipv4 $domain : nfqws2 --in-range=-s1 --lua-desync=oob:urp=e:byte=0
+curl_test_https_tls13 ipv4 $domain : nfqws2 --lua-desync=syndata:blob=fake_default_tls:tls_mod=sni=www.google.com --payload=tls_client_hello --lua-desync=multisplit:pos=1,midsld
+curl_test_https_tls13 ipv4 $domain : nfqws2 --lua-desync=syndata:blob=blob_tls_clienthello_www_google_com --payload=tls_client_hello --lua-desync=multidisorder:pos=1,midsld
 
 # --- Family 7: TCP MD5 Option & Auto-TTL Injection (Routerich 2026 Core) ---
 curl_test_https_tls12 ipv4 $domain : nfqws2 --payload=tls_client_hello --lua-desync=fake:blob=0x00000000:tcp_md5:repeats=6 --lua-desync=multisplit:pos=midsld
@@ -799,6 +801,16 @@ curl_test_https_tls13 ipv4 $domain : nfqws2 --payload=tls_client_hello --lua-des
 curl_test_https_tls13 ipv4 $domain : nfqws2 --payload=tls_client_hello --lua-desync=multisplit:pos=midsld:seqovl=210
 curl_test_https_tls13 ipv4 $domain : nfqws2 --payload=tls_client_hello --lua-desync=fake:blob=0x0F0F0F0F:tcp_seq=-10000:tcp_ack=-66000:badsum:repeats=2 --lua-desync=multidisorder:pos=midsld
 curl_test_https_tls13 ipv4 $domain : nfqws2 --payload=tls_client_hello --lua-desync=fake:blob=0x00000000:tcp_ts_up:tcp_ack=-66000:repeats=2 --lua-desync=multisplit:pos=1,midsld
+
+# --- Family 11: IP-фрагментация (ipfrag) и обратный порядок (youtubeUnblock) ---
+# DPI, который собирает TCP, но не IP, ломается на фрагментах; reverse меняет
+# порядок частей, чтобы сборщик увидел хвост раньше заголовка.
+curl_test_https_tls13 ipv4 $domain : nfqws2 --payload=tls_client_hello --lua-desync=multisplit:pos=midsld:ipfrag:ipfrag_pos_tcp=32
+curl_test_https_tls13 ipv4 $domain : nfqws2 --payload=tls_client_hello --lua-desync=multisplit:pos=midsld:ipfrag:ipfrag_pos_tcp=32:ipfrag_disorder
+curl_test_https_tls13 ipv4 $domain : nfqws2 --payload=tls_client_hello --lua-desync=multisplit:pos=1,midsld:ipfrag:ipfrag_pos_tcp=40:ipfrag_disorder
+curl_test_https_tls13 ipv4 $domain : nfqws2 --payload=tls_client_hello --lua-desync=send:ipfrag:ipfrag_pos_tcp=32
+curl_test_https_tls13 ipv4 $domain : nfqws2 --payload=tls_client_hello --lua-desync=multidisorder:pos=midsld,1
+curl_test_https_tls13 ipv4 $domain : nfqws2 --payload=tls_client_hello --lua-desync=multisplit:pos=midsld:send:delay=50
 EOF
 
     # Family 7: Window Size Scaling (wssize) - STRICTLY for non-discord targets
@@ -879,6 +891,8 @@ generate_adaptive_corpus() {
             fake = false,
             oob = false,
             syndata = false,
+            ipfrag = false,
+            reverse = false,
             wssize = false,
             multisplit = false,
             tcp_md5 = false,
@@ -910,6 +924,8 @@ generate_adaptive_corpus() {
                 if al:find("fake:blob") or al:find("badsum") then fams.fake = true end
                 if al:find("oob:") or al:find("urp=") then fams.oob = true end
                 if al:find("syndata") then fams.syndata = true end
+                if al:find("ipfrag") then fams.ipfrag = true end
+                if al:find("multidisorder:pos=midsld,1") then fams.reverse = true end
                 if al:find("wssize") then fams.wssize = true end
                 if al:find("multisplit") then fams.multisplit = true end
                 if al:find("tcp_md5") then fams.tcp_md5 = true end
@@ -987,6 +1003,7 @@ generate_adaptive_corpus() {
                 "pos=1,sniext+1,midsld-2,midsld,midsld+2,endhost-1",
                 "pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1",
                 "pos=2,midsld",
+                "pos=midsld,1",
                 "pos=sniext+1,host+1",
                 "pos=1,host+1,midsld"
             }
@@ -1009,14 +1026,27 @@ generate_adaptive_corpus() {
 
         -- 6. OOB & SYN-Data mutations
         if fams.oob then
-            add_cand("--in-range=-s1 --lua-desync=oob:urp=midsld")
-            add_cand("--in-range=-s1 --lua-desync=oob:urp=2")
-            add_cand("--in-range=-s1 --lua-desync=oob:urp=0")
-            add_cand("--in-range=-s1 --lua-desync=oob:urp=b")
+            add_cand("--in-range=-s1 --lua-desync=oob:urp=b:char=0x00")
+            add_cand("--in-range=-s1 --lua-desync=oob:urp=e:byte=0")
+            add_cand("--in-range=-s1 --lua-desync=oob:urp=b:byte=0")
+            add_cand("--in-range=-s1 --lua-desync=oob:urp=e:char=0x00")
         end
         if fams.syndata then
-            add_cand("--lua-desync=syndata --payload=tls_client_hello --lua-desync=multisplit:pos=1,midsld")
-            add_cand("--lua-desync=syndata --payload=tls_client_hello --lua-desync=multidisorder:pos=1,midsld")
+            add_cand("--lua-desync=syndata:blob=fake_default_tls:tls_mod=sni=www.google.com --payload=tls_client_hello --lua-desync=multisplit:pos=1,midsld")
+            add_cand("--lua-desync=syndata:blob=fake_default_tls --payload=tls_client_hello --lua-desync=multidisorder:pos=1,midsld")
+            add_cand("--lua-desync=syndata:blob=blob_tls_clienthello_www_google_com --payload=tls_client_hello --lua-desync=multisplit:pos=midsld")
+        end
+
+        -- 6b. IP fragmentation (ipfrag) + reverse order
+        if fams.ipfrag then
+            add_cand("--payload=tls_client_hello --lua-desync=multisplit:pos=midsld:ipfrag:ipfrag_pos_tcp=32")
+            add_cand("--payload=tls_client_hello --lua-desync=multisplit:pos=midsld:ipfrag:ipfrag_pos_tcp=32:ipfrag_disorder")
+            add_cand("--payload=tls_client_hello --lua-desync=multisplit:pos=1,midsld:ipfrag:ipfrag_pos_tcp=40:ipfrag_disorder")
+            add_cand("--payload=tls_client_hello --lua-desync=send:ipfrag:ipfrag_pos_tcp=32")
+        end
+        if fams.reverse then
+            add_cand("--payload=tls_client_hello --lua-desync=multidisorder:pos=midsld,1")
+            add_cand("--payload=tls_client_hello --lua-desync=multidisorder:pos=sniext+1,1")
         end
 
         -- 7. Window Size (wssize) - STRICTLY non-discord
