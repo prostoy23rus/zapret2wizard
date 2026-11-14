@@ -4072,12 +4072,14 @@ dns_pin_pool() {
 
 dns_fix_discord() {
     uci -q get zapret2wizard.BlockcheckW_Discord.enabled 2>/dev/null | grep -q '^1$' || return 0
-    local ip
-    ip=$(dns_pin_pool "discord.com" "https://discord.com/login" 50000 \
-        162.159.136.232 162.159.135.232 162.159.128.233 162.159.137.232 162.159.138.232 2>/dev/null | tail -1)
-    [ -n "$ip" ] || return 0
-    dns_pin_host "discordapp.com" "$ip"
-    dns_pin_host "gateway.discord.gg" "$ip"
+    # 162.159.136.232 стабильно отдаёт полный login/gateway через nfqws.
+    # 162.159.135.232 на части сетей отдаёт только ~15 КБ (обрезанный ответ),
+    # поэтому pool с роутерной проверкой выбирал нерабочий для клиента edge.
+    local ip="162.159.136.232"
+    dns_pin_host "discord.com" "$ip" norestart
+    dns_pin_host "discordapp.com" "$ip" norestart
+    dns_pin_host "gateway.discord.gg" "$ip" norestart
+    safe_dns_restart >/dev/null 2>&1 || true
     return 0
 }
 

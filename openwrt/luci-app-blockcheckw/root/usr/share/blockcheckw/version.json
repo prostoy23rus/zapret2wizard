@@ -1,11 +1,11 @@
 {
-  "version": "0.36.4",
+  "version": "0.36.5",
   "release_date": "2026-11-14",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "Пакетный postinst ждёт nfqws2/nft, применяет DNS-пины и проверяет DNS",
-    "Релизы теперь содержат SHA256SUMS",
-    "Проверена установка .ipk на 24.10 и .apk на 25.12"
+    "Discord DNS-пин переведён на стабильный edge 162.159.136.232",
+    "Устранён обрезанный 15 КБ ответ с 162.159.135.232",
+    "Пакетный postinst проверяет runtime/DNS"
   ]
 }
