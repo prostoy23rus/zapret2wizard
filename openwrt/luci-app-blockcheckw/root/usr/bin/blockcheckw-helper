@@ -2314,6 +2314,49 @@ cmd_save_good() {
     echo '{"saved":true}'
 }
 
+# Пост-установочная проверка пакета: дождаться nfqws2/nft, применить DNS-пины,
+# проверить резолвер. Вызывается из postinst .ipk/.apk.
+cmd_postinstall() {
+    local i=0 ok=0
+    while [ "$i" -lt 45 ]; do
+        if pidof nfqws2 >/dev/null 2>&1 && nft list tables 2>/dev/null | grep -q 'zapret2wizard'; then
+            ok=1
+            break
+        fi
+        sleep 1
+        i=$((i + 1))
+    done
+    if [ "$ok" != "1" ]; then
+        /etc/init.d/zapret2wizard restart >/dev/null 2>&1 || true
+        i=0
+        while [ "$i" -lt 30 ]; do
+            if pidof nfqws2 >/dev/null 2>&1 && nft list tables 2>/dev/null | grep -q 'zapret2wizard'; then
+                ok=1
+                break
+            fi
+            sleep 1
+            i=$((i + 1))
+        done
+    fi
+    dns_fix_discord >/dev/null 2>&1 || true
+    dns_fix_instagram >/dev/null 2>&1 || true
+    i=0
+    while [ "$i" -lt 5 ]; do
+        if nslookup www.google.com 127.0.0.1 >/dev/null 2>&1 || nslookup ya.ru 127.0.0.1 >/dev/null 2>&1; then
+            break
+        fi
+        safe_dns_restart >/dev/null 2>&1 || true
+        sleep 1
+        i=$((i + 1))
+    done
+    if [ "$ok" = "1" ]; then
+        echo '{"ok":true,"engines":"ready"}'
+        return 0
+    fi
+    echo '{"ok":false,"error":"nfqws2/nft не поднялись"}'
+    return 1
+}
+
 cmd_restore_good() {
     if [ ! -s "$GOOD_CONFIG" ]; then
         echo '{"ok":false,"error":"нет сохранённой рабочей конфигурации"}'
@@ -6791,6 +6834,7 @@ gv_fix) cmd_gv_fix ;;
     client_probe_netns) shift; client_probe_netns "$1" ;;
     save_good) shift; cmd_save_good "$1" ;;
     restore_good) cmd_restore_good ;;
+    postinstall) cmd_postinstall ;;
     dns_pool) shift; dns_pin_pool "$@" ;;
     fix_defaults) cmd_fix_defaults ;;
 quic_probe) cmd_quic_probe && echo ok || echo fail ;;

@@ -170,6 +170,11 @@ jobs:
           pattern: scanner-tar-*
           merge-multiple: true
           path: dist
+      - name: Create checksums
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS
+          ls -l SHA256SUMS
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*

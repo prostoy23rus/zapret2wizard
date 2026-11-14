@@ -1,10 +1,11 @@
 {
-  "version": "0.36.3",
+  "version": "0.36.4",
   "release_date": "2026-11-14",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "Установщик детерминированно применяет DNS-пины Discord/Instagram до проверки DNS",
-    "Снижает риск временного 127.0.0.1 после установки"
+    "Пакетный postinst ждёт nfqws2/nft, применяет DNS-пины и проверяет DNS",
+    "Релизы теперь содержат SHA256SUMS",
+    "Проверена установка .ipk на 24.10 и .apk на 25.12"
   ]
 }

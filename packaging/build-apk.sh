@@ -67,7 +67,8 @@ chmod 755 /usr/bin/blockcheckw-helper /usr/share/zapret2wizard/uci2config \
 /usr/bin/blockcheckw-helper kmods_modprobe >/dev/null 2>&1 || true
 /etc/init.d/zapret2wizard enable >/dev/null 2>&1 || true
 /usr/bin/blockcheckw-helper cron_install >/dev/null 2>&1 || true
-( /etc/init.d/zapret2wizard restart >/dev/null 2>&1 </dev/null & )
+/etc/init.d/zapret2wizard restart >/dev/null 2>&1 || true
+/usr/bin/blockcheckw-helper postinstall >/dev/null 2>&1 || true
 if [ "$(uci show zapret2wizard 2>/dev/null | grep -c '=strategy')" -eq 0 ]; then
     (/usr/bin/blockcheckw-helper autosetup >/tmp/bcw_autosetup.log 2>&1 &) || true
 fi
