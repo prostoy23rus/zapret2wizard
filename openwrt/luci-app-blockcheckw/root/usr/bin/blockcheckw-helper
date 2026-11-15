@@ -4071,6 +4071,7 @@ dns_pin_pool() {
 }
 
 dns_fix_discord() {
+    [ "$(uci -q get zapret2wizard.main.auto_dns 2>/dev/null)" = "0" ] && return 0
     uci -q get zapret2wizard.BlockcheckW_Discord.enabled 2>/dev/null | grep -q '^1$' || return 0
     # 162.159.136.232 стабильно отдаёт полный login/gateway через nfqws.
     # 162.159.135.232 на части сетей отдаёт только ~15 КБ (обрезанный ответ),
@@ -4084,6 +4085,7 @@ dns_fix_discord() {
 }
 
 dns_fix_instagram() {
+    [ "$(uci -q get zapret2wizard.main.auto_dns 2>/dev/null)" = "0" ] && return 0
     uci -q get zapret2wizard.BlockcheckW_Instagram.enabled 2>/dev/null | grep -q '^1$' || return 0
     # Проверка curl с роутера идёт мимо forward-очереди nfqws и часто
     # забраковывает рабочий для клиентов edge. Для Instagram используем
@@ -4263,6 +4265,10 @@ cmd_gv_fix() {
 }
 
 cmd_optimize_dns() {
+    if [ "$(uci -q get zapret2wizard.main.auto_dns 2>/dev/null)" = "0" ]; then
+        echo '{"skipped":"auto_dns disabled"}'
+        return 0
+    fi
     local changed=0 entry dom cs
     # Один прогон за раз: при старте службы оптимизация запускается в фоне,
     # и несколько параллельных копий дёргали dnsmasq и пиннили Instagram.
@@ -6341,7 +6347,7 @@ cleanup_leftovers() {
         done
         for s in $(uci -q get dhcp.@dnsmasq[0].address 2>/dev/null); do
             case "$s" in
-                /instagram.com/*|/cdninstagram.com/*|/www.instagram.com/*)
+                /instagram.com/*|/cdninstagram.com/*|/www.instagram.com/*|/i.instagram.com/*|/discord.com/*|/discordapp.com/*|/gateway.discord.gg/*)
                     uci -q del_list dhcp.@dnsmasq[0].address="$s" 2>/dev/null && changed=1
                     ;;
             esac
@@ -6357,6 +6363,8 @@ cleanup_leftovers() {
         /etc/init.d/firewall reload >/dev/null 2>&1 || true
     fi
     nft delete table inet zapret2wizard 2>/dev/null || true
+    sed -i '/# bcw-health/d;/# bcw-evolve/d;/# bcw-bypass/d' /etc/crontabs/root 2>/dev/null || true
+    rc=$?
     echo "{\"cleaned\":true,\"dns_changed\":$changed}"
 }
 
@@ -6388,7 +6396,9 @@ rm -rf /www/luci-static/resources/view/blockcheckw
 
 rm -f /tmp/blockcheckw_*
 rm -f /etc/blockcheckw_watchdog.json /var/log/blockcheckw_watchdog.log
-sed -i '/watchdog/d' /etc/crontabs/root 2>/dev/null || true
+sed -i '/watchdog/d;/# bcw-health/d;/# bcw-evolve/d;/# bcw-bypass/d' /etc/crontabs/root 2>/dev/null || true
+rm -f /etc/config/zapret2wizard /etc/config/zapret2wizard-opkg
+rm -rf /etc/zapret2wizard
 rm -f /var/run/blockcheckw.pid
 rm -rf /tmp/luci-indexcache* /tmp/luci-modulecache*
 

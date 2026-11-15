@@ -19,6 +19,13 @@ var lastCircular = '';
 var zapretServicesData = {};
 var zapretAllStrategies = [];
 
+function parseHelperJson(res) {
+	if (res && res.stdout) {
+		try { return JSON.parse(res.stdout); } catch (e) {}
+	}
+	return null;
+}
+
 var PRESET_DEFS = {
 	'builtin': {
 		name: 'Встроенные хосты (33)',
@@ -1693,6 +1700,44 @@ return view.extend({
 			paramCircularHintEl
 		]);
 
+		// Автоприменение: пользователь сам решает, писать ли найденную
+		// стратегию в конфигурацию. По умолчанию включено для совместимости.
+		var autoApplyHintEl = E('div', {
+			class: 'bcw-param-hint',
+			style: 'margin-top: 4px; font-size: 12px; color: #abb2bf;'
+		}, autoApply ? 'Включено: найденная стратегия будет применена и проверена автоматически.' : 'Выключено: стратегия будет только найдена и показана — примените её вручную.');
+		var chkAutoApply = E('input', {
+			type: 'checkbox',
+			id: 'bcw_chk_autoapply',
+			class: 'bcw-chk-input',
+			checked: autoApply,
+			change: function(e) {
+				autoApply = e.target.checked;
+				try { localStorage.setItem('bcw_auto_apply', autoApply ? '1' : '0'); } catch (x) {}
+				if (autoApplyHintEl) {
+					autoApplyHintEl.textContent = autoApply ? 'Включено: найденная стратегия будет применена и проверена автоматически.' : 'Выключено: стратегия будет только найдена и показана — примените её вручную.';
+				}
+			}
+		});
+		try {
+			var savedAuto = localStorage.getItem('bcw_auto_apply');
+			if (savedAuto === '0') { autoApply = false; chkAutoApply.checked = false; }
+		} catch (x) {}
+		var autoApplyToggleBox = E('div', {
+			style: 'display: flex; flex-direction: column; gap: 4px; padding: 12px 16px; background: var(--bcw-bg-card-inner); border: 1px solid var(--bcw-border-sub); border-radius: 8px;'
+		}, [
+			E('label', {
+				for: 'bcw_chk_autoapply',
+				class: 'bcw-chk-wrap',
+				style: 'margin: 0;'
+			}, [
+				chkAutoApply,
+				E('span', { class: 'bcw-chk-box' }),
+				E('span', { style: 'font-weight: 600; font-size: 13.5px; color: var(--bcw-text-title);' }, 'Автоматически применять найденную стратегию')
+			]),
+			autoApplyHintEl
+		]);
+
 		var btnStartScan = E('button', {
 			class: 'bcw-action-btn bcw-action-btn-primary',
 			click: function() { startScan(); }
@@ -1916,6 +1961,7 @@ return view.extend({
 
 		var unifiedScanCard = E('div', { id: 'bcw-scan-card', class: 'bcw-card', style: 'display:none;' }, [
 			circularToggleBox,
+			autoApplyToggleBox,
 			monitorCard
 		]);
 		mainLayout.appendChild(unifiedScanCard);
@@ -4498,13 +4544,6 @@ return view.extend({
 			}
 
 			var listContainer = E('div', { id: 'bcw-hostlists-container' });
-
-			function parseHelperJson(res) {
-				if (res && res.stdout) {
-					try { return JSON.parse(res.stdout); } catch (e) {}
-				}
-				return null;
-			}
 
 			function buildRow(hl) {
 				var count = hl.domains_count || 0;
