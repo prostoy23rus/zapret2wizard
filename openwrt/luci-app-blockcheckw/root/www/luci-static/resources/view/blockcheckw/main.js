@@ -3907,20 +3907,28 @@ return view.extend({
 					if (out.all_ok) {
 						ui.addNotification(null, E('p', {}, '✓ Стратегия применена и проверена, видео-хост доступен: ' + label), 'info');
 					} else if (out.rolled_back) {
-						ui.addNotification(null, E('p', {}, '⚠ Стратегия не подтвердила трафик/видео — прежняя конфигурация восстановлена'), 'warning');
+						var vinfo = (out.client_probe && out.client_probe.video) || {};
+						var vreason = vinfo && vinfo.video_code ? ' (googlevideo: ' + vinfo.video_code + ')' : '';
+						ui.addNotification(null, E('p', {}, '⚠ Стратегия не подняла видео' + vreason + ' — прежняя конфигурация восстановлена. Выберите другую стратегию.'), 'warning');
 					} else {
 						ui.addNotification(null, E('p', {}, '⚠ Стратегия записана, но трафик не подтвердился — проверьте сервис'), 'warning');
 					}
 				} else {
 					ui.addNotification(null, E('p', {}, '✗ Не удалось применить: ' + (out.error || 'ошибка')), 'danger');
 				}
-				return getZapretInfo();
+				// Обновление LuCI после restart может кратковременно упасть по XHR,
+				// но это не ошибка применения: результат уже получен.
+				return getZapretInfo().catch(function() { return null; });
 			}).then(function(info) {
-				zapretInfo = info || zapretInfo;
+				if (!info) {
+					ui.addNotification(null, E('p', {}, 'Результат применения получен; обновите страницу, если данные не обновились.'), 'warning');
+					return;
+				}
+				zapretInfo = info;
 				updateSummaryBox();
 				updateActiveStrategyDisplay();
 			}).catch(function(err) {
-				ui.addNotification(null, E('p', {}, '✗ Ошибка применения: ' + err), 'danger');
+				ui.addNotification(null, E('p', {}, '⚠ Применение/опрос статуса прервано: ' + err), 'warning');
 			}).then(function() {
 				btn.disabled = false;
 				btn.textContent = oldText;
