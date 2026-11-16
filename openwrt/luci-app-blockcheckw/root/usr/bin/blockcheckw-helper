@@ -2534,6 +2534,20 @@ client_probe_netns() {
     return 1
 }
 
+cmd_apply_bg() {
+    rm -f /tmp/bcw_apply_done /tmp/bcw_apply_result.json /tmp/bcw_apply_err.log 2>/dev/null || true
+    ( cmd_apply "$@" > /tmp/bcw_apply_result.json 2>/tmp/bcw_apply_err.log; echo done > /tmp/bcw_apply_done ) &
+    echo '{"success":true,"started":true}'
+}
+
+cmd_apply_status() {
+    if [ -f /tmp/bcw_apply_done ]; then
+        cat /tmp/bcw_apply_result.json 2>/dev/null || echo '{"success":false,"error":"пустой результат apply"}'
+    else
+        echo '{"pending":true}'
+    fi
+}
+
 cmd_apply() {
     local target=""
     local script_text=""
@@ -3677,8 +3691,10 @@ cmd_toggle_service() {
         *) printf '{"success":false,"error":"Unknown target: %s"}\n' "$target"; return 1 ;;
     esac
 
-    local pkg="zapret2"
-    [ -f /etc/config/zapret2 ] || pkg="zapret2wizard"
+    # Сначала наша конфигурация: на роутере может остаться старый
+    # /etc/config/zapret2 от пакета zapret2, и toggle менял не тот файл.
+    local pkg="zapret2wizard"
+    [ -f /etc/config/zapret2wizard ] || pkg="zapret2"
 
     local sections=$(uci show "$pkg" 2>/dev/null | grep -E "^$pkg\.${base_sec}(_[0-9]+)?=" | cut -d'.' -f2 | cut -d'=' -f1)
     if [ "$base_sec" = "BlockcheckW_Discord" ]; then
@@ -3815,6 +3831,9 @@ cmd_conflicts_resolve() {
         esac
     done
     case "$action" in disable|remove|keep) ;; *) action="disable" ;; esac
+    # Не удаляем пакеты чужих обходов: они могут владеть nfqws2/kmod,
+    # после чего наша служба останется без движка. Только disable.
+    [ "$action" = "remove" ] && action="disable"
 
     local stopped="" disabled="" killed="" removed="" tables_deleted=""
     if [ "$action" != "keep" ]; then
@@ -6836,6 +6855,8 @@ case "$1" in
     status) cmd_status ;;
     stop) cmd_stop ;;
     apply) shift; cmd_apply "$@" ;;
+    apply_bg) shift; cmd_apply_bg "$@" ;;
+    apply_status) cmd_apply_status ;;
     activate) shift; cmd_activate "$@" ;;
     delete_strategy) shift; cmd_delete_strategy "$@" ;;
     test) shift; cmd_test "$@" ;;

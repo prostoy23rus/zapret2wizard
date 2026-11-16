@@ -434,7 +434,6 @@ function bcwConflictBanner(c) {
 	if (localStorage.getItem('bcw_conflicts_ignored') === '1') return null;
 
 	function act(action) {
-		if (action === 'remove' && !confirm('Удалить пакеты сторонних обходов? Это необратимо.')) return;
 		fs.exec(HELPER_BIN, ['conflicts_resolve', '--action', action]).then(function() {
 			if (action === 'keep') localStorage.setItem('bcw_conflicts_ignored', '1');
 			location.reload();
@@ -452,11 +451,10 @@ function bcwConflictBanner(c) {
 		style: 'border:1px solid #d97706; background:rgba(217,119,6,.08); margin-bottom:14px;'
 	}, [
 		E('div', { style: 'font-weight:bold; color:#d97706; margin-bottom:6px;' }, '⚠ Найдены сторонние обходы DPI'),
-		E('div', { style: 'font-size:13px; line-height:1.45;' }, 'Они могут конфликтовать с нашей службой (queue/маркировки/общие файлы). Рекомендуется отключить или удалить.'),
+		E('div', { style: 'font-size:13px; line-height:1.45;' }, 'Они могут конфликтовать с нашей службой (queue/маркировки/общие файлы). Рекомендуется отключить; пакеты не удаляются, чтобы не потерять движок nfqws2.'),
 		details.length ? E('div', { style: 'font-size:12px; opacity:.8; margin-top:6px;' }, details.join(' · ')) : null,
 		E('div', { style: 'display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;' }, [
 			E('button', { class: 'btn cbi-button cbi-button-action', type: 'button', click: function() { act('disable'); } }, 'Отключить'),
-			E('button', { class: 'btn cbi-button cbi-button-remove', type: 'button', click: function() { act('remove'); } }, 'Удалить пакеты'),
 			E('button', { class: 'btn cbi-button', type: 'button', click: function() { act('keep'); } }, 'Скрыть')
 		])
 	]);
@@ -2841,10 +2839,13 @@ return view.extend({
 					click: function() {
 						ta.focus();
 						ta.select();
-						try {
-							document.execCommand('copy');
+						var copied = false;
+						try { copied = document.execCommand('copy'); } catch (e) {}
+						if (copied) {
 							ui.addNotification(null, E('p', {}, '✓ Скопировано в буфер обмена!'), 'info');
-						} catch(e) {}
+						} else {
+							ui.addNotification(null, E('p', {}, 'Текст выделен, но браузер запретил буфер обмена. Нажмите Ctrl+C (Cmd+C).'), 'warning');
+						}
 					}
 				}, 'Выделить и скопировать'),
 				E('button', {
@@ -3862,19 +3863,42 @@ return view.extend({
 			return m ? m[1] : 'прочее';
 		}
 
-		// Быстрое применение найденной стратегии к текущему выбранному сервису.
+		// Применение через фоновую задачу: сама операция с проверкой видео
+		// может идти дольше таймаута LuCI RPC, поэтому UI опрашивает статус.
 		function applyStrategyFromCard(args, btn) {
 			var label = (PRESET_DEFS[currentTarget] && PRESET_DEFS[currentTarget].name) || currentTarget;
 			var oldText = btn.textContent;
 			btn.disabled = true;
-			btn.textContent = '⏳ Применяю...';
-			fs.exec(HELPER_BIN, ['apply', '--target', currentTarget, '--script', args]).then(function(res) {
-				var out = parseHelperJson(res) || {};
+			btn.textContent = '⏳ Применяю и проверяю видео...';
+			fs.exec(HELPER_BIN, ['apply_bg', '--target', currentTarget, '--script', args]).then(function(res) {
+				var started = parseHelperJson(res) || {};
+				if (!started.success) {
+					ui.addNotification(null, E('p', {}, '✗ Не удалось запустить применение: ' + (started.error || 'ошибка')), 'danger');
+					return null;
+				}
+				return new Promise(function(resolve, reject) {
+					var tries = 0;
+					function poll() {
+						fs.exec(HELPER_BIN, ['apply_status']).then(function(r) {
+							var out = parseHelperJson(r) || {};
+							if (out.pending) {
+								tries++;
+								if (tries > 150) { reject(new Error('превышено время применения')); return; }
+								setTimeout(poll, 2000);
+							} else {
+								resolve(out);
+							}
+						}).catch(reject);
+					}
+					poll();
+				});
+			}).then(function(out) {
+				if (!out) return null;
 				if (out.success) {
 					if (out.all_ok) {
-						ui.addNotification(null, E('p', {}, '✓ Стратегия применена и проверена: ' + label), 'info');
+						ui.addNotification(null, E('p', {}, '✓ Стратегия применена и проверена, видео-хост доступен: ' + label), 'info');
 					} else if (out.rolled_back) {
-						ui.addNotification(null, E('p', {}, '⚠ Стратегия не подтвердила трафик — прежняя конфигурация восстановлена'), 'warning');
+						ui.addNotification(null, E('p', {}, '⚠ Стратегия не подтвердила трафик/видео — прежняя конфигурация восстановлена'), 'warning');
 					} else {
 						ui.addNotification(null, E('p', {}, '⚠ Стратегия записана, но трафик не подтвердился — проверьте сервис'), 'warning');
 					}
