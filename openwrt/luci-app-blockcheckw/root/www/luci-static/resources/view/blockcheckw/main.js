@@ -431,11 +431,14 @@ function bcwConflictBanner(c) {
 	var disabledByUs = (c.disabled_by_us || '').trim();
 	var running = c.conflict_running || foreign > 0 || tables.length > 0 || disabledByUs.length > 0;
 	if (!running) return null;
-	if (localStorage.getItem('bcw_conflicts_ignored') === '1') return null;
+	// Старый «Скрыть» больше не должен прятать конфликт навсегда:
+	// иначе сторонний Zapret2 остаётся незамеченным.
+	try { localStorage.removeItem('bcw_conflicts_ignored'); } catch (e) {}
+	try { if (sessionStorage.getItem('bcw_conflicts_ignored') === '1') return null; } catch (e) {}
 
 	function act(action) {
 		fs.exec(HELPER_BIN, ['conflicts_resolve', '--action', action]).then(function() {
-			if (action === 'keep') localStorage.setItem('bcw_conflicts_ignored', '1');
+			if (action === 'keep') { try { sessionStorage.setItem('bcw_conflicts_ignored', '1'); } catch (e) {} }
 			location.reload();
 		}).catch(function() {});
 	}
@@ -2872,7 +2875,7 @@ return view.extend({
 				}
 				if (!reportText || reportText.trim() === '') reportText = 'Ошибка получения диагностического отчета.';
 
-				if (navigator.clipboard && navigator.clipboard.writeText) {
+				if (window.isSecureContext && navigator.clipboard && navigator.clipboard.writeText) {
 					navigator.clipboard.writeText(reportText).then(function() {
 						ui.addNotification(null, E('p', {}, '✓ Диагностический отчёт скопирован в буфер обмена! Вы можете вставить его в обращение на GitHub или в Telegram.'), 'info');
 						btns.forEach(function(b) { b.textContent = '✓ Скопировано!'; });

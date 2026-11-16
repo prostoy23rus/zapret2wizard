@@ -3725,7 +3725,15 @@ cmd_toggle_service() {
     uci commit "$pkg" 2>/dev/null || true
     [ -f /etc/config/zapret2wizard ] && uci commit zapret2wizard 2>/dev/null || true
 
-    restart_dpi_service
+    # Toggle должен быть атомарным: фоновый restart при быстрых
+    # переключениях оставлял службу с 0 движков. Перезапускаем и ждём
+    # готовности; один toggle обычно занимает 2-5 секунд.
+    [ -x /usr/share/zapret2wizard/uci2config ] && /usr/share/zapret2wizard/uci2config >/dev/null 2>&1 || true
+    /etc/init.d/zapret2wizard restart >/dev/null 2>&1 || true
+    if ! wait_dpi_ready 25; then
+        _svc_start_bg
+        wait_dpi_ready 20 || true
+    fi
     history_add "toggle" "$(metric_target_key "$target")" "$([ "$new_state" = "1" ] && echo 'Обход включён' || echo 'Обход выключен')"
 
     printf '{"success":true,"target":"%s","enabled":%s,"section":"%s"}\n' "$target" "$new_state" "$base_sec"
