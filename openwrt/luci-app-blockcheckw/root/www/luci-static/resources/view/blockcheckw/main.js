@@ -3891,7 +3891,13 @@ return view.extend({
 							} else {
 								resolve(out);
 							}
-						}).catch(reject);
+						}).catch(function() {
+							// rpcd может быть кратковременно занят перезапуском службы.
+							// Не показываем XHR timeout сразу — повторяем опрос.
+							tries++;
+							if (tries > 150) { reject(new Error('статус применения недоступен')); return; }
+							setTimeout(poll, 2000);
+						});
 					}
 					poll();
 				});
@@ -4546,8 +4552,24 @@ return view.extend({
 				class: 'btn cbi-button cbi-button-action',
 				click: function() {
 					var text = pre.textContent || '';
-					if (navigator.clipboard) { navigator.clipboard.writeText(text); }
-					else { var r = document.createRange(); r.selectNodeContents(pre); var s = window.getSelection(); s.removeAllRanges(); s.addRange(r); }
+					function selectFallback() {
+						var r = document.createRange();
+						r.selectNodeContents(pre);
+						var s = window.getSelection();
+						s.removeAllRanges();
+						s.addRange(r);
+						var copied = false;
+						try { copied = document.execCommand('copy'); } catch (e) {}
+						if (copied) ui.addNotification(null, E('p', {}, '✓ Скопировано в буфер обмена!'), 'info');
+						else ui.addNotification(null, E('p', {}, 'Текст выделен. Браузер запретил буфер обмена — нажмите Ctrl+C (Cmd+C).'), 'warning');
+					}
+					if (window.isSecureContext && navigator.clipboard && navigator.clipboard.writeText) {
+						navigator.clipboard.writeText(text).then(function() {
+							ui.addNotification(null, E('p', {}, '✓ Скопировано в буфер обмена!'), 'info');
+						}).catch(selectFallback);
+					} else {
+						selectFallback();
+					}
 				}
 			}, '📋 Скопировать');
 			var closeBtn = E('button', { class: 'btn cbi-button cbi-button-neutral', click: function() { ui.hideModal(); } }, 'Закрыть');
