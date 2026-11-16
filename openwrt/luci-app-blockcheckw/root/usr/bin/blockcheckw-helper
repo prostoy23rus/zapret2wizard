@@ -2381,6 +2381,35 @@ probe_resolve() {
     return 1
 }
 
+# Проверка видео-хоста googlevideo через тот же временный nfqws.
+# Главная страница YouTube может открываться при стратегии, которая не
+# поднимает видеопоток; проверяем TLS/HTTP к реальному googlevideo-хосту.
+probe_youtube_video_host() {
+    local q="$1" pageip="$2" page="/tmp/bcw_yt_video_page.$$" vhost vip out code size=0
+    curl -4 -sS -m 25 --resolve "www.youtube.com:443:$pageip" "https://www.youtube.com/watch?v=dQw4w9WgXcQ" -o "$page" 2>/dev/null || true
+    if [ ! -s "$page" ]; then
+        rm -f "$page"
+        echo '{"ok":false,"video_error":"empty page"}'
+        return 1
+    fi
+    vhost=$(grep -o 'https://[A-Za-z0-9._-]*googlevideo\.com/' "$page" 2>/dev/null | head -n1 | sed 's#https://##; s#/$##')
+    rm -f "$page"
+    [ -n "$vhost" ] || { echo '{"ok":false,"video_error":"no googlevideo host"}'; return 1; }
+    vip=$(probe_resolve "$vhost") || true
+    [ -n "$vip" ] || { echo '{"ok":false,"video_host":"'"$vhost"'","video_error":"no video A"}'; return 1; }
+    nft add rule inet bcwprobe out ip daddr "$vip" tcp dport 443 queue num "$q" bypass 2>/dev/null || true
+    nft add rule inet bcwprobe in ip saddr "$vip" tcp sport 443 queue num "$q" bypass 2>/dev/null || true
+    out=$(curl -4 -sS -o /dev/null -m 20 --resolve "$vhost:443:$vip" -w '%{http_code} %{size_download}' "https://$vhost/" 2>/dev/null)
+    code=$(printf '%s' "$out" | cut -d' ' -f1)
+    size=$(printf '%s' "$out" | cut -d' ' -f2)
+    [ -n "$size" ] || size=0
+    case "$code" in
+        2*|3*|4*) echo '{"ok":true,"video_host":"'"$vhost"'","video_code":"'"$code"'","video_bytes":'"$size"'}'; return 0 ;;
+    esac
+    echo '{"ok":false,"video_host":"'"$vhost"'","video_code":"'"$code"'","video_bytes":'"$size"'}'
+    return 1
+}
+
 client_probe_output() {
     local target="$1" host="" url="" min=50000 ip out code size pid cmd tpid q=65302
     case "$target" in
@@ -2428,13 +2457,23 @@ client_probe_output() {
     sleep 1
     out=$(curl -4 -sS -o /dev/null -m 25 --resolve "$host:443:$ip" -w '%{http_code} %{size_download}' "$url" 2>/dev/null)
     code=${out%% *}; size=${out##* }
+    local video_res="" video_ok=1 vjson=""
+    case "$target" in
+        preset_youtube|youtube)
+            if [ -n "$code" ] && [ "$code" -ge 200 ] 2>/dev/null && [ "$code" -lt 400 ] 2>/dev/null && [ "$size" -ge "$min" ] 2>/dev/null; then
+                video_res=$(probe_youtube_video_host "$q" "$ip" 2>/dev/null)
+                echo "$video_res" | grep -q '"ok":true' || video_ok=0
+            fi
+            ;;
+    esac
+    [ -n "$video_res" ] && vjson=",\"video\":$video_res"
     _probe_cleanup
     trap - EXIT INT TERM
-    if [ -n "$code" ] && [ "$code" -ge 200 ] 2>/dev/null && [ "$code" -lt 400 ] 2>/dev/null && [ "$size" -ge "$min" ] 2>/dev/null; then
-        echo '{"ok":true,"mode":"output","host":"'"$host"'","ip":"'"$ip"'","code":"'"$code"'","bytes":'"$size"',"min":'"$min"'}'
+    if [ -n "$code" ] && [ "$code" -ge 200 ] 2>/dev/null && [ "$code" -lt 400 ] 2>/dev/null && [ "$size" -ge "$min" ] 2>/dev/null && [ "$video_ok" = "1" ]; then
+        echo "{\"ok\":true,\"mode\":\"output\",\"host\":\"$host\",\"ip\":\"$ip\",\"code\":\"$code\",\"bytes\":$size,\"min\":$min$vjson}"
         return 0
     fi
-    echo '{"ok":false,"mode":"output","host":"'"$host"'","ip":"'"$ip"'","code":"'"$code"'","bytes":"'"$size"'","min":'"$min"'"}'
+    echo "{\"ok\":false,\"mode\":\"output\",\"host\":\"$host\",\"ip\":\"$ip\",\"code\":\"$code\",\"bytes\":\"$size\",\"min\":$min$vjson}"
     return 1
 }
 
