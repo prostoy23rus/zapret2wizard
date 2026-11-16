@@ -4588,9 +4588,12 @@ return view.extend({
 		}
 
 		function showHostlistsModal(hostlists) {
-			var lists = (hostlists || zapretInfo.hostlists || []).filter(function(h) {
-				return h.key === 'youtube' || h.key === 'discord' || h.key === 'instagram' || h.key === 'exclude';
-			});
+			function allowedHostlists(arr) {
+				return (arr || []).filter(function(h) {
+					return h.key === 'youtube' || h.key === 'discord' || h.key === 'instagram' || h.key === 'exclude';
+				});
+			}
+			var lists = allowedHostlists(hostlists || zapretInfo.hostlists);
 
 			if (!lists || lists.length === 0) {
 				lists = [
@@ -4641,7 +4644,7 @@ return view.extend({
 									return getZapretInfo().then(function(info) {
 										zapretInfo = info || {};
 										try { updateSummaryBox(); } catch (e) {}
-										lists = (zapretInfo.hostlists || lists).slice();
+										lists = allowedHostlists(zapretInfo.hostlists || lists);
 										renderAll();
 										ui.addNotification(null, E('p', {}, '✓ Список «' + hl.name + '» сохранён'), 'info');
 									});
@@ -4727,7 +4730,7 @@ return view.extend({
 						return getZapretInfo();
 					}).then(function(info) {
 						zapretInfo = info || {};
-						lists = (zapretInfo.hostlists || lists).slice();
+						lists = allowedHostlists(zapretInfo.hostlists || lists);
 						renderAll();
 						ui.addNotification(null, E('p', {}, '✓ Все списки доменов проверены и синхронизированы с Zapret2!'), 'info');
 					}).catch(function(err) {
