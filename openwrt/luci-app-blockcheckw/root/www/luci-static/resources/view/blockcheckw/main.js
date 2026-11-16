@@ -10,7 +10,7 @@ var logPollInterval = null;
 var currentTarget = 'preset_youtube';
 var currentMode = 'smart';
 var doCircular = true;
-var autoApply = true;
+var autoApply = false;
 var activeScanInProgress = false;
 var activeLogTab = 'scanner';
 var autoLogScroll = true;
@@ -1721,7 +1721,8 @@ return view.extend({
 		});
 		try {
 			var savedAuto = localStorage.getItem('bcw_auto_apply');
-			if (savedAuto === '0') { autoApply = false; chkAutoApply.checked = false; }
+			if (savedAuto === '1') { autoApply = true; chkAutoApply.checked = true; }
+			else if (savedAuto === '0') { autoApply = false; chkAutoApply.checked = false; }
 		} catch (x) {}
 		var autoApplyToggleBox = E('div', {
 			style: 'display: flex; flex-direction: column; gap: 4px; padding: 12px 16px; background: var(--bcw-bg-card-inner); border: 1px solid var(--bcw-border-sub); border-radius: 8px;'
