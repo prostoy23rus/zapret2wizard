@@ -97,3 +97,14 @@ Checksums из релиза `v0.36.5` проверены.
 
 Вывод: для совместной работы нужно исправлять выбор интерфейса в ZeroBlock;
 Zapret2Wizard не должен и не может применять desync к уже tproxy-нутому трафику.
+### OnePlus .107 и ZeroBlock
+
+- `.107` не входит в `fully_routed_ips`, но ZeroBlock tproxy-ит его
+  Google/Telegram через community-списки FPTN; в цепочке соединения видно
+  `FPTN__section`, а не nfqws2.
+- Прямой тест FPTN SOCKS (127.0.0.2:20180) открывает YouTube: 200/204.
+- Нормальный клиент через netns (без ZeroBlock tproxy) проходит через нашу
+  службу: YouTube 200 при обоих включённых сервисах.
+- Исторические per-client логи 18:00-02:00 на роутере не сохраняются:
+  logread начинается после перезагрузки, ZeroBlock API хранит только
+  daemon-события с 00:00 без IP клиента. Для разбора нужен live trace.
