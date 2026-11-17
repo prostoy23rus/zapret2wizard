@@ -67,6 +67,25 @@ var PRESET_DEFS = {
 			]
 		}
 	},
+	'preset_youtubei': {
+		name: 'YouTube API (youtubei.googleapis.com)',
+		label: 'YouTube API',
+		icon: '🧩',
+		domain: 'youtubei.googleapis.com',
+		domainsText: 'youtubei.googleapis.com — API приложения YouTube',
+		test_url: 'https://youtubei.googleapis.com/',
+		key: 'preset_youtubei',
+		port: '443',
+		hint: {
+			title: 'YouTube API (youtubei.googleapis.com)',
+			summary: 'Отдельная цель для API-шлюза приложения YouTube. Нужна, когда видео-CDN открывается, а приложение показывает ошибку или бесконечную загрузку.',
+			details: [
+				{ title: '🎯 Что тестируется', text: 'youtubei.googleapis.com — API инициализации приложения YouTube. Проверка идёт через клиентский netns, а не локальным curl роутера.' },
+				{ title: '🛡️ Секция Zapret2', text: 'Создаёт секцию zapret2wizard.YTApi (hostlist ytapi_hostlist) и исключает youtubei из основной YouTube-секции.' },
+				{ title: '📱 Зачем', text: 'Если страница YouTube открывается, а приложение не грузит видео/ленту, чаще всего блокируется именно API-хост.' }
+			]
+		}
+	},
 	'preset_discord': {
 		name: 'Предустановленный список Discord (3)',
 		label: 'Discord (3)',
@@ -1336,7 +1355,8 @@ return view.extend({
 		var quickChipsList = [
 			{ id: 'preset_youtube', icon: '📺', name: 'YouTube' },
 			{ id: 'preset_discord', icon: '💬', name: 'Discord' },
-			{ id: 'preset_instagram', icon: '📸', name: 'Instagram' }
+			{ id: 'preset_instagram', icon: '📸', name: 'Instagram' },
+			{ id: 'preset_youtubei', icon: '🧩', name: 'YouTube API' }
 		];
 
 		var chipButtonsMap = {};

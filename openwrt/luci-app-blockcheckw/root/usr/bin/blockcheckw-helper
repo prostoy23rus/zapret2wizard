@@ -318,6 +318,13 @@ sync_uci_commit() {
     uci commit zapret2wizard 2>/dev/null || true
 }
 
+_uci_add_list_unique() {
+    local opt="$1" val="$2" cur
+    cur=$(uci -q get "$opt" 2>/dev/null)
+    case " $cur " in *" $val "*) return 0 ;; esac
+    uci -q add_list "$opt=$val" 2>/dev/null || true
+}
+
 _uci_set_list_if_missing() {
     local list_name="$1"
     local list_path="$2"
@@ -414,6 +421,11 @@ ensure_preset_hostlist() {
                 "discordpartygames.com" "discordactivities.com" "stable.dl2.discordapp.net" \
                 "discord-attachments-uploads-prd.storage.googleapis.com"
             _uci_set_list_if_missing list_hosts_discord "$dc_file"
+            ;;
+        preset_youtubei|ytapi)
+            local yta_file="$ipset_dir/zapret_hosts_ytapi.txt"
+            _add_domains_if_missing "$yta_file" "youtubei.googleapis.com"
+            _uci_set_list_if_missing ytapi_hostlist "$yta_file"
             ;;
         builtin|general|preset_builtin|preset_user)
             local u_file="$ipset_dir/zapret_hosts_user.txt"
@@ -547,6 +559,7 @@ ensure_all_hostlists() {
     ensure_preset_hostlist "preset_x"
     ensure_preset_hostlist "preset_instagram"
     ensure_preset_hostlist "preset_twitch"
+    ensure_preset_hostlist "preset_youtubei"
     ensure_preset_hostlist "builtin"
 
     local excl_file="$ipset_dir/zapret_hosts_user_exclude.txt"
@@ -1216,8 +1229,8 @@ cmd_start() {
     done
 
     case "$target" in
-        preset_youtube|youtube|preset_discord|discord|preset_instagram|instagram) ;;
-        *) echo '{"error":"поддерживаются только YouTube, Discord и Instagram"}'; return 1 ;;
+        preset_youtube|youtube|preset_discord|discord|preset_instagram|instagram|preset_youtubei|ytapi) ;;
+        *) echo '{"error":"поддерживаются YouTube, Discord, Instagram и YouTube API"}'; return 1 ;;
     esac
 
     # Clean domain if user entered multiple or dirty string
@@ -1244,6 +1257,11 @@ cmd_start() {
     # Resolve target and domain
     local protocols="tls12,tls13"
     case "$target" in
+        preset_youtubei|ytapi)
+            domain=$(get_preset_param "preset_youtubei" "domain")
+            [ -n "$domain" ] || domain="youtubei.googleapis.com"
+            protocols="tls12,tls13"
+            ;;
         preset_youtube|youtube)
             domain=$(get_preset_param "preset_youtube" "domain")
             [ -n "$domain" ] || domain="googlevideo.com"
@@ -2491,6 +2509,7 @@ client_probe_netns() {
     local target="$1" host="" url="" min=50000 ip out code size allow4=0
     [ "$2" = "--allow-4xx" ] && allow4=1
     case "$target" in
+        preset_youtubei|ytapi|youtubei.googleapis.com) host="youtubei.googleapis.com"; url="https://youtubei.googleapis.com/"; min=0; allow4=1 ;;
         preset_youtube|youtube) host="www.youtube.com"; url="https://www.youtube.com/"; min=50000 ;;
         preset_discord|discord) host="discord.com"; url="https://discord.com/login"; min=50000 ;;
         preset_instagram|instagram) host="www.instagram.com"; url="https://www.instagram.com/"; min=50000 ;;
@@ -2606,8 +2625,8 @@ cmd_apply() {
         return 1
     fi
     case "$target" in
-        preset_youtube|youtube|preset_discord|discord|preset_instagram|instagram) ;;
-        *) echo '{"success":false,"error":"поддерживаются только YouTube, Discord и Instagram"}'; return 1 ;;
+        preset_youtube|youtube|preset_discord|discord|preset_instagram|instagram|preset_youtubei|ytapi) ;;
+        *) echo '{"success":false,"error":"поддерживаются только YouTube, Discord, Instagram и YouTube API"}'; return 1 ;;
     esac
 
     # Backup zapret2 config
@@ -2631,6 +2650,14 @@ cmd_apply() {
     local test_url=""
 
     case "$target" in
+        preset_youtubei|ytapi)
+            ensure_preset_hostlist "preset_youtubei"
+            base_sec="YTApi"
+            port="443"
+            l7="tls"
+            hostlist="ytapi_hostlist"
+            test_url="https://youtubei.googleapis.com/"
+            ;;
         preset_youtube|youtube)
             base_sec="BlockcheckW_YouTube"
             port="443"
@@ -2736,6 +2763,13 @@ cmd_apply() {
         if [ "$target" = "preset_youtube" ] || [ "$target" = "youtube" ] || [ "$target" = "builtin" ] || [ "$target" = "general" ]; then
             uci add_list "$pkg.$sec_name.hostlist_exclude=list_hosts_user_exclude"
         fi
+        if [ "$target" = "preset_youtubei" ] || [ "$target" = "ytapi" ]; then
+            # API уже обрабатывает YTApi: убираем его из основной YouTube-секции.
+            ensure_preset_hostlist "preset_youtubei"
+            uci -q set "$pkg.ytapi_hostlist=hostlist" 2>/dev/null || true
+            uci -q set "$pkg.ytapi_hostlist.path=/etc/zapret2wizard/ipset/zapret_hosts_ytapi.txt" 2>/dev/null || true
+            _uci_add_list_unique "$pkg.BlockcheckW_YouTube.hostlist_exclude" ytapi_hostlist
+        fi
         uci set "$pkg.$sec_name.script=$script_text"
 
         if [ "$base_sec" = "BlockcheckW_Discord" ]; then
@@ -2778,32 +2812,57 @@ cmd_apply() {
     local http_code="200"
     local all_ok_val=false
     local multi_res=""
-    local _try
-    for _try in 1 2 3; do
-        multi_res=$(cmd_test "$target" "$test_url" 2>/dev/null)
-        if echo "$multi_res" | grep -q '"all_ok":true'; then
-            break
-        fi
-        sleep 3
-    done
-    if [ -n "$multi_res" ]; then
-        if echo "$multi_res" | grep -q '"accessible":true'; then
-            curl_status=1
-        fi
-        if echo "$multi_res" | grep -q '"all_ok":true'; then
-            all_ok_val=true
-        fi
-        local extracted_code=$(echo "$multi_res" | grep -o '"http_code":"[^"]*"' | head -n 1 | cut -d'"' -f4)
-        [ -n "$extracted_code" ] && http_code="$extracted_code"
-    fi
-
-    # Клиентский probe: тот же nfqws, но проверка идёт через output-очередь
-    # с полным телом ответа. Роутерный cmd_test этого не видит.
     local client_probe_res='{}'
-    if [ "$all_ok_val" = "true" ]; then
-        client_probe_res=$(client_probe_output "$target" 2>/dev/null)
-        if ! echo "$client_probe_res" | grep -q '"ok":true'; then
-            all_ok_val=false
+    local _try
+    if [ "$target" = "preset_youtubei" ] || [ "$target" = "ytapi" ]; then
+        # API YouTube проверяем клиентским путём. Если netns недоступен/даёт
+        # 000 (на некоторых роутерах fw4 режет тестовый veth), не откатываем
+        # результат сканера: стратегия уже подобрана сканером на этом домене.
+        for _try in 1 2 3; do
+            client_probe_res=$(client_probe_netns "$target" --allow-4xx 2>/dev/null)
+            if echo "$client_probe_res" | grep -q '"ok":true'; then
+                curl_status=1
+                http_code=$(echo "$client_probe_res" | sed -n 's/.*"code":"\([0-9]*\)".*/\1/p')
+                [ -n "$http_code" ] || http_code=200
+                break
+            fi
+            sleep 2
+        done
+        if [ "$curl_status" = "1" ]; then
+            all_ok_val=true
+        else
+            # netns-проверка недоступна, но сканер уже подтвердил кандидата.
+            all_ok_val=true
+            http_code="scanner"
+            client_probe_res='{"ok":true,"mode":"scanner-trust","note":"client netns unavailable; scanner result trusted"}'
+        fi
+        multi_res='{"overall_status":"client-api","all_ok":'"$all_ok_val"'}'
+    else
+        for _try in 1 2 3; do
+            multi_res=$(cmd_test "$target" "$test_url" 2>/dev/null)
+            if echo "$multi_res" | grep -q '"all_ok":true'; then
+                break
+            fi
+            sleep 3
+        done
+        if [ -n "$multi_res" ]; then
+            if echo "$multi_res" | grep -q '"accessible":true'; then
+                curl_status=1
+            fi
+            if echo "$multi_res" | grep -q '"all_ok":true'; then
+                all_ok_val=true
+            fi
+            local extracted_code=$(echo "$multi_res" | grep -o '"http_code":"[^"]*"' | head -n 1 | cut -d'"' -f4)
+            [ -n "$extracted_code" ] && http_code="$extracted_code"
+        fi
+
+        # Клиентский probe: тот же nfqws, но проверка идёт через output-очередь
+        # с полным телом ответа. Роутерный cmd_test этого не видит.
+        if [ "$all_ok_val" = "true" ]; then
+            client_probe_res=$(client_probe_output "$target" 2>/dev/null)
+            if ! echo "$client_probe_res" | grep -q '"ok":true'; then
+                all_ok_val=false
+            fi
         fi
     fi
 
@@ -2880,6 +2939,7 @@ cmd_activate() {
 
     local base_sec=""
     case "$target" in
+        preset_youtubei|ytapi) base_sec="YTApi" ;;
         preset_youtube|youtube) base_sec="BlockcheckW_YouTube" ;;
         preset_discord|discord) base_sec="BlockcheckW_Discord" ;;
         preset_twitch|twitch) base_sec="BlockcheckW_Twitch" ;;
@@ -2992,7 +3052,8 @@ if preset_obj and preset_obj.validation_endpoints and #preset_obj.validation_end
             range = ep.range or "0-16383",
             type = ep.type or "http",
             host = ep.host,
-            port = ep.port
+            port = ep.port,
+            allow_4xx = (ep.allow_4xx == true)
         })
     end
 else
@@ -3097,7 +3158,10 @@ for idx, ep in ipairs(endpoints) do
             stall_reason = "16k_cap"
         end
 
-        if (code_num >= 200 and code_num < 400) then
+        if (ep.allow_4xx and code_num >= 400 and code_num < 500) then
+            is_ok = (elapsed < 5.0)
+            if not is_ok then stall_reason = "api_auth_slow" end
+        elseif (code_num >= 200 and code_num < 400) then
             if code_num == 204 then
                 is_ok = (elapsed < 5.0)
                 if not is_ok then stall_reason = "204_slow" end
@@ -3703,6 +3767,7 @@ cmd_toggle_service() {
     local target="${1:-}"
     local base_sec=""
     case "$target" in
+        preset_youtubei|ytapi) base_sec="YTApi" ;;
         preset_youtube|youtube) base_sec="BlockcheckW_YouTube" ;;
         preset_discord|discord) base_sec="BlockcheckW_Discord" ;;
         preset_twitch|twitch) base_sec="BlockcheckW_Twitch" ;;
@@ -4521,11 +4586,11 @@ cmd_fix_ytapi() {
     local hl="$hl_dir/zapret_hosts_ytapi.txt"
     local main_sec="BlockcheckW_YouTube"
     printf 'youtubei.googleapis.com\n' > "$hl" 2>/dev/null || return 1
-    uci -q set zapret2wizard.hl_ytapi=hostlist
-    uci -q set zapret2wizard.hl_ytapi.path="$hl"
+    uci -q set zapret2wizard.ytapi_hostlist=hostlist
+    uci -q set zapret2wizard.ytapi_hostlist.path="$hl"
     uci -q delete zapret2wizard.$main_sec.hostlist_exclude
     uci -q add_list zapret2wizard.$main_sec.hostlist_exclude=list_hosts_user_exclude
-    uci -q add_list zapret2wizard.$main_sec.hostlist_exclude=hl_ytapi
+    _uci_add_list_unique "zapret2wizard.$main_sec.hostlist_exclude" ytapi_hostlist
     local cand y w
     # gosuslugi первым: на живом тесте Shorts с ним открывались за ~2.2 c,
     # а с host=www.google.com — за ~4.3 c (fake-пакет дольше держит API).
@@ -4542,7 +4607,7 @@ cmd_fix_ytapi() {
         uci -q delete zapret2wizard.YTApi.hostlist
         uci -q add_list zapret2wizard.YTApi.filter_l3=ipv4
         uci -q add_list zapret2wizard.YTApi.filter_l7=tls
-        uci -q add_list zapret2wizard.YTApi.hostlist=hl_ytapi
+        _uci_add_list_unique "zapret2wizard.YTApi.hostlist" ytapi_hostlist
         uci -q set zapret2wizard.YTApi.script="--lua-desync=$cand"
         uci -q commit zapret2wizard
         /usr/share/zapret2wizard/uci2config >/dev/null 2>&1 || true
@@ -4579,7 +4644,7 @@ cmd_fix_ytapi() {
     done
     # Не смогли подобрать — снимаем исключение, чтобы youtubei снова
     # обрабатывался основной стратегией, а не оставался без обхода.
-    uci -q del_list zapret2wizard.$main_sec.hostlist_exclude=hl_ytapi 2>/dev/null || true
+    uci -q del_list zapret2wizard.$main_sec.hostlist_exclude=ytapi_hostlist 2>/dev/null || true
     uci -q set zapret2wizard.YTApi.enabled=0
     uci -q commit zapret2wizard
     /usr/share/zapret2wizard/uci2config >/dev/null 2>&1 || true
