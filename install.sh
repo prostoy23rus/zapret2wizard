@@ -719,6 +719,21 @@ wait_zapret_ready() {
     return 1
 }
 
+restore_dns_preinstall() {
+    # DNS-сбой не должен откатывать саму установку службы: возвращаем только
+    # сетевые конфиги и резолвер. Иначе helper/main.js/version откатываются
+    # на старую версию, а UI показывает 0 сервисов при работающем nfqws2.
+    [ -f "$INSTALL_BACKUP/dhcp" ] && cp -f "$INSTALL_BACKUP/dhcp" /etc/config/dhcp 2>/dev/null || true
+    [ -f "$INSTALL_BACKUP/network" ] && cp -f "$INSTALL_BACKUP/network" /etc/config/network 2>/dev/null || true
+    [ -f "$INSTALL_BACKUP/firewall" ] && cp -f "$INSTALL_BACKUP/firewall" /etc/config/firewall 2>/dev/null || true
+    uci -q commit dhcp 2>/dev/null || true
+    uci -q commit network 2>/dev/null || true
+    uci -q commit firewall 2>/dev/null || true
+    /etc/init.d/dnsmasq restart >/dev/null 2>&1 || true
+    killall -HUP dnsmasq 2>/dev/null || true
+    /etc/init.d/network reload >/dev/null 2>&1 || true
+}
+
 restore_preinstall() {
     local f
     for f in zapret2wizard.config zapret2wizard.init blockcheckw-helper main.js version.json; do
@@ -755,6 +770,8 @@ if ! wait_zapret_ready; then
         echo "ОШИБКА: nfqws2/таблица не поднялись после установки."
         echo "Возвращаю предыдущую конфигурацию..."
         restore_preinstall
+        /etc/init.d/zapret2wizard start >/dev/null 2>&1 || true
+        wait_zapret_ready || true
         exit 1
     fi
 fi
@@ -769,7 +786,7 @@ sleep 2
 
 # Проверка DNS: не оставляем роутер без резолвера после перезапусков dnsmasq.
 dns_works=0
-for _ in 1 2 3; do
+for _ in 1 2 3 4 5 6 7 8 9 10; do
     if nslookup www.google.com 127.0.0.1 >/dev/null 2>&1 || nslookup ya.ru 127.0.0.1 >/dev/null 2>&1; then
         dns_works=1
         break
@@ -777,12 +794,21 @@ for _ in 1 2 3; do
     sleep 1
 done
 if [ "$dns_works" != "1" ]; then
-    echo "DNS не отвечает — возвращаю конфигурацию dnsmasq..."
-    restore_preinstall
-    sleep 2
-    if ! nslookup www.google.com 127.0.0.1 >/dev/null 2>&1 && ! nslookup ya.ru 127.0.0.1 >/dev/null 2>&1; then
-        echo "ОШИБКА: DNS всё ещё не отвечает. Проверьте WAN/резолвер вручную."
-        exit 1
+    echo "DNS не отвечает — возвращаю только сетевую конфигурацию и dnsmasq..."
+    restore_dns_preinstall
+    dns_works=0
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        if nslookup www.google.com 127.0.0.1 >/dev/null 2>&1 || nslookup ya.ru 127.0.0.1 >/dev/null 2>&1; then
+            dns_works=1
+            break
+        fi
+        sleep 1
+    done
+    if [ "$dns_works" != "1" ]; then
+        echo "ПРЕДУПРЕЖДЕНИЕ: DNS всё ещё не отвечает; служба оставлена установленной."
+        echo "Проверьте WAN/резолвер вручную: cat /etc/resolv.conf; uci show dhcp"
+    else
+        echo "DNS восстановлен из предустановочной конфигурации."
     fi
 fi
 
