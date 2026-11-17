@@ -2480,7 +2480,8 @@ client_probe_output() {
 # Точный клиентский путь: временный netns + veth, трафик идёт через
 # forward-цепочку и реальную очередь nfqws. Требует kmod-veth.
 client_probe_netns() {
-    local target="$1" host="" url="" min=50000 ip out code size
+    local target="$1" host="" url="" min=50000 ip out code size allow4=0
+    [ "$2" = "--allow-4xx" ] && allow4=1
     case "$target" in
         preset_youtube|youtube) host="www.youtube.com"; url="https://www.youtube.com/"; min=50000 ;;
         preset_discord|discord) host="discord.com"; url="https://discord.com/login"; min=50000 ;;
@@ -2526,11 +2527,17 @@ client_probe_netns() {
     code=${out%% *}; size=${out##* }
     _netns_cleanup
     trap - EXIT INT TERM
-    if [ -n "$code" ] && [ "$code" -ge 200 ] 2>/dev/null && [ "$code" -lt 400 ] 2>/dev/null && [ "$size" -ge "$min" ] 2>/dev/null; then
-        echo '{"ok":true,"mode":"netns","host":"'"$host"'","ip":"'"$ip"'","code":"'"$code"'","bytes":'"$size"',"min":'"$min"'}'
+    local code_ok=0
+    if [ -n "$code" ] && [ "$code" -ge 200 ] 2>/dev/null && [ "$code" -lt 400 ] 2>/dev/null; then
+        code_ok=1
+    elif [ "$allow4" = "1" ] && [ -n "$code" ] && [ "$code" -ge 400 ] 2>/dev/null && [ "$code" -lt 500 ] 2>/dev/null; then
+        code_ok=1
+    fi
+    if [ "$code_ok" = "1" ] && [ "$size" -ge "$min" ] 2>/dev/null; then
+        echo '{"ok":true,"mode":"netns","host":"'"$host"'","ip":"'"$ip"'","code":"'"$code"'","bytes":'"$size"',"min":'"$min"',"allow_4xx":'"$allow4"'}'
         return 0
     fi
-    echo '{"ok":false,"mode":"netns","host":"'"$host"'","ip":"'"$ip"'","code":"'"$code"'","bytes":"'"$size"'","min":'"$min"'}'
+    echo '{"ok":false,"mode":"netns","host":"'"$host"'","ip":"'"$ip"'","code":"'"$code"'","bytes":"'"$size"'","min":'"$min"',"allow_4xx":'"$allow4"'}'
     return 1
 }
 
@@ -4539,21 +4546,26 @@ cmd_fix_ytapi() {
         /usr/share/zapret2wizard/uci2config >/dev/null 2>&1 || true
         /etc/init.d/zapret2wizard restart >/dev/null 2>&1 || true
         wait_dpi_ready 15
-        # После restart движок поднимается не мгновенно: одна проба 000
-        # ничего не доказывает. Проверяем несколько раз, прежде чем
-        # объявить кандидата нерабочим (из-за этого API ошибочно отключался).
-        y=000; w=""
-        for _try in 1 2 3 4 5; do
-            y=$(curl -4 -s -o /dev/null -m 7 -w '%{http_code}' https://youtubei.googleapis.com/ 2>/dev/null)
-            w=$(curl -4 -s -o /dev/null -m 7 -w '%{http_code}' https://www.youtube.com/ 2>/dev/null)
-            [ "$y" != "000" ] && [ -n "$y" ] && break
+        # Проверять API с роутера нельзя: локальный curl не проходит через
+        # postrouting/NFQUEUE и всегда даёт 000. Проверяем клиентский путь
+        # через временный netns, как реальный телефон.
+        local _api="" _www="" y=000 w=000
+        for _try in 1 2 3; do
+            _api=$(client_probe_netns youtubei.googleapis.com --allow-4xx 2>/dev/null | tail -1)
+            _www=$(client_probe_netns www.youtube.com 2>/dev/null | tail -1)
+            case "$_api" in *'"ok":true'*) break ;; esac
             sleep 2
         done
-        logger -t zapret2wizard "YTApi $cand: api=$y www=$w"
-        if [ "$y" != "000" ] && [ -n "$y" ]; then
-            echo "{\"success\":true,\"api\":\"$y\",\"www\":\"$w\",\"strategy\":\"$cand\"}"
-            return 0
-        fi
+        y=$(printf '%s' "$_api" | sed -n 's/.*"code":"\([0-9]*\)".*/\1/p')
+        w=$(printf '%s' "$_www" | sed -n 's/.*"code":"\([0-9]*\)".*/\1/p')
+        [ -n "$y" ] || y=000
+        [ -n "$w" ] || w=000
+        logger -t zapret2wizard "YTApi $cand: api=$y www=$w (netns)"
+        case "$_api" in
+            *'"ok":true'*)
+                echo "{\"success\":true,\"api\":\"$y\",\"www\":\"$w\",\"mode\":\"netns\",\"strategy\":\"$cand\"}"
+                return 0 ;;
+        esac
     done
     # Не смогли подобрать — снимаем исключение, чтобы youtubei снова
     # обрабатывался основной стратегией, а не оставался без обхода.

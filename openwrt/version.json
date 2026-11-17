@@ -1,11 +1,11 @@
 {
-  "version": "0.36.14",
-  "release_date": "2026-11-16",
+  "version": "0.36.15",
+  "release_date": "2026-11-17",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "apply_bg запускается через setsid с закрытием fd 3..9, LuCI fs.exec больше не ждёт фоновый apply и не даёт XHR timeout",
-    "Стратегия применяется в фоне, результат остаётся в /tmp/bcw_apply_result.json",
-    "Тест через LuCI fs.exec: apply_bg возвращает started за ~100 мс"
+    "YTApi проверяется через клиентский netns, а не локальный curl роутера",
+    "client_probe_netns поддерживает --allow-4xx для API-ответов 405",
+    "Исправлен ложный отказ YTApi на МТС: локальный curl не проходит через nfqws2"
   ]
 }
