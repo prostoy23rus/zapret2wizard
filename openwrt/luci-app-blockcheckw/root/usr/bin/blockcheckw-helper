@@ -5162,7 +5162,7 @@ _info_json_shell() {
 cmd_asn() {
     if [ -f /etc/zapret2wizard/provider ]; then
         local p=$(cat /etc/zapret2wizard/provider 2>/dev/null)
-        local a=$(printf '%s' "$p" | grep -o 'AS[0-9]*' | head -n 1)
+        local a=$(printf '%s' "$p" | grep -o 'AS[0-9][0-9]*' | head -n 1)
         [ -n "$a" ] && { echo "$a"; return 0; }
     fi
     local a=$(lua /usr/share/zapret2wizard/evolve.lua asn /tmp/blockcheckw_status.json 2>/dev/null)
