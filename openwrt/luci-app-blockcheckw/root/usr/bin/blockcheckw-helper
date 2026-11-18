@@ -15,6 +15,7 @@ OUTPUT_CIRCULAR="/tmp/blockcheckw_circular.txt"
 TURBO_FILE="/tmp/blockcheckw_turbo.txt"
 PRESETS_FILE="/usr/share/blockcheckw/zapret2_presets.json"
 CIRCULAR_BUILDER="/usr/bin/circular-builder.lua"
+PROBE_TIMEOUT=25
 
 # Результаты последних проверок по сервисам и журнал событий для вкладок
 # «Результаты» и «История». Обычные JSON-файлы, читаются командой metrics.
@@ -2373,8 +2374,11 @@ cmd_restore_good() {
 # стратегию на реальном TLS-соединении, а не только curl с роутера.
 probe_resolve() {
     local host="$1" ip="" i=0
-    while [ "$i" -lt 4 ]; do
+    while [ "$i" -lt 6 ]; do
         ip=$(nslookup "$host" 127.0.0.1 2>/dev/null | awk '/^Address: /{print $2}' | grep -E '^[0-9.]+$' | head -n1)
+        [ -n "$ip" ] && { echo "$ip"; return 0; }
+        # dnsmasq мог перезапускаться вместе со службой — пробуем внешний DNS.
+        ip=$(nslookup "$host" 1.1.1.1 2>/dev/null | awk '/^Address: /{print $2}' | grep -E '^[0-9.]+$' | head -n1)
         [ -n "$ip" ] && { echo "$ip"; return 0; }
         i=$((i + 1)); sleep 1
     done
@@ -2397,8 +2401,8 @@ probe_youtube_video_host() {
     [ -n "$vhost" ] || { echo '{"ok":false,"video_error":"no googlevideo host"}'; return 1; }
     vip=$(probe_resolve "$vhost") || true
     [ -n "$vip" ] || { echo '{"ok":false,"video_host":"'"$vhost"'","video_error":"no video A"}'; return 1; }
-    nft add rule inet bcwprobe out ip daddr "$vip" tcp dport 443 queue num "$q" bypass 2>/dev/null || true
-    nft add rule inet bcwprobe in ip saddr "$vip" tcp sport 443 queue num "$q" bypass 2>/dev/null || true
+    nft add rule inet bcwprobe out meta mark and 0x40000000 == 0 ip daddr "$vip" tcp dport 443 queue num "$q" bypass 2>/dev/null || true
+    nft add rule inet bcwprobe in meta mark and 0x40000000 == 0 ip saddr "$vip" tcp sport 443 queue num "$q" bypass 2>/dev/null || true
     out=$(curl -4 -sS -o /dev/null -m 20 --resolve "$vhost:443:$vip" -w '%{http_code} %{size_download}' "https://$vhost/" 2>/dev/null)
     code=$(printf '%s' "$out" | cut -d' ' -f1)
     size=$(printf '%s' "$out" | cut -d' ' -f2)
@@ -2411,8 +2415,9 @@ probe_youtube_video_host() {
 }
 
 client_probe_output() {
-    local target="$1" host="" url="" min=50000 ip out code size pid cmd tpid q=65302
+    local target="$1" host="" url="" min=50000 ip out code size pid cmd tpid q=65302 allow4=0
     case "$target" in
+        preset_youtubei|ytapi|youtubei.googleapis.com) host="youtubei.googleapis.com"; url="https://youtubei.googleapis.com/"; min=0; allow4=1 ;;
         preset_youtube|youtube) host="www.youtube.com"; url="https://www.youtube.com/"; min=50000 ;;
         preset_discord|discord) host="discord.com"; url="https://discord.com/login"; min=50000 ;;
         preset_instagram|instagram) host="www.instagram.com"; url="https://www.instagram.com/"; min=50000 ;;
@@ -2452,10 +2457,10 @@ client_probe_output() {
     nft add table inet bcwprobe 2>/dev/null || { _probe_cleanup; echo '{"ok":false,"error":"nft table"}'; return 1; }
     nft add chain inet bcwprobe out '{ type filter hook output priority -150; policy accept; }' 2>/dev/null || true
     nft add chain inet bcwprobe in '{ type filter hook input priority -150; policy accept; }' 2>/dev/null || true
-    nft add rule inet bcwprobe out ip daddr "$ip" tcp dport 443 queue num "$q" bypass 2>/dev/null || true
-    nft add rule inet bcwprobe in ip saddr "$ip" tcp sport 443 queue num "$q" bypass 2>/dev/null || true
+    nft add rule inet bcwprobe out meta mark and 0x40000000 == 0 ip daddr "$ip" tcp dport 443 queue num "$q" bypass 2>/dev/null || true
+    nft add rule inet bcwprobe in meta mark and 0x40000000 == 0 ip saddr "$ip" tcp sport 443 queue num "$q" bypass 2>/dev/null || true
     sleep 1
-    out=$(curl -4 -sS -o /dev/null -m 25 --resolve "$host:443:$ip" -w '%{http_code} %{size_download}' "$url" 2>/dev/null)
+    out=$(curl -4 -sS -o /dev/null -m "$PROBE_TIMEOUT" --resolve "$host:443:$ip" -w '%{http_code} %{size_download}' "$url" 2>/dev/null)
     code=${out%% *}; size=${out##* }
     local video_res="" video_ok=1 vjson=""
     case "$target" in
@@ -2469,7 +2474,10 @@ client_probe_output() {
     [ -n "$video_res" ] && vjson=",\"video\":$video_res"
     _probe_cleanup
     trap - EXIT INT TERM
-    if [ -n "$code" ] && [ "$code" -ge 200 ] 2>/dev/null && [ "$code" -lt 400 ] 2>/dev/null && [ "$size" -ge "$min" ] 2>/dev/null && [ "$video_ok" = "1" ]; then
+    local _code_ok=0
+    if [ -n "$code" ] && [ "$code" -ge 200 ] 2>/dev/null && [ "$code" -lt 400 ] 2>/dev/null; then _code_ok=1; fi
+    if [ "$allow4" = "1" ] && [ -n "$code" ] && [ "$code" -ge 400 ] 2>/dev/null && [ "$code" -lt 500 ] 2>/dev/null; then _code_ok=1; fi
+    if [ "$_code_ok" = "1" ] && [ "$size" -ge "$min" ] 2>/dev/null && [ "$video_ok" = "1" ]; then
         echo "{\"ok\":true,\"mode\":\"output\",\"host\":\"$host\",\"ip\":\"$ip\",\"code\":\"$code\",\"bytes\":$size,\"min\":$min$vjson}"
         return 0
     fi
@@ -2523,7 +2531,7 @@ client_probe_netns() {
     nft add table ip bcwprobe_nat 2>/dev/null || true
     nft add chain ip bcwprobe_nat post '{ type nat hook postrouting priority 100; policy accept; }' 2>/dev/null || true
     nft add rule ip bcwprobe_nat post ip saddr 10.99.99.0/24 masquerade 2>/dev/null || true
-    out=$(ip netns exec "$NS" curl -4 -sS -o /dev/null -m 25 --resolve "$host:443:$ip" -w '%{http_code} %{size_download}' "$url" 2>/dev/null)
+    out=$(ip netns exec "$NS" curl -4 -sS -o /dev/null -m "$PROBE_TIMEOUT" --resolve "$host:443:$ip" -w '%{http_code} %{size_download}' "$url" 2>/dev/null)
     code=${out%% *}; size=${out##* }
     _netns_cleanup
     trap - EXIT INT TERM
@@ -4101,13 +4109,22 @@ dns_doh_base() {
 # такой адрес, и сайт висит, хотя DPI-обход работает. Проверяем адреса и
 # закрепляем рабочий для www.instagram.com через host-record dnsmasq.
 dns_pin_host() {
-    local host="$1" ip="$2" norestart="$3" cur e new=""
+    local host="$1" ip="$2" norestart="$3" cur e new="" found=0
     # OpenWrt dnsmasq не поддерживает host-record через uci, а address= —
     # поддерживает: /www.instagram.com/1.2.3.4 отвечает A и для поддоменов.
     cur=$(uci -q get dhcp.@dnsmasq[0].address 2>/dev/null)
     for e in $cur; do
-        case "$e" in "/$host/"*) ;; *) new="$new $e" ;; esac
+        case "$e" in
+            "/$host/"*)
+                # Уже закреплён за нужным IP: не трогаем flash и dnsmasq.
+                [ "$e" = "/$host/$ip" ] && [ "$found" = "0" ] && { found=1; new="$new $e"; }
+                ;;
+            *) new="$new $e" ;;
+        esac
     done
+    if [ "$found" = "1" ]; then
+        return 0
+    fi
     uci -q delete dhcp.@dnsmasq[0].address 2>/dev/null
     for e in $new; do
         uci add_list dhcp.@dnsmasq[0].address="$e" 2>/dev/null || true
@@ -4232,26 +4249,11 @@ cmd_ensure_instagram() {
 }
 
 cmd_prune_services() {
-    local pkg=zapret2wizard changed=0 sec e
-    for sec in $(uci show "$pkg" 2>/dev/null | sed -n 's/^zapret2wizard\.\([^.=]*\)=strategy$/\1/p'); do
-        case "$sec" in
-            BlockcheckW_YouTube|BlockcheckW_Discord|BlockcheckW_Discord_Voice|BlockcheckW_Instagram) ;;
-            *) uci -q delete "$pkg.$sec" 2>/dev/null && changed=1 ;;
-        esac
-    done
-    for e in $(uci -q get dhcp.@dnsmasq[0].address 2>/dev/null); do
-        case "$e" in *instagram*) uci -q del_list dhcp.@dnsmasq[0].address="$e" 2>/dev/null && changed=1 ;; esac
-    done
-    for e in $(uci -q get dhcp.@dnsmasq[0].server 2>/dev/null); do
-        case "$e" in *instagram*) uci -q del_list dhcp.@dnsmasq[0].server="$e" 2>/dev/null && changed=1 ;; esac
-    done
-    if [ "$changed" = "1" ]; then
-        uci -q commit "$pkg" 2>/dev/null || true
-        uci -q commit dhcp 2>/dev/null || true
-        safe_dns_restart >/dev/null 2>&1 || true
-        logger -t zapret2wizard "оставлены только YouTube и Discord"
-    fi
-    echo '{"pruned":true}'
+    # Раньше здесь удалялись все стратегии, кроме четырёх захардкоженных.
+    # Это уничтожало легитимные BlockcheckW_X/Twitch/YTApi/QUIC и DNS-пины
+    # Instagram при каждом старте службы. Автоматически не удаляем ни одну
+    # зарегистрированную стратегию: чистка выполняется только явной командой.
+    echo '{"pruned":true,"preserved":true}'
 }
 
 cmd_fix_defaults() {
@@ -4556,6 +4558,14 @@ cmd_fix_ytapi() {
             case "$_api" in *'"ok":true'*) break ;; esac
             sleep 2
         done
+        case "$_api" in
+            *'"ok":true'*) ;;
+            *) _api=$(client_probe_output youtubei.googleapis.com 2>/dev/null | tail -1) ;;
+        esac
+        case "$_www" in
+            *'"ok":true'*) ;;
+            *) _www=$(client_probe_output www.youtube.com 2>/dev/null | tail -1) ;;
+        esac
         y=$(printf '%s' "$_api" | sed -n 's/.*"code":"\([0-9]*\)".*/\1/p')
         w=$(printf '%s' "$_www" | sed -n 's/.*"code":"\([0-9]*\)".*/\1/p')
         [ -n "$y" ] || y=000
@@ -4590,8 +4600,8 @@ cmd_ensure_ytapi() {
     uci -q get zapret2wizard.YTApi >/dev/null 2>&1 && return 0
     [ -f /tmp/bcw_ytapi.attempted ] && return 0
     uci -q get zapret2wizard.BlockcheckW_YouTube.enabled 2>/dev/null | grep -q '^1$' || return 0
-    code=$(curl -4 -s -o /dev/null -m 6 -w '%{http_code}' https://youtubei.googleapis.com/ 2>/dev/null)
-    [ "$code" = "000" ] || return 0
+    code=$(_yt_probe https://youtubei.googleapis.com/ 2>/dev/null | awk '{print $1}')
+    [ "$code" = "000" ] || [ -z "$code" ] || return 0
     : > /tmp/bcw_ytapi.lock
     : > /tmp/bcw_ytapi.attempted
     cmd_fix_ytapi >/dev/null 2>&1 || true
@@ -4918,7 +4928,9 @@ cmd_selftest() {
     echo "fake-блобов:       $(ls /usr/share/zapret2wizard/fake/*.bin 2>/dev/null | wc -l)"
     echo "доменов в списках: $(cat /etc/zapret2wizard/ipset/zapret_hosts_*.txt 2>/dev/null | grep -vc '^#')"
     echo
-    echo "flow offloading:   $(uci -q get firewall.@defaults[0].flow_offloading)/$(uci -q get firewall.@defaults[0].flow_offloading_hw)"
+    local _fo_sw=$(uci -q get firewall.@defaults[0].flow_offloading 2>/dev/null); [ -n "$_fo_sw" ] || _fo_sw="off"
+    local _fo_hw=$(uci -q get firewall.@defaults[0].flow_offloading_hw 2>/dev/null); [ -n "$_fo_hw" ] || _fo_hw="off"
+    echo "flow offloading:   $_fo_sw/$_fo_hw"
     echo
     echo "--- живая проверка ($target) ---"
     local out
@@ -5154,6 +5166,15 @@ cmd_asn() {
         [ -n "$a" ] && { echo "$a"; return 0; }
     fi
     local a=$(lua /usr/share/zapret2wizard/evolve.lua asn /tmp/blockcheckw_status.json 2>/dev/null)
+    if [ -z "$a" ] || [ "$a" = "AS0" ]; then
+        # status.json может быть без isp/netcheck: добираем ASN внешним API.
+        local raw=""
+        raw=$(curl -4 -sS -m 5 https://ipinfo.io/org 2>/dev/null)
+        [ -n "$raw" ] || raw=$(curl -4 -sS -m 5 https://ipapi.co/asn/ 2>/dev/null)
+        a=$(printf '%s' "$raw" | grep -o 'AS[0-9][0-9]*' | head -n 1)
+        [ -n "$a" ] && mkdir -p /etc/zapret2wizard 2>/dev/null && printf 'ASN %s
+' "$a" > /etc/zapret2wizard/provider 2>/dev/null
+    fi
     [ -n "$a" ] || a="AS0"
     echo "$a"
 }
@@ -5330,11 +5351,37 @@ cmd_evolve_import() {
 # Комплексная проверка «YouTube глазами роутера»: веб, превью, API, CDN.
 # Ничего не меняет и не трогает чужие службы — только измеряет.
 _yt_probe() {
-    if command -v curl >/dev/null 2>&1; then
-        curl -4 -s -o /dev/null -m 8 -w '%{http_code} %{size_download} %{time_total}' "$1" 2>/dev/null
-    else
-        printf '000 0 0'
+    # Аудит должен смотреть глазами LAN-клиента: локальный curl роутера
+    # обходит postrouting/NFQUEUE и всегда даёт ложный 000.
+    local url="$1" host json code bytes
+    host=$(printf '%s' "$url" | sed -e 's|^https*://||' -e 's|/.*||')
+    [ -n "$host" ] || { printf '000 0 0'; return; }
+    local allow=""
+    case "$host" in *youtubei.googleapis.com*|*googleapis.com*) allow="--allow-4xx" ;; esac
+    json=$(client_probe_netns "$host" $allow 2>/dev/null | tail -1)
+    code=$(printf '%s' "$json" | sed -n 's/.*"code":"\([0-9]*\)".*/\1/p')
+    bytes=$(printf '%s' "$json" | sed -n 's/.*"bytes":\([0-9][0-9]*\).*/\1/p')
+    [ -n "$bytes" ] || bytes=$(printf '%s' "$json" | sed -n 's/.*"bytes":"\([0-9][0-9]*\)".*/\1/p')
+    [ -n "$bytes" ] || bytes=0
+    if [ -n "$code" ] && [ "$code" != "000" ]; then
+        printf '%s %s 0' "$code" "$bytes"
+        return
     fi
+    # veth может отсутствовать (BUG-04): пробуем output-очередь.
+    # Последовательные аудиты одного хоста иногда оставляли stale-lock
+    # предыдущего output-зонда, поэтому убираем его перед и после вызова.
+    rm -rf /tmp/bcw_probe.lock
+    json=$(client_probe_output "$host" 2>/dev/null | tail -1)
+    rm -rf /tmp/bcw_probe.lock
+    code=$(printf '%s' "$json" | sed -n 's/.*"code":"\([0-9]*\)".*/\1/p')
+    bytes=$(printf '%s' "$json" | sed -n 's/.*"bytes":\([0-9][0-9]*\).*/\1/p')
+    [ -n "$bytes" ] || bytes=$(printf '%s' "$json" | sed -n 's/.*"bytes":"\([0-9][0-9]*\)".*/\1/p')
+    [ -n "$bytes" ] || bytes=0
+    if [ -n "$code" ] && [ "$code" != "000" ]; then
+        printf '%s %s 0' "$code" "$bytes"
+        return
+    fi
+    printf '000 0 0'
 }
 
 # Диагностика: идёт ли домен через туннель (без остановки служб).
@@ -5350,7 +5397,9 @@ cmd_tunnel_check() {
 
 cmd_youtube_audit() {
     local score=0 total=0 checks="" name url code bytes sec ok advice="ok" advice_text="всё в порядке"
-    local qm qr i=0
+    local qm qr i=0 _probe_timeout_old="$PROBE_TIMEOUT"
+    # Аудит не должен висеть по 25 с на заблокированном API.
+    PROBE_TIMEOUT=8
     # Сразу после restart/prepare движки поднимаются не мгновенно: без ожидания
     # аудит честно получает 000 и пугает пользователя ложной ошибкой.
     while [ "$i" -lt 10 ] && [ -z "$(our_engines)" ]; do
@@ -5390,6 +5439,7 @@ cmd_youtube_audit() {
         [ "$name" = "cdn" ] && [ "$code" = "000" ] && { advice="rescan_youtube"; advice_text="CDN YouTube не отвечает — запустите подбор заново"; }
         [ "$name" = "www" ] && [ "$point_reason" = "cap16" ] && { advice="rescan_youtube"; advice_text="ТСПУ обрывает поток YouTube на ~16 КБ — стратегия не держит поток, запустите подбор заново"; }
     done
+    PROBE_TIMEOUT="$_probe_timeout_old"
     qm=$(uci -q get zapret2wizard.main.quic_mode); [ -n "$qm" ] || qm=auto
     qr=$(uci -q get firewall.reject_quic.enabled); [ -n "$qr" ] || qr=?
     ok=false

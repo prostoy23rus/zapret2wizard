@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.36.17] (2026-11-18)
+
+### Аудит QA
+
+* `prune_services` больше не удаляет X/Twitch/YTApi/QUIC и DNS-пины Instagram; 
+* в output-зонде добавлен filter `mark 0x40000000`, устранён самозахват пакетов и ложный откат; 
+* `youtube_audit` и `fix_ytapi` используют клиентский путь; есть fallback через output-очередь без `kmod-veth`; 
+* DNS-пины идемпотентны: при неизменном IP нет commit/flash и рестарта dnsmasq; 
+* исправлены `res.code === 0` в LuCI, fallback ASN и вывод offloading в selftest.
+
 ## [0.36.16] (2026-11-17)
 
 ### Установщик

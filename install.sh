@@ -610,6 +610,17 @@ fi
 # сами из фида прошивки, а не просим пользователя делать это руками.
 modprobe nfnetlink_queue 2>/dev/null || true
 modprobe nft_queue 2>/dev/null || true
+# veth нужен только для точного клиентского netns-зонда; без него есть
+# fallback через output-очередь. Ставим best-effort, не валим установку.
+modprobe veth 2>/dev/null || true
+if [ ! -d /sys/module/veth ]; then
+    if command -v apk >/dev/null 2>&1; then
+        apk add kmod-veth >/dev/null 2>&1 || true
+    elif command -v opkg >/dev/null 2>&1; then
+        opkg install kmod-veth >/dev/null 2>&1 || true
+    fi
+    modprobe veth 2>/dev/null || true
+fi
 if [ ! -d /sys/module/nfnetlink_queue ] || [ ! -d /sys/module/nft_queue ]; then
     echo -e "${BLUE}ℹ${NC} Доустанавливаю модули ядра nfqueue (kmod-nfnetlink-queue, kmod-nft-queue)..."
     if [ -x /usr/bin/blockcheckw-helper ]; then

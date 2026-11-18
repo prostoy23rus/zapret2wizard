@@ -260,7 +260,7 @@ function getDoctor() {
 
 function getMetrics() {
 	return fs.exec(HELPER_BIN, ['metrics']).then(function(res) {
-		if (res && res.code === 0 && res.stdout) {
+		if (res && res.code == 0 && res.stdout) {
 			try {
 				var parsed = JSON.parse(res.stdout);
 				if (parsed && typeof parsed === 'object') {
@@ -276,7 +276,7 @@ function getMetrics() {
 
 function getLogs() {
 	return fs.exec(HELPER_BIN, ['logs']).then(function(res) {
-		if (res && res.code === 0 && res.stdout) {
+		if (res && res.code == 0 && res.stdout) {
 			try {
 				return JSON.parse(res.stdout);
 			} catch (e) {
@@ -296,7 +296,7 @@ function getLogs() {
 
 function checkVersion() {
 	return fs.exec(HELPER_BIN, ['check_update']).then(function(res) {
-		if (res && res.code === 0 && res.stdout) {
+		if (res && res.code == 0 && res.stdout) {
 			try {
 				return JSON.parse(res.stdout);
 			} catch (e) {
