@@ -6994,6 +6994,16 @@ if [ "${BCW_LIB_ONLY:-0}" = "1" ]; then
     return 0 2>/dev/null || exit 0
 fi
 
+# Ограничиваем /tmp/blockcheckw_run.log: при интенсивном подборе он рос
+# без предела. Ротация только при новом вызове, один старый файл.
+if [ -f "$LOG_FILE" ]; then
+    _log_sz=$(wc -c < "$LOG_FILE" 2>/dev/null || echo 0)
+    if [ "${_log_sz:-0}" -gt 262144 ] 2>/dev/null; then
+        mv -f "$LOG_FILE" "$LOG_FILE.old" 2>/dev/null || true
+        : > "$LOG_FILE"
+    fi
+fi
+
 case "$1" in
     start) shift; cmd_start "$@" ;;
     start_bg) shift; cmd_start_bg "$@" ;;
@@ -7048,7 +7058,7 @@ gv_fix) cmd_gv_fix ;;
     dns_fix_instagram) dns_fix_instagram ;;
     dns_fix_discord) dns_fix_discord ;;
     client_probe) shift; client_probe_output "$1" ;;
-    client_probe_netns) shift; client_probe_netns "$1" ;;
+    client_probe_netns) shift; client_probe_netns "$@" ;;
     save_good) shift; cmd_save_good "$1" ;;
     restore_good) cmd_restore_good ;;
     postinstall) cmd_postinstall ;;

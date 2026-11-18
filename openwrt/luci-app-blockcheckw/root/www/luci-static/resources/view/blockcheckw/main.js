@@ -1356,7 +1356,9 @@ return view.extend({
 			{ id: 'preset_youtube', icon: '📺', name: 'YouTube' },
 			{ id: 'preset_discord', icon: '💬', name: 'Discord' },
 			{ id: 'preset_instagram', icon: '📸', name: 'Instagram' },
-			{ id: 'preset_youtubei', icon: '🧩', name: 'YouTube API' }
+			{ id: 'preset_youtubei', icon: '🧩', name: 'YouTube API' },
+			{ id: 'preset_x', icon: '𝕏', name: 'X (Twitter)' },
+			{ id: 'preset_twitch', icon: '🎮', name: 'Twitch' }
 		];
 
 		var chipButtonsMap = {};

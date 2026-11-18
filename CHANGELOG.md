@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.36.21] (2026-11-18)
+
+* ротация `/tmp/blockcheckw_run.log` после 256 КБ; 
+* цели сканера X (Twitter) и Twitch в LuCI; 
+* `kmod-veth` в зависимостях пакета для client-path аудита.
+
 ## [0.36.20] (2026-11-18)
 
 * YouTube API добавлен в `services` и список сервисов LuCI; 

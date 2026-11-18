@@ -1,11 +1,11 @@
 {
-  "version": "0.36.20",
+  "version": "0.36.21",
   "release_date": "2026-11-18",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "YouTube API отображается в списке сервисов как настроенный",
-    "youtubei hostlist и YTApi включены в info/UI",
-    "Информация о YouTube API: домен, секция, статус"
+    "Ротация /tmp/blockcheckw_run.log при 256 КБ",
+    "X (Twitter) и Twitch добавлены в цели сканера LuCI",
+    "kmod-veth добавлен в зависимости пакета для точного клиентского netns-зонда"
   ]
 }
