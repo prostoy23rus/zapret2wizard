@@ -1,11 +1,12 @@
 {
-  "version": "0.36.18",
+  "version": "0.36.19",
   "release_date": "2026-11-18",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "ASN fallback: не парсить ASN как голый AS",
-    "Аудит QA: сохранение стратегий, mark-фильтр зонда, клиентский YouTube-аудит, идемпотентные DNS-пины",
-    "Установщик: DNS-сбой не откатывает helper/UI/конфиг службы"
+    "YouTube API как отдельная цель сканера и кнопка в LuCI",
+    "Apply YTApi: отдельная секция, hostlist ytapi_hostlist, уникальные исключения",
+    "Сканер preset_youtubei и сохранение рабочей стратегии как YTApi",
+    "Проверка через клиентский путь; API открывается 405 при рабочем профиле"
   ]
 }
