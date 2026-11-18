@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.36.20] (2026-11-18)
+
+* YouTube API добавлен в `services` и список сервисов LuCI; 
+* hostlist `ytapi_hostlist` учитывается в информации и UI; 
+* переключатель YouTube API работает через `toggle youtubei`.
+
 ## [0.36.19] (2026-11-18)
 
 ### YouTube API

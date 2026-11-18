@@ -2939,7 +2939,7 @@ cmd_activate() {
 
     local base_sec=""
     case "$target" in
-        preset_youtubei|ytapi) base_sec="YTApi" ;;
+        preset_youtubei|ytapi|youtubei) base_sec="YTApi" ;;
         preset_youtube|youtube) base_sec="BlockcheckW_YouTube" ;;
         preset_discord|discord) base_sec="BlockcheckW_Discord" ;;
         preset_twitch|twitch) base_sec="BlockcheckW_Twitch" ;;
@@ -3767,7 +3767,7 @@ cmd_toggle_service() {
     local target="${1:-}"
     local base_sec=""
     case "$target" in
-        preset_youtubei|ytapi) base_sec="YTApi" ;;
+        preset_youtubei|ytapi|youtubei) base_sec="YTApi" ;;
         preset_youtube|youtube) base_sec="BlockcheckW_YouTube" ;;
         preset_discord|discord) base_sec="BlockcheckW_Discord" ;;
         preset_twitch|twitch) base_sec="BlockcheckW_Twitch" ;;
@@ -5173,6 +5173,7 @@ _info_sec_key() {
         BlockcheckW_Instagram) echo instagram ;;
         BlockcheckW_General) echo builtin ;;
         BlockcheckW_User*) echo user ;;
+        YTApi) echo youtubei ;;
         *) echo custom ;;
     esac
 }
@@ -6039,6 +6040,7 @@ cmd_info() {
             { key = "discord", name = "Discord", fname = "zapret_hosts_discord.txt", uci_sec = "list_hosts_discord" },
             { key = "x", name = "X (Twitter)", fname = "zapret_hosts_x.txt", uci_sec = "list_hosts_x" },
             { key = "instagram", name = "Instagram", fname = "zapret_hosts_instagram.txt", uci_sec = "list_hosts_instagram" },
+            { key = "ytapi", name = "YouTube API", fname = "zapret_hosts_ytapi.txt", uci_sec = "ytapi_hostlist" },
             { key = "twitch", name = "Twitch", fname = "zapret_hosts_twitch.txt", uci_sec = "list_hosts_twitch" },
             { key = "user", name = "Общие сайты (User)", fname = "zapret_hosts_user.txt", uci_sec = "list_hosts_user" },
             { key = "exclude", name = "Исключения (не обходить)", fname = "zapret_hosts_user_exclude.txt", uci_sec = "list_hosts_user_exclude" }
@@ -6115,6 +6117,8 @@ cmd_info() {
             x = { base = "BlockcheckW_X", name = "X (Twitter)" },
             preset_instagram = { base = "BlockcheckW_Instagram", name = "Предустановленный список Instagram (2)" },
             instagram = { base = "BlockcheckW_Instagram", name = "Instagram" },
+            preset_youtubei = { base = "YTApi", name = "YouTube API" },
+            youtubei = { base = "YTApi", name = "YouTube API" },
             tcp16 = { base = "BlockcheckW_TCP16", name = "Лимит данных (16 КБ)" },
             domains = { base = "BlockcheckW_Custom", name = "Свои домены" },
             custom = { base = "BlockcheckW_Custom", name = "Свои домены" },

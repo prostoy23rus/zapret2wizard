@@ -1,12 +1,11 @@
 {
-  "version": "0.36.19",
+  "version": "0.36.20",
   "release_date": "2026-11-18",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "YouTube API как отдельная цель сканера и кнопка в LuCI",
-    "Apply YTApi: отдельная секция, hostlist ytapi_hostlist, уникальные исключения",
-    "Сканер preset_youtubei и сохранение рабочей стратегии как YTApi",
-    "Проверка через клиентский путь; API открывается 405 при рабочем профиле"
+    "YouTube API отображается в списке сервисов как настроенный",
+    "youtubei hostlist и YTApi включены в info/UI",
+    "Информация о YouTube API: домен, секция, статус"
   ]
 }

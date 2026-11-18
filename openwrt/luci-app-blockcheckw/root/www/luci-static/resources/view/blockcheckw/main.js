@@ -1374,6 +1374,7 @@ return view.extend({
 		// Ключ списка доменов отличается от ключа сервиса (у builtin это user).
 		function rowHostlistKey(id) {
 			if (id === 'builtin') return 'user';
+			if (id === 'preset_youtubei') return 'ytapi';
 			if (id === 'domains' || id === 'test_strategy') return null;
 			return String(id).replace(/^preset_/, '');
 		}
@@ -3008,7 +3009,8 @@ return view.extend({
 		var SERVICES_CONFIG = [
 			{ key: 'youtube', altKey: 'preset_youtube', name: 'YouTube', icon: '📺', uciBase: 'BlockcheckW_YouTube', desc: 'Видеопотоки, превью и плеер', hostlistKey: 'youtube', targetId: 'preset_youtube', portDefault: 'TCP 443' },
 			{ key: 'discord', altKey: 'preset_discord', name: 'Discord', icon: '💬', uciBase: 'BlockcheckW_Discord', desc: 'Чат, медиа и голосовые шлюзы', hostlistKey: 'discord', targetId: 'preset_discord', portDefault: 'TCP 443 + UDP' },
-			{ key: 'instagram', altKey: 'preset_instagram', name: 'Instagram', icon: '📸', uciBase: 'BlockcheckW_Instagram', desc: 'Лента, Stories, Reels и CDN', hostlistKey: 'instagram', targetId: 'preset_instagram', portDefault: 'TCP 443' }
+			{ key: 'instagram', altKey: 'preset_instagram', name: 'Instagram', icon: '📸', uciBase: 'BlockcheckW_Instagram', desc: 'Лента, Stories, Reels и CDN', hostlistKey: 'instagram', targetId: 'preset_instagram', portDefault: 'TCP 443' },
+			{ key: 'youtubei', altKey: 'preset_youtubei', name: 'YouTube API', icon: '🧩', uciBase: 'YTApi', desc: 'API приложения YouTube', hostlistKey: 'ytapi', targetId: 'preset_youtubei', portDefault: 'TCP 443' }
 		];
 
 		function updateActiveStrategyDisplay() {
