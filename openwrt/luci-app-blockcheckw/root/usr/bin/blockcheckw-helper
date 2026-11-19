@@ -1229,8 +1229,8 @@ cmd_start() {
     done
 
     case "$target" in
-        preset_youtube|youtube|preset_discord|discord|preset_instagram|instagram|preset_youtubei|ytapi) ;;
-        *) echo '{"error":"поддерживаются YouTube, Discord, Instagram и YouTube API"}'; return 1 ;;
+        preset_youtube|youtube|preset_discord|discord|preset_instagram|instagram|preset_youtubei|ytapi|preset_x|x|preset_twitch|twitch) ;;
+        *) echo '{"error":"поддерживаются YouTube, Discord, Instagram, YouTube API, X и Twitch"}'; return 1 ;;
     esac
 
     # Clean domain if user entered multiple or dirty string
@@ -2625,8 +2625,8 @@ cmd_apply() {
         return 1
     fi
     case "$target" in
-        preset_youtube|youtube|preset_discord|discord|preset_instagram|instagram|preset_youtubei|ytapi) ;;
-        *) echo '{"success":false,"error":"поддерживаются только YouTube, Discord, Instagram и YouTube API"}'; return 1 ;;
+        preset_youtube|youtube|preset_discord|discord|preset_instagram|instagram|preset_youtubei|ytapi|preset_x|x|preset_twitch|twitch) ;;
+        *) echo '{"success":false,"error":"поддерживаются только YouTube, Discord, Instagram, YouTube API, X и Twitch"}'; return 1 ;;
     esac
 
     # Backup zapret2 config
@@ -5282,7 +5282,7 @@ cmd_catalog_fetch() {
         return 1
     fi
 
-    local provider=$(lua "$evo" provider /tmp/blockcheckw_status.json 2>/dev/null)
+    local provider=$(evolve_provider)
     [ -n "$provider" ] || provider="default"
     local res
     res=$(lua "$evo" import "$genomes" "$provider" "$tmp" 2>/dev/null)
@@ -5297,7 +5297,7 @@ cmd_catalog_export() {
     local out="/tmp/bcw_catalog_export.json"
     local evo="/usr/share/zapret2wizard/evolve.lua"
     local genomes="/etc/zapret2wizard/genomes.json"
-    local provider=$(lua "$evo" provider /tmp/blockcheckw_status.json 2>/dev/null)
+    local provider=$(evolve_provider)
     [ -n "$provider" ] || provider="default"
 
     lua "$evo" export "$genomes" "$provider" 1 "$asn" > "$out" 2>/dev/null
@@ -5374,7 +5374,7 @@ cmd_evolve_export() {
     local min_ok="${1:-1}"
     local evo="/usr/share/zapret2wizard/evolve.lua"
     local genomes="/etc/zapret2wizard/genomes.json"
-    local provider=$(lua "$evo" provider /tmp/blockcheckw_status.json 2>/dev/null)
+    local provider=$(evolve_provider)
     [ -n "$provider" ] || provider="default"
     lua "$evo" export "$genomes" "$provider" "$min_ok" 2>/dev/null
 }
@@ -5406,7 +5406,7 @@ cmd_evolve_import() {
         return 1
     fi
 
-    local provider=$(lua "$evo" provider /tmp/blockcheckw_status.json 2>/dev/null)
+    local provider=$(evolve_provider)
     [ -n "$provider" ] || provider="default"
     lua "$evo" import "$genomes" "$provider" "$tmp" 2>/dev/null
     rm -f "$tmp"
@@ -5520,7 +5520,7 @@ cmd_genome_args() {
     local id="$1"
     local evo="/usr/share/zapret2wizard/evolve.lua"
     local genomes="/etc/zapret2wizard/genomes.json"
-    local provider=$(lua "$evo" provider /tmp/blockcheckw_status.json 2>/dev/null)
+    local provider=$(evolve_provider)
     [ -n "$provider" ] || provider="default"
     lua "$evo" args "$genomes" "$provider" "$id" 2>/dev/null
 }
@@ -5531,7 +5531,7 @@ cmd_genome_apply() {
     local target="${2:-preset_youtube}"
     local evo="/usr/share/zapret2wizard/evolve.lua"
     local genomes="/etc/zapret2wizard/genomes.json"
-    local provider=$(lua "$evo" provider /tmp/blockcheckw_status.json 2>/dev/null)
+    local provider=$(evolve_provider)
     [ -n "$provider" ] || provider="default"
 
     local json=$(lua "$evo" args "$genomes" "$provider" "$id" 2>/dev/null)
@@ -5604,7 +5604,7 @@ cmd_strategy_set() {
 cmd_evolve_status() {
     local evo="/usr/share/zapret2wizard/evolve.lua"
     local genomes="/etc/zapret2wizard/genomes.json"
-    local provider=$(lua "$evo" provider /tmp/blockcheckw_status.json 2>/dev/null)
+    local provider=$(evolve_provider)
     [ -n "$provider" ] || provider="default"
     lua "$evo" status "$genomes" "$provider" 2>/dev/null || echo '{"provider":"default","running":false,"history":[],"top":[]}'
 }
@@ -5655,7 +5655,7 @@ cmd_evolve_nightly() {
 
     local evo="/usr/share/zapret2wizard/evolve.lua"
     local genomes="/etc/zapret2wizard/genomes.json"
-    local provider=$(lua "$evo" provider /tmp/blockcheckw_status.json 2>/dev/null)
+    local provider=$(evolve_provider)
     [ -n "$provider" ] || provider="default"
 
     # «свободный канал»: по дню выбираем сервис с наименьшим числом проверок
@@ -5772,6 +5772,21 @@ cmd_service() {
     esac
 }
 
+# Провайдер для эволюции: активный статус может быть пустым/auto_unknown.
+# В этом случае берём реальный ASN, чтобы геномы копились в AS12389, а не
+# в необщей секции auto_unknown.
+evolve_provider() {
+    local p
+    p=$(lua /usr/share/zapret2wizard/evolve.lua provider /tmp/blockcheckw_status.json 2>/dev/null)
+    case "$p" in
+        ""|"auto_unknown"|"unknown"|"default")
+            p=$(cmd_asn 2>/dev/null)
+            ;;
+    esac
+    [ -n "$p" ] || p="AS0"
+    echo "$p"
+}
+
 cmd_evolve() {
     local target="preset_youtube" count=16 verify_n=3 tests=3 pause=2
     while [ "$#" -gt 0 ]; do
@@ -5800,7 +5815,7 @@ cmd_evolve() {
     fi
 
     local genomes="/etc/zapret2wizard/genomes.json"
-    local provider=$(lua "$evo" provider /tmp/blockcheckw_status.json 2>/dev/null)
+    local provider=$(evolve_provider)
     [ -n "$provider" ] || provider="default"
 
     local corpus="/tmp/bcw_evolve_corpus.txt"

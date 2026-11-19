@@ -847,7 +847,8 @@ if [ "${STRATS:-0}" -eq 0 ] && [ "${AUTOSETUP:-1}" != "0" ] && [ -x /usr/bin/blo
 fi
 
 # Определение локального IP-адреса роутера
-ROUTER_IP=$(uci get network.lan.ipaddr 2>/dev/null || echo "192.168.1.1")
+ROUTER_IP=$(uci get network.lan.ipaddr 2>/dev/null | cut -d/ -f1)
+[ -n "$ROUTER_IP" ] || ROUTER_IP="192.168.1.1"
 
 echo -e "\n${GREEN}${BOLD}==============================================================================${NC}"
 echo -e "${GREEN}${BOLD}        Zapret2Wizard и LuCI интерфейс успешно установлены!                    ${NC}"

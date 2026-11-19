@@ -1,11 +1,12 @@
 {
-  "version": "0.36.21",
-  "release_date": "2026-11-18",
+  "version": "0.36.22",
+  "release_date": "2026-11-19",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "Ротация /tmp/blockcheckw_run.log при 256 КБ",
-    "X (Twitter) и Twitch добавлены в цели сканера LuCI",
-    "kmod-veth добавлен в зависимости пакета для точного клиентского netns-зонда"
+    "Исправлен URL установщика при CIDR-адресе LAN",
+    "Эволюция использует реальный ASN провайдера вместо auto_unknown",
+    "Разрешены цели сканирования X (Twitter) и Twitch в helper",
+    "Добавлен отчёт QA v2"
   ]
 }
