@@ -5779,7 +5779,7 @@ evolve_provider() {
     local p
     p=$(lua /usr/share/zapret2wizard/evolve.lua provider /tmp/blockcheckw_status.json 2>/dev/null)
     case "$p" in
-        ""|"auto_unknown"|"unknown"|"default")
+        ""|auto_*|"unknown"|"default")
             p=$(cmd_asn 2>/dev/null)
             ;;
     esac
