@@ -1,11 +1,11 @@
 {
-  "version": "0.36.23",
-  "release_date": "2026-11-19",
+  "version": "0.36.24",
+  "release_date": "2026-11-20",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "Эволюция: fallback на ASN для auto_* провайдеров",
-    "X/Twitch: backend принимает цели сканера",
-    "Установщик: CIDR-маска убрана из URL"
+    "Применение стратегии больше не падает по XHR timeout при обрыве rpcd",
+    "apply_status различает фоновый процесс и неудачный старт",
+    "Фолбэк запуска apply без setsid"
   ]
 }

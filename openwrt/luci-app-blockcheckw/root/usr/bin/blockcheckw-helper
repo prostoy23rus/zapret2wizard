@@ -2570,21 +2570,34 @@ client_probe_netns() {
 
 cmd_apply_bg() {
     rm -f /tmp/bcw_apply_done /tmp/bcw_apply_result.json /tmp/bcw_apply_err.log 2>/dev/null || true
+    # Маркер старта: по нему apply_status отличает «идёт» от «не запустился».
+    : > /tmp/bcw_apply_started
     # Отдельная сессия + закрытие унаследованных fd 3..9: иначе LuCI fs.exec
     # держит pipe/ждёт процесс и UI получает XHR timeout.
-    setsid sh -c '
-        exec 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&-;
-        /usr/bin/blockcheckw-helper apply "$@" >/tmp/bcw_apply_result.json 2>/tmp/bcw_apply_err.log;
-        echo done >/tmp/bcw_apply_done
-    ' bcw "$@" </dev/null >/dev/null 2>&1 &
+    if command -v setsid >/dev/null 2>&1; then
+        setsid sh -c '
+            exec 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&-;
+            /usr/bin/blockcheckw-helper apply "$@" >/tmp/bcw_apply_result.json 2>/tmp/bcw_apply_err.log;
+            echo done >/tmp/bcw_apply_done
+        ' bcw "$@" </dev/null >/dev/null 2>&1 &
+    else
+        sh -c '
+            exec 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&-;
+            /usr/bin/blockcheckw-helper apply "$@" >/tmp/bcw_apply_result.json 2>/tmp/bcw_apply_err.log;
+            echo done >/tmp/bcw_apply_done
+        ' bcw "$@" </dev/null >/dev/null 2>&1 &
+    fi
     echo '{"success":true,"started":true}'
 }
 
 cmd_apply_status() {
     if [ -f /tmp/bcw_apply_done ]; then
+        rm -f /tmp/bcw_apply_started 2>/dev/null || true
         cat /tmp/bcw_apply_result.json 2>/dev/null || echo '{"success":false,"error":"пустой результат apply"}'
-    else
+    elif [ -f /tmp/bcw_apply_started ]; then
         echo '{"pending":true}'
+    else
+        echo '{"pending":false,"success":false,"error":"apply не запускался"}'
     fi
 }
 

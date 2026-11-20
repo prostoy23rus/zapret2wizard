@@ -3903,6 +3903,13 @@ return view.extend({
 					ui.addNotification(null, E('p', {}, '✗ Не удалось запустить применение: ' + (started.error || 'ошибка')), 'danger');
 					return null;
 				}
+				return started;
+			}, function() {
+				// rpcd может оборвать вызов по таймауту, хотя фоновый apply уже
+				// стартовал. Не считаем это ошибкой — опрашиваем apply_status.
+				return { started: true, rpc_timeout: true };
+			}).then(function(started) {
+				if (!started || !started.started) return null;
 				return new Promise(function(resolve, reject) {
 					var tries = 0;
 					function poll() {
