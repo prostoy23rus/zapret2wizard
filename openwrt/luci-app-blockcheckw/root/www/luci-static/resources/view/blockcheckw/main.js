@@ -4646,7 +4646,10 @@ return view.extend({
 				var status = E('div', { style: 'font-size: 12px; margin-top: 6px; color: #abb2bf;' }, '');
 				if (hl.key === 'user') {
 					var builtinSvc = (zapretInfo && zapretInfo.services) ? zapretInfo.services.builtin : null;
-					var builtinReady = builtinSvc && builtinSvc.script && String(builtinSvc.script).trim() !== '';
+					// fallback-секция Routerich_circular не означает, что User-список
+					// реально применяется: нужна именно BlockcheckW_General.
+					var builtinReady = builtinSvc && builtinSvc.script && String(builtinSvc.script).trim() !== '' &&
+						String(builtinSvc.section || '').indexOf('BlockcheckW_General') === 0;
 					if (builtinReady) {
 						status.textContent = 'Применяется стратегией «Встроенные хосты».';
 					} else {

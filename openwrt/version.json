@@ -1,10 +1,10 @@
 {
-  "version": "0.36.27",
+  "version": "0.36.28",
   "release_date": "2026-11-21",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "User-список показывает, настроена ли цель «Встроенные хосты»",
-    "Предупреждение, если домены User сейчас не обходятся"
+    "User-список предупреждает, если BlockcheckW_General отсутствует",
+    "Fallback Routerich_circular не считается настроенной целью"
   ]
 }
