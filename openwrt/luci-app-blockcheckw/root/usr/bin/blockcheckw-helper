@@ -2061,7 +2061,16 @@ EOF
                 fi
                 if [ -z "$last_err" ]; then
                     case "$exit_code" in
-                        6) last_err="Предполётная проверка не прошла: нет движка nfqws2, модулей nfqueue или nftables. Запустите blockcheckw-helper doctor" ;;
+                        6)
+                            # Конкретную причину предполётная проверка уже записала в
+                            # status.json ("Проверка перед подбором не прошла: ..."),
+                            # показываем её, а не общий текст (issue #6).
+                            local _pre=$(grep -o '"phase":"[^"]*"' "$STATUS_FILE" 2>/dev/null | head -n 1 | sed 's/"phase":"//; s/"$//')
+                            case "$_pre" in
+                                "Проверка перед подбором"*) last_err="$_pre" ;;
+                                *) last_err="Предполётная проверка не прошла: нет движка nfqws2, модулей nfqueue или nftables. Запустите blockcheckw-helper doctor" ;;
+                            esac
+                            ;;
                         *) last_err="Код ошибки $exit_code — запустите blockcheckw-helper doctor для диагностики" ;;
                     esac
                 fi
@@ -2456,6 +2465,7 @@ client_probe_output() {
         preset_instagram|instagram) host="www.instagram.com"; url="https://www.instagram.com/"; min=50000 ;;
         preset_twitch|twitch) host="www.twitch.tv"; url="https://www.twitch.tv/"; min=30000 ;;
         preset_x|x) host="x.com"; url="https://x.com/"; min=10000 ;;
+        builtin|general) host="rutracker.org"; url="https://rutracker.org/"; min=1000 ;;
         *) host="$target"; url="https://$target/"; min=1000 ;;
     esac
     command -v nft >/dev/null 2>&1 || { echo '{"ok":false,"error":"nft missing"}'; return 1; }
@@ -2530,6 +2540,7 @@ client_probe_netns() {
         preset_instagram|instagram) host="www.instagram.com"; url="https://www.instagram.com/"; min=50000 ;;
         preset_twitch|twitch) host="www.twitch.tv"; url="https://www.twitch.tv/"; min=30000 ;;
         preset_x|x) host="x.com"; url="https://x.com/"; min=10000 ;;
+        builtin|general) host="rutracker.org"; url="https://rutracker.org/"; min=1000 ;;
         *) host="$target"; url="https://$target/"; min=1000 ;;
     esac
     command -v ip >/dev/null 2>&1 || { echo '{"ok":false,"error":"ip missing"}'; return 1; }
@@ -3896,10 +3907,14 @@ _conflict_pkg_list() {
 
 cmd_conflicts() {
     local services="" svc run svc_running=0
+    # Сторонние init-скрипты могут висеть на procd-локе — ограничиваем
+    # время, иначе doctor сам зависает (issue #6: "Ошибка вызова helper").
+    local tmo_cmd=""
+    command -v timeout >/dev/null 2>&1 && tmo_cmd="timeout 3"
     for svc in zapret2 zapret zapret-manager blockcheck; do
         [ -x "/etc/init.d/$svc" ] || continue
         run=0
-        /etc/init.d/"$svc" running >/dev/null 2>&1 && run=1
+        $tmo_cmd /etc/init.d/"$svc" running >/dev/null 2>&1 && run=1
         [ "$run" = "1" ] && svc_running=1
         services="$services{\"name\":\"$svc\",\"running\":$run},"
     done
@@ -4890,7 +4905,9 @@ cmd_doctor() {
 
     if ls /etc/rc.d/ 2>/dev/null | grep -q zapret2wizard; then add_check "автозапуск" 1 "включён" ""; else add_check "автозапуск" 0 "выключен" "Включите: /etc/init.d/zapret2wizard enable"; fi
 
-    local foreign=$(blockcheckw-helper conflicts 2>/dev/null | grep -o '"foreign":[0-9]*' | cut -d: -f2)
+    local _tmo_c=""
+    command -v timeout >/dev/null 2>&1 && _tmo_c="timeout 5"
+    local foreign=$($_tmo_c blockcheckw-helper conflicts 2>/dev/null | grep -o '"foreign":[0-9]*' | cut -d: -f2)
     add_check "чужие движки" 1 "${foreign:-0} шт. — не трогаем" ""
 
     checks="[${checks%,}]"

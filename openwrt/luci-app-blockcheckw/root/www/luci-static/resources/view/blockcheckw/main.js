@@ -4142,7 +4142,12 @@ return view.extend({
 					} else if (out.rolled_back) {
 						var vinfo = (out.client_probe && out.client_probe.video) || {};
 						var vreason = vinfo && vinfo.video_code ? ' (googlevideo: ' + vinfo.video_code + ')' : '';
-						ui.addNotification(null, E('p', {}, '⚠ Стратегия не подняла видео' + vreason + ' — прежняя конфигурация восстановлена. Выберите другую стратегию.'), 'warning');
+						// «Видео» говорим только для YouTube: для встроенных хостов/Discord
+						// проверка другая, и текст про видео только путал (issue #5).
+						var rbmsg = (currentTarget === 'preset_youtube' || currentTarget === 'youtube')
+							? ('⚠ Стратегия не подняла видео' + vreason + ' — прежняя конфигурация восстановлена. Выберите другую стратегию.')
+							: '⚠ Стратегия не подтвердила трафик — прежняя конфигурация восстановлена. Выберите другую стратегию.';
+						ui.addNotification(null, E('p', {}, rbmsg), 'warning');
 					} else {
 						ui.addNotification(null, E('p', {}, '⚠ Стратегия записана, но трафик не подтвердился — проверьте сервис'), 'warning');
 					}

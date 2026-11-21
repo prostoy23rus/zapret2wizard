@@ -95,7 +95,7 @@ OUTFILE="$OUT/${PKGNAME}_${VERSION}-r1_${ARCH}.apk"
     --info "origin:$PKGNAME" \
     --info "maintainer:prostoy23rus" \
     --info "url:https://github.com/prostoy23rus/zapret2wizard" \
-    --info "depends:nftables curl ca-bundle" \
+    --info "depends:nftables curl ca-bundle kmod-nfnetlink-queue kmod-nft-queue" \
     --script "post-install:$WORK/post-install" \
     --script "pre-deinstall:$WORK/pre-deinstall" \
     --files "$PAYLOAD" \
