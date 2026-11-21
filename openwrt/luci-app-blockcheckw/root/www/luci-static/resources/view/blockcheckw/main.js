@@ -2101,13 +2101,6 @@ return view.extend({
 		// Список найденных стратегий обязан быть в документе. Раньше resultsCard
 		// просто удаляли, и найденные профили некуда было выводить: счётчик
 		// «найдено 44» был, а списка и кнопок «Применить» — нет.
-		if (resultsCard) {
-			if (resultsCard.parentNode) resultsCard.parentNode.removeChild(resultsCard);
-			// Список стратегий — во всю ширину под блоком сканера: внутри узкой
-			// правой колонки (380px) карточки с аргументами нечитаемы.
-			resultsCard.style.marginTop = '4px';
-			resultsCard.style.width = '100%';
-			mainLayout.appendChild(resultsCard);
 		// ===== Класс ТСПУ провайдера (tspu_class) =====
 		function fmtTspuResult(d) {
 			if (!d || d.ok !== true) {
@@ -2173,7 +2166,7 @@ return view.extend({
 						'скопируйте узел до /videoplayback (например, rr1---sn-xxxx.googlevideo.com) → запустите «Определить класс ТСПУ» с этим узлом. ' +
 						'Красные ERR_CONNECTION_ABORTED на videoplayback — прямой признак, что узел нужно проверять отдельно.')
 				]));
-			}).catch(function() {});
+			}).catch(function() { if (!loadTspuReport._retried) { loadTspuReport._retried = true; setTimeout(loadTspuReport, 2500); } });
 		}
 
 		function startTspuClass() {
@@ -2266,6 +2259,15 @@ return view.extend({
 				}
 			});
 		}
+
+		if (resultsCard) {
+			if (resultsCard.parentNode) resultsCard.parentNode.removeChild(resultsCard);
+			// Список стратегий — во всю ширину под блоком сканера: внутри узкой
+			// правой колонки (380px) карточки с аргументами нечитаемы.
+			resultsCard.style.marginTop = '4px';
+			resultsCard.style.width = '100%';
+			mainLayout.appendChild(resultsCard);
+
 
 		// ===== Класс ТСПУ провайдера + Канарейка (порт tspu-class-test) =====
 		var tspuCardTitleRow = E('div', { style: 'display: flex; align-items: center; justify-content: space-between;' }, [

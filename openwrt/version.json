@@ -1,11 +1,11 @@
 {
-  "version": "0.37.1",
+  "version": "0.37.2",
   "release_date": "2026-11-21",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "КРИТИЧНО: исправлен ReferenceError startTspuClass is not defined — страница Zapret2Wizard не открывалась после 0.37.0",
-    "Самообновление службы: теперь обновляет init.d (хуки канарейки, modprobe veth) и файлы каталога/классификатора ТСПУ",
-    "modprobe veth при обновлении — тесты client_probe_netns работают без перезагрузки"
+    "Карточка «Класс ТСПУ» показывается: функции перенесены из if-блока в область render (strict mode = блоковая видимость), восстановлен JSON.parse",
+    "Классификатор понимает текстовый формат сканера (-o): «# HTTPS/TLS1.2 — N strategies» + строки стратегий",
+    "Ретрай загрузки отчёта класса при сбое RPC на старте страницы"
   ]
 }

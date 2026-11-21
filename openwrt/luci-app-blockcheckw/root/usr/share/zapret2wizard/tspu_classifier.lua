@@ -57,42 +57,79 @@ local n = #lst
 if n < 10 then fail("catalog too short: " .. n .. " lines") end
 
 -- ---- 2. Скан: протокол -> map[args] = true (только рабочие) ----
+-- Поддерживаем ДВА формата:
+--   A) JSON ({strategies:[{protocol,args}]} — отчёт scan/universal, merge в helper)
+--   B) текстовый файл сканера (-o): "# HTTPS/TLS1.2 — N strategies" + строки --payload...
 local passed = { tls12 = {}, tls13 = {} }
 local sf = io.open(scan_file, "r")
 if not sf then fail("scan file not found: " .. scan_file) end
-local d = json.parse(sf:read("*a"))
+local content = sf:read("*a") or ""
 sf:close()
-if not d or type(d) ~= "table" then fail("scan parse failed") end
 
-local strats = d.strategies
--- Формат A: плоский список {protocol, args} (scan/universal отчёты)
--- Формат B: protocols[] с вложенными strategies[] (полный scan отчёт)
-if not strats and type(d.protocols) == "table" then
-    strats = {}
-    for _, pr in ipairs(d.protocols) do
-        local pn = tostring(pr.protocol or "")
-        for _, s in ipairs(pr.strategies or {}) do
-            local a = (type(s) == "table" and s.args) or s
-            if a then strats[#strats + 1] = { protocol = pn, args = a } end
+local strats = {}   -- нормализованный список {protocol=..., args=...}
+local head = content:gsub("^%s+", ""):sub(1, 1)
+if head == "{" then
+    local d = json.parse(content)
+    if not d or type(d) ~= "table" then fail("scan parse failed") end
+    local list = d.strategies
+    -- Формат A: плоский список {protocol, args}
+    -- Формат B: protocols[] с вложенными strategies[]
+    if not list and type(d.protocols) == "table" then
+        list = {}
+        for _, pr in ipairs(d.protocols) do
+            local pn = tostring(pr.protocol or "")
+            for _, s in ipairs(pr.strategies or {}) do
+                local a = (type(s) == "table" and s.args) or s
+                if a then list[#list + 1] = { protocol = pn, args = a } end
+            end
+        end
+    end
+    for _, s in ipairs(list or {}) do
+        if type(s) == "table" then
+            strats[#strats + 1] = { protocol = tostring(s.protocol or ""), args = s.args or "" }
+        else
+            strats[#strats + 1] = { protocol = "", args = tostring(s) }
+        end
+    end
+else
+    -- Текстовый файл сканера: группировка по комментарию протокола
+    local cur_proto = ""
+    for line in content:gmatch("[^\r\n]+") do
+        local p12 = line:match("^#%s*HTTPS/TLS1%.2")
+        local p13 = line:match("^#%s*HTTPS/TLS1%.3")
+        if p12 then
+            cur_proto = "TLS1.2"
+        elseif p13 then
+            cur_proto = "TLS1.3"
+        else
+            local a = line:match("^%s*(%-%-[^\r\n]+)$")
+            if a then
+                strats[#strats + 1] = { protocol = cur_proto, args = a }
+            end
         end
     end
 end
-if not strats then strats = {} end
+
+if #strats == 0 then
+    -- пустой скан — это не ошибка: вердикт будет "не определён"
+end
 
 for _, s in ipairs(strats) do
-    if type(s) == "table" then
-        local a = s.args or s
-        local p = tostring(s.protocol or "")
+    local a = norm(s.args)
+    if a ~= "" then
         local key = nil
-        if p:find("TLS1.2") then key = "tls12"
-        elseif p:find("TLS1.3") then key = "tls13" end
-        if key then passed[key][norm(a)] = true end
-    else
-        -- строка без протокола: считаем прошедшей на обеих версиях
-        passed.tls12[norm(s)] = true
-        passed.tls13[norm(s)] = true
+        if s.protocol:find("TLS1.2") then key = "tls12"
+        elseif s.protocol:find("TLS1.3") then key = "tls13" end
+        if key then
+            passed[key][a] = true
+        else
+            -- протокол неизвестен: считаем прошедшей на обеих версиях
+            passed.tls12[a] = true
+            passed.tls13[a] = true
+        end
     end
 end
+
 
 -- ---- 3. Матчинг каталога ----
 local ok = { tls12 = {}, tls13 = {} }   -- ok[proto][k] = true, если прошла
