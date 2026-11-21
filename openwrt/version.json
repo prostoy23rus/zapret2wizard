@@ -1,10 +1,9 @@
 {
-  "version": "0.36.28",
+  "version": "0.36.29",
   "release_date": "2026-11-21",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "User-список предупреждает, если BlockcheckW_General отсутствует",
-    "Fallback Routerich_circular не считается настроенной целью"
+    "Редактор списка YouTube API больше не пишет Unknown hostlist target"
   ]
 }

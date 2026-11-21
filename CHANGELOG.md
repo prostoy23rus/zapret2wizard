@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.36.29] (2026-11-21)
+
+* `_hostlist_path` знает `ytapi`, `preset_youtubei` и `auto`; 
+* редактор YouTube API открывает `zapret_hosts_ytapi.txt` вместо ошибки.
+
 ## [0.36.28] (2026-11-21)
 
 * предупреждение User-списка учитывает наличие именно `BlockcheckW_General`, а не fallback `Routerich_circular`.

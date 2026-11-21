@@ -6827,6 +6827,8 @@ _hostlist_path() {
         youtube|preset_youtube) echo "/etc/zapret2wizard/ipset/zapret_hosts_youtube.txt" ;;
         discord|preset_discord) echo "/etc/zapret2wizard/ipset/zapret_hosts_discord.txt" ;;
         x|preset_x) echo "/etc/zapret2wizard/ipset/zapret_hosts_x.txt" ;;
+        ytapi|preset_youtubei|youtubei) echo "/etc/zapret2wizard/ipset/zapret_hosts_ytapi.txt" ;;
+        auto) echo "/etc/zapret2wizard/ipset/zapret_hosts_auto.txt" ;;
         instagram|preset_instagram) echo "/etc/zapret2wizard/ipset/zapret_hosts_instagram.txt" ;;
         twitch|preset_twitch) echo "/etc/zapret2wizard/ipset/zapret_hosts_twitch.txt" ;;
         user|general|builtin) echo "/etc/zapret2wizard/ipset/zapret_hosts_user.txt" ;;
