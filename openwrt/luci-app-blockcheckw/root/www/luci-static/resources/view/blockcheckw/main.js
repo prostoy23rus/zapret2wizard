@@ -1756,6 +1756,10 @@ return view.extend({
 			if (savedAuto === '1') autoApply = true;
 			else if (savedAuto === '0') autoApply = false;
 		} catch (x) {}
+		// Подсказка должна соответствовать уже загруженному состоянию switch.
+		if (autoApplyHintEl) {
+			autoApplyHintEl.textContent = autoApply ? 'Включено: найденная стратегия будет применена и проверена автоматически.' : 'Выключено: стратегия будет только найдена и показана — примените её вручную.';
+		}
 		var chkAutoApply = makeToggleSwitch(autoApply, function(v) {
 			autoApply = v;
 			try { localStorage.setItem('bcw_auto_apply', autoApply ? '1' : '0'); } catch (x) {}
