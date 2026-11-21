@@ -4645,7 +4645,14 @@ return view.extend({
 
 				var status = E('div', { style: 'font-size: 12px; margin-top: 6px; color: #abb2bf;' }, '');
 				if (hl.key === 'user') {
-					status.textContent = 'Список используется целью «Встроенные хосты». Чтобы применить его, выберите эту цель в сканере и запустите поиск/применение.';
+					var builtinSvc = (zapretInfo && zapretInfo.services) ? zapretInfo.services.builtin : null;
+					var builtinReady = builtinSvc && builtinSvc.script && String(builtinSvc.script).trim() !== '';
+					if (builtinReady) {
+						status.textContent = 'Применяется стратегией «Встроенные хосты».';
+					} else {
+						status.textContent = '⚠ Цель «Встроенные хосты» не настроена: домены из этого списка сейчас не обходятся. Выберите её в сканере и примените рабочую стратегию.';
+						status.style.color = '#e5c07b';
+					}
 				}
 				var area = E('textarea', {
 					rows: 6,
