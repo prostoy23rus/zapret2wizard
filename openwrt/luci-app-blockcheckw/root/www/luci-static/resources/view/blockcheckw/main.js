@@ -26,6 +26,34 @@ function parseHelperJson(res) {
 	return null;
 }
 
+// Переключатель в стиле iOS: используется для настроек Circular и авто-применения.
+function makeToggleSwitch(checked, onChange, ariaLabel) {
+	var sw = E('span', {
+		class: 'bcw-switch' + (checked ? ' on' : ''),
+		role: 'switch',
+		tabindex: '0',
+		'aria-label': ariaLabel || '',
+		'aria-checked': checked ? 'true' : 'false',
+		click: function(e) {
+			e.preventDefault();
+			set(!sw.classList.contains('on'));
+		},
+		keydown: function(e) {
+			if (e.key === ' ' || e.key === 'Enter') {
+				e.preventDefault();
+				set(!sw.classList.contains('on'));
+			}
+		}
+	}, [E('span', { class: 'bcw-switch-dot' })]);
+	function set(v) {
+		sw.classList.toggle('on', !!v);
+		sw.setAttribute('aria-checked', v ? 'true' : 'false');
+		if (onChange) onChange(!!v);
+	}
+	sw.setChecked = set;
+	return sw;
+}
+
 var PRESET_DEFS = {
 	'builtin': {
 		name: 'Встроенные хосты (33)',
@@ -1697,29 +1725,21 @@ return view.extend({
 			style: 'margin-top: 4px; font-size: 12px; color: #abb2bf;'
 		}, doCircular ? CIRC_HINT_ON : CIRC_HINT_OFF);
 
-		var chkCircular = E('input', {
-			type: 'checkbox',
-			id: 'bcw_chk_circular',
-			class: 'bcw-chk-input',
-			checked: doCircular,
-			change: function(e) {
-				doCircular = e.target.checked;
-				if (paramCircularHintEl) {
-					paramCircularHintEl.textContent = doCircular ? CIRC_HINT_ON : CIRC_HINT_OFF;
-				}
+		var chkCircular = makeToggleSwitch(doCircular, function(v) {
+			doCircular = v;
+			if (paramCircularHintEl) {
+				paramCircularHintEl.textContent = v ? CIRC_HINT_ON : CIRC_HINT_OFF;
 			}
-		});
+		}, 'Разрешить Circular-связку');
 
 		var circularToggleBox = E('div', {
 			style: 'display: flex; flex-direction: column; gap: 4px; padding: 12px 16px; background: var(--bcw-bg-card-inner); border: 1px solid var(--bcw-border-sub); border-radius: 8px;'
 		}, [
-			E('label', {
-				for: 'bcw_chk_circular',
+			E('div', {
 				class: 'bcw-chk-wrap',
 				style: 'margin: 0;'
 			}, [
 				chkCircular,
-				E('span', { class: 'bcw-chk-box' }),
 				E('span', { style: 'font-weight: 600; font-size: 13.5px; color: var(--bcw-text-title);' }, 'Разрешить Circular-связку (служба решит, нужна ли)')
 			]),
 			paramCircularHintEl
@@ -1731,34 +1751,26 @@ return view.extend({
 			class: 'bcw-param-hint',
 			style: 'margin-top: 4px; font-size: 12px; color: #abb2bf;'
 		}, autoApply ? 'Включено: найденная стратегия будет применена и проверена автоматически.' : 'Выключено: стратегия будет только найдена и показана — примените её вручную.');
-		var chkAutoApply = E('input', {
-			type: 'checkbox',
-			id: 'bcw_chk_autoapply',
-			class: 'bcw-chk-input',
-			checked: autoApply,
-			change: function(e) {
-				autoApply = e.target.checked;
-				try { localStorage.setItem('bcw_auto_apply', autoApply ? '1' : '0'); } catch (x) {}
-				if (autoApplyHintEl) {
-					autoApplyHintEl.textContent = autoApply ? 'Включено: найденная стратегия будет применена и проверена автоматически.' : 'Выключено: стратегия будет только найдена и показана — примените её вручную.';
-				}
-			}
-		});
 		try {
 			var savedAuto = localStorage.getItem('bcw_auto_apply');
-			if (savedAuto === '1') { autoApply = true; chkAutoApply.checked = true; }
-			else if (savedAuto === '0') { autoApply = false; chkAutoApply.checked = false; }
+			if (savedAuto === '1') autoApply = true;
+			else if (savedAuto === '0') autoApply = false;
 		} catch (x) {}
+		var chkAutoApply = makeToggleSwitch(autoApply, function(v) {
+			autoApply = v;
+			try { localStorage.setItem('bcw_auto_apply', autoApply ? '1' : '0'); } catch (x) {}
+			if (autoApplyHintEl) {
+				autoApplyHintEl.textContent = autoApply ? 'Включено: найденная стратегия будет применена и проверена автоматически.' : 'Выключено: стратегия будет только найдена и показана — примените её вручную.';
+			}
+		}, 'Автоматически применять найденную стратегию');
 		var autoApplyToggleBox = E('div', {
 			style: 'display: flex; flex-direction: column; gap: 4px; padding: 12px 16px; background: var(--bcw-bg-card-inner); border: 1px solid var(--bcw-border-sub); border-radius: 8px;'
 		}, [
-			E('label', {
-				for: 'bcw_chk_autoapply',
+			E('div', {
 				class: 'bcw-chk-wrap',
 				style: 'margin: 0;'
 			}, [
 				chkAutoApply,
-				E('span', { class: 'bcw-chk-box' }),
 				E('span', { style: 'font-weight: 600; font-size: 13.5px; color: var(--bcw-text-title);' }, 'Автоматически применять найденную стратегию')
 			]),
 			autoApplyHintEl
@@ -3349,7 +3361,7 @@ return view.extend({
 
 		function switchCircularMode(isCirc) {
 			doCircular = isCirc;
-			if (chkCircular) chkCircular.checked = isCirc;
+			if (chkCircular && chkCircular.setChecked) chkCircular.setChecked(isCirc);
 			if (paramCircularHintEl) {
 				paramCircularHintEl.textContent = isCirc
 					? '🔄 Circular: объединяет 2-3 независимые техники (Fake, Multisplit, Multidisorder) в ротацию. При сбое роутер на лету переключится на резервную.'

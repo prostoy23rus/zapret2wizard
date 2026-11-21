@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.36.31] (2026-11-21)
+
+* Circular и автоприменение теперь switch-переключатели; 
+* клик/Enter/Space и `aria-checked`; 
+* состояние автоприменения сохраняется в localStorage.
+
 ## [0.36.30] (2026-11-21)
 
 * `_hostlist_path` понимает ключ `user_exclude`; 
