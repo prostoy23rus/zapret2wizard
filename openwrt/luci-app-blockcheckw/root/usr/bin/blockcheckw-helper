@@ -7279,9 +7279,9 @@ cmd_canary_status() {
     fi
     local oks=0 fails=0 skips=0
     if [ -s "$CANARY_LOG" ]; then
-        oks=$(grep -c "— ОК" "$CANARY_LOG" 2>/dev/null || echo 0)
-        fails=$(grep -c "— СБОЙ" "$CANARY_LOG" 2>/dev/null || echo 0)
-        skips=$(grep -c "— пропуск" "$CANARY_LOG" 2>/dev/null || echo 0)
+        oks=$(grep -c "— ОК" "$CANARY_LOG" 2>/dev/null || true)
+        fails=$(grep -c "— СБОЙ" "$CANARY_LOG" 2>/dev/null || true)
+        skips=$(grep -c "— пропуск" "$CANARY_LOG" 2>/dev/null || true)
     fi
     local okn=$(echo "$oks" | tr -dc '0-9')
     local failn=$(echo "$fails" | tr -dc '0-9')

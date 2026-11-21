@@ -2275,11 +2275,11 @@ return view.extend({
 			E('div', { style: 'display: flex; gap: 6px; align-items: center;' }, [
 				E('button', {
 					class: 'btn cbi-button cbi-button-apply',
-					onclick: startTspuClass
+					click: startTspuClass
 				}, 'Определить класс ТСПУ'),
 				E('button', {
 					class: 'btn cbi-button cbi-button-neutral',
-					onclick: toggleCanary,
+					click: toggleCanary,
 					title: 'Мониторинг доступности: фоновый контроль живости стратегии'
 				}, 'Мониторинг доступности: —')
 			])
