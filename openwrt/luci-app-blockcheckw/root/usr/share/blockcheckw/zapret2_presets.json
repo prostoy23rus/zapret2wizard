@@ -1,6 +1,6 @@
 {
-  "version": "1.2",
-  "updated": "2026-11-06",
+  "version": "1.3",
+  "updated": "2026-11-21",
   "presets": {
     "builtin": {
       "name": "Встроенные хосты (33)",
@@ -46,7 +46,18 @@
         "--payload=tls_client_hello --lua-desync=hostfakesplit:host=vk.com:midhost=midsld",
         "--payload=tls_client_hello --lua-desync=rst:rstack:ip_autottl=-2,3-20",
         "--payload=tls_client_hello --lua-desync=syndata:blob=fake_default_tls:tcp_ts_up",
-        "--payload=tls_client_hello --lua-desync=multidisorder:pos=host+1,midsld:seqovl=1"
+        "--payload=tls_client_hello --lua-desync=multidisorder:pos=host+1,midsld:seqovl=1",
+        "--payload=tls_client_hello --lua-desync=multisplit:pos=1",
+        "--payload=tls_client_hello --lua-desync=multisplit:blob=fake_default_tls:badsum:pos=2:nodrop:repeats=4 --lua-desync=multisplit:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1",
+        "--payload=tls_client_hello --lua-desync=multidisorder:blob=fake_default_tls:badsum:pos=2:nodrop:repeats=4 --lua-desync=multidisorder:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1",
+        "--payload=all --lua-desync=multisplit:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1",
+        "--payload=tls_client_hello --lua-desync=multisplit:blob=fake_default_tls:badsum:pos=2:nodrop:repeats=2 --lua-desync=multisplit:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1",
+        "--payload=tls_client_hello --lua-desync=multidisorder:blob=fake_default_tls:badsum:pos=2:nodrop:repeats=2 --lua-desync=multidisorder:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1",
+        "--payload=all --lua-desync=multisplit:blob=fake_default_tls:badsum:pos=2:nodrop:repeats=4 --lua-desync=multisplit:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1",
+        "--payload=all --lua-desync=multidisorder:blob=fake_default_tls:badsum:pos=2:nodrop:repeats=4 --lua-desync=multidisorder:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1",
+        "--payload=tls_client_hello --lua-desync=tls_client_hello_clone:blob=hs32 --lua-desync=fake:blob=hs32:tcp_md5:repeats=6",
+        "--payload=tls_client_hello --lua-desync=tls_client_hello_clone:blob=hs33 --lua-desync=fake:blob=hs33:tcp_md5:repeats=6 --lua-desync=multidisorder:pos=midsld",
+        "--payload=tls_client_hello --lua-desync=send:repeats=2 --lua-desync=multidisorder:pos=midsld"
       ]
     },
     "preset_youtube": {
@@ -116,7 +127,18 @@
         "--payload=tls_client_hello --lua-desync=hostfakesplit:host=vk.com:midhost=midsld",
         "--payload=tls_client_hello --lua-desync=rst:rstack:ip_autottl=-2,3-20",
         "--payload=tls_client_hello --lua-desync=syndata:blob=fake_default_tls:tcp_ts_up",
-        "--payload=tls_client_hello --lua-desync=multidisorder:pos=host+1,midsld:seqovl=1"
+        "--payload=tls_client_hello --lua-desync=multidisorder:pos=host+1,midsld:seqovl=1",
+        "--payload=tls_client_hello --lua-desync=multisplit:pos=1",
+        "--payload=tls_client_hello --lua-desync=multisplit:blob=fake_default_tls:badsum:pos=2:nodrop:repeats=4 --lua-desync=multisplit:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1",
+        "--payload=tls_client_hello --lua-desync=multidisorder:blob=fake_default_tls:badsum:pos=2:nodrop:repeats=4 --lua-desync=multidisorder:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1",
+        "--payload=all --lua-desync=multisplit:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1",
+        "--payload=tls_client_hello --lua-desync=multisplit:blob=fake_default_tls:badsum:pos=2:nodrop:repeats=2 --lua-desync=multisplit:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1",
+        "--payload=tls_client_hello --lua-desync=multidisorder:blob=fake_default_tls:badsum:pos=2:nodrop:repeats=2 --lua-desync=multidisorder:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1",
+        "--payload=all --lua-desync=multisplit:blob=fake_default_tls:badsum:pos=2:nodrop:repeats=4 --lua-desync=multisplit:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1",
+        "--payload=all --lua-desync=multidisorder:blob=fake_default_tls:badsum:pos=2:nodrop:repeats=4 --lua-desync=multidisorder:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1",
+        "--payload=tls_client_hello --lua-desync=tls_client_hello_clone:blob=hs32 --lua-desync=fake:blob=hs32:tcp_md5:repeats=6",
+        "--payload=tls_client_hello --lua-desync=tls_client_hello_clone:blob=hs33 --lua-desync=fake:blob=hs33:tcp_md5:repeats=6 --lua-desync=multidisorder:pos=midsld",
+        "--payload=tls_client_hello --lua-desync=send:repeats=2 --lua-desync=multidisorder:pos=midsld"
       ]
     },
     "preset_discord": {
@@ -408,6 +430,23 @@
         "--payload=tls_client_hello --lua-desync=multisplit:pos=1,sniext+1:seqovl=1",
         "--payload=tls_client_hello --lua-desync=multisplit:pos=10:seqovl=1",
         "--payload=tls_client_hello --lua-desync=fakeddisorder:pos=midsld:tcp_md5"
+      ]
+    },
+    "preset_universal": {
+      "name": "Универсальная лестница (сообщество)",
+      "label": "Универсальная лестница",
+      "domain": "www.youtube.com",
+      "test_url": "https://www.youtube.com",
+      "hostlist": "list_hosts_youtube",
+      "port": "443",
+      "protocols": [
+        "tls12",
+        "tls13"
+      ],
+      "filter_l7": "tls",
+      "description": "Проверена сообществом на флапающих ТСПУ (RouteRich 25.12.6): badsum-фейк внутри нарезки, 7 разрезов по границам SNI, payload=all, circular за 60 с. Fallback для адаптивных ТСПУ.",
+      "turbo_strategies": [
+        "--out-range=-s34228 --payload=all --in-range=-s5556 --lua-desync=circular:fails=2:time=60:retrans=2:nld=2:reset --in-range=x --lua-desync=multisplit:blob=fake_default_tls:badsum:pos=2:nodrop:repeats=4:strategy=1 --lua-desync=multisplit:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1:strategy=1 --lua-desync=multidisorder:blob=fake_default_tls:badsum:pos=2:nodrop:repeats=4:strategy=2 --lua-desync=multidisorder:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1:strategy=2 --lua-desync=multidisorder:pos=1,midsld:seqovl=1:strategy=3 --lua-desync=multisplit:pos=1,midsld:seqovl=1:strategy=4"
       ]
     }
   }

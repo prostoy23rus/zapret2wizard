@@ -79,6 +79,24 @@
 				],
 				"/etc/init.d/zapret2wizard": [
 					"exec"
+				],
+				"/usr/share/zapret2wizard/tspu_classifier.lua": [
+					"read"
+				],
+				"/usr/share/zapret2wizard/tspu_catalog.txt": [
+					"read"
+				],
+				"/tmp/bcw_tspu_result.json": [
+					"read"
+				],
+				"/tmp/bcw_tspu_status.json": [
+					"read"
+				],
+				"/tmp/bcw_canary.log": [
+					"read"
+				],
+				"/tmp/bcw_canary.status": [
+					"read"
 				]
 			}
 		},
@@ -138,6 +156,16 @@
 				],
 				"/etc/init.d/zapret2wizard": [
 					"exec"
+				],
+				"/tmp/bcw_canary.stop": [
+					"write"
+				],
+				"/tmp/bcw_canary.pid": [
+					"write",
+					"remove"
+				],
+				"/tmp/bcw_tspu_run.log": [
+					"read"
 				]
 			}
 		}

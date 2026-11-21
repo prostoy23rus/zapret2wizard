@@ -1678,11 +1678,25 @@ EOF
         fi
 
         # Merge Phase 1 probe and Phase 2 adaptive outputs so no working strategies are lost
-        lua - "$OUTPUT_SCAN" "$probe_output" "$adaptive_output" << 'EOF' 2>/dev/null
+        # Валидаторные предупреждения (порт tspu-class-test): unknown-функции и
+        # "работает без обхода" из лога сканера иначе теряются без следа.
+        local scan_warn=""
+        grep -q "desync function" "$LOG_FILE" 2>/dev/null && scan_warn="$scan_warn unknown_desync_functions"
+        grep -qi "working without bypass" "$LOG_FILE" 2>/dev/null && scan_warn="$scan_warn working_without_bypass"
+        lua - "$OUTPUT_SCAN" "$probe_output" "$adaptive_output" "$scan_warn" << 'EOF' 2>/dev/null
 local json = require("luci.jsonc")
 local scan_file = arg[1]
 local p_file = arg[2]
 local a_file = arg[3]
+local warn_flags = arg[4] or ""
+
+local warnings = {}
+if warn_flags:find("unknown_desync_functions") then
+    warnings[#warnings + 1] = "в логе есть 'desync function ... does not exist': часть стратегий шла БЕЗ обхода (nfqws2 не знает их функции) - результаты по ним не считаются"
+end
+if warn_flags:find("working_without_bypass") then
+    warnings[#warnings + 1] = "домен открывается и без обхода - прохождение стратегий может ничего не доказывать"
+end
 
 local base_data = { strategies = {} }
 local sf = io.open(scan_file, "r")
@@ -1760,6 +1774,7 @@ end
 base_data.strategies = merged
 base_data.working = #merged
 base_data.outcome = (#merged > 0) and "found" or "not_found"
+base_data.warnings = warnings
 
 local out_f = io.open(scan_file, "w")
 if out_f then
@@ -7035,6 +7050,277 @@ if [ "${BCW_LIB_ONLY:-0}" = "1" ]; then
     return 0 2>/dev/null || exit 0
 fi
 
+# ============================================================
+#  Классификатор «КЛАСС ТСПУ» (порт saitkul/tspu-class-test v2.5).
+#  Прогоняет каталог из 34 стратегий через сканер и печатает вердикт
+#  (L0-/L0/L2/особый/аномалия) отдельно по TLS 1.2 и TLS 1.3.
+#  Служба на время прогона останавливается и возвращается сторожем.
+# ============================================================
+TSPU_CATALOG="/usr/share/zapret2wizard/tspu_catalog.txt"
+TSPU_CLASSIFIER="/usr/share/zapret2wizard/tspu_classifier.lua"
+TSPU_RESULT="/tmp/bcw_tspu_result.json"
+
+tspu_running() {
+    [ -f /tmp/bcw_tspu.pid ] && kill -0 "$(cat /tmp/bcw_tspu.pid 2>/dev/null)" 2>/dev/null
+}
+
+cmd_tspu_class() {
+    local domain="${1:-www.youtube.com}"
+    case "$domain" in
+        *[!A-Za-z0-9.-]*|-) printf '{"ok":false,"error":"Некорректный домен"}\n'; return 0 ;;
+    esac
+
+    # Взаимоисключение: подбор и классификация оба трогают службу и очереди
+    if tspu_running; then
+        printf '{"ok":false,"error":"Классификация уже выполняется"}\n'
+        return 0
+    fi
+    if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE" 2>/dev/null)" 2>/dev/null; then
+        printf '{"ok":false,"error":"Идёт подбор - дождитесь его завершения"}\n'
+        return 0
+    fi
+    if ps w | grep -qE '[b]lockcheckw-helper (start|apply) '; then
+        printf '{"ok":false,"error":"Идёт подбор - дождитесь его завершения"}\n'
+        return 0
+    fi
+    [ -f "$TSPU_CATALOG" ] || { printf '{"ok":false,"error":"Каталог ТСПУ не найден"}\n'; return 0; }
+    [ -f "$TSPU_CLASSIFIER" ] || { printf '{"ok":false,"error":"Классификатор не найден"}\n'; return 0; }
+    [ -x /usr/bin/blockcheckw ] || { printf '{"ok":false,"error":"Сканер не установлен"}\n'; return 0; }
+    scan_preflight || return 0
+
+    # Фоновый запуск: UI будет опрашивать tspu_class_status
+    if [ "$2" = "bg" ]; then
+        rm -f /tmp/bcw_tspu.stop
+        : > /tmp/bcw_tspu_run.log
+        /bin/sh -c "/usr/bin/blockcheckw-helper tspu_class_run '$domain' > /tmp/bcw_tspu_run.log 2>&1 &"
+        sleep 1
+        if tspu_running; then
+            printf '{"ok":true,"started":true,"domain":"%s"}\n' "$domain"
+        else
+            printf '{"ok":false,"error":"не удалось запустить"}\n'
+            head -n 5 /tmp/bcw_tspu_run.log 2>/dev/null
+        fi
+        return 0
+    fi
+
+    cmd_tspu_class_run "$domain"
+}
+
+cmd_tspu_class_run() {
+    local domain="${1:-www.youtube.com}"
+    echo $$ > /tmp/bcw_tspu.pid
+    local was=0
+    if _svc_running; then was=1; _svc_stop; fi
+    : > /tmp/bcw_scan_paused
+    # сторож: вернуть службу, если этот процесс умрёт (kill, перезагрузка UI)
+    (
+        i=0
+        while [ -f /tmp/bcw_tspu.pid ] && [ "$i" -lt 40 ]; do
+            sleep 15
+            i=$((i + 1))
+        done
+        sleep 5
+        if ! _svc_running; then
+            _svc_start_bg
+            logger -t zapret2wizard "сторож классификации: служба поднята"
+        fi
+    ) &
+
+    local qnum=$(pick_scan_qnum)
+    local scan_home=/tmp/bcw_scan_home
+    local scan_dns=$(scan_dns_mode "$domain")
+    local out="/tmp/bcw_tspu_scan.json"
+    mkdir -p "$scan_home" 2>/dev/null || true
+    rm -f "$out"
+    printf '{"state":"running","percent":10,"phase":"Классификация ТСПУ: %s"}\n' "$domain" > /tmp/bcw_tspu_status.json
+
+    echo "[blockcheckw-helper] TSPU class: прогон 34-стратегического каталога по $domain (queue $qnum)" >> "$LOG_FILE"
+    HOME="$scan_home" /usr/bin/blockcheckw --qnum "$qnum" -w 2 scan -d "$domain" -p tls12,tls13 --dns "$scan_dns" --from-file "$TSPU_CATALOG" -o "$out" --auto --timeout 300 >> "$LOG_FILE" 2>&1
+
+    printf '{"state":"running","percent":80,"phase":"Считаю вердикт класса ТСПУ..."}\n' > /tmp/bcw_tspu_status.json
+
+    # Вернуть службу
+    [ "$was" = "1" ] && _svc_start_bg
+    rm -f /tmp/bcw_scan_paused
+    rm -f /tmp/bcw_tspu.pid
+
+    if [ ! -s "$out" ]; then
+        printf '{"ok":false,"error":"Скан не дал результата (см. лог)"}\n' > "$TSPU_RESULT"
+        printf '{"state":"error","percent":100,"phase":"Скан не дал результата"}\n' > /tmp/bcw_tspu_status.json
+        cat "$TSPU_RESULT"
+        return 0
+    fi
+
+    lua "$TSPU_CLASSIFIER" "$out" "$TSPU_CATALOG" > "$TSPU_RESULT" 2>/dev/null || {
+        printf '{"ok":false,"error":"Ошибка классификатора"}\n' > "$TSPU_RESULT"
+    }
+
+    # Дописываем контекст для UI (domain/time)
+    lua - "$TSPU_RESULT" "$domain" << 'EOF' 2>/dev/null
+local json = require("luci.jsonc")
+local rf, df = arg[1], arg[2]
+local f = io.open(rf, "r")
+local d = f and json.parse(f:read("*a")) or { ok = false }
+if f then f:close() end
+d.domain = df
+d.time = os.time()
+if d.ok then
+    local out = io.open(rf, "w")
+    if out then out:write(json.stringify(d, true)); out:close() end
+end
+print(json.stringify(d))
+EOF
+
+    printf '{"state":"done","percent":100,"phase":"Готово"}\n' > /tmp/bcw_tspu_status.json
+    local cls=$(sed -n 's/.*"verdict":"\([^"]*\)".*/\1/p' "$TSPU_RESULT" | head -n 1)
+    history_add "tspu_class" "$domain" "${cls:-классификация завершена}" >/dev/null 2>&1 || true
+    cat "$TSPU_RESULT"
+}
+
+cmd_tspu_class_status() {
+    if tspu_running; then
+        cat /tmp/bcw_tspu_status.json 2>/dev/null || printf '{"state":"running","percent":0,"phase":"..."}\n'
+    else
+        cat /tmp/bcw_tspu_status.json 2>/dev/null || printf '{"state":"idle"}\n'
+    fi
+}
+
+cmd_tspu_class_report() {
+    if [ -s "$TSPU_RESULT" ]; then
+        cat "$TSPU_RESULT"
+    else
+        printf '{"ok":false,"error":"Классификация ещё не выполнялась"}\n'
+    fi
+}
+
+# ============================================================
+#  Канарейка: фоновый контроль живости текущей стратегии.
+#  Каждые N секунд один запрос через живой Zapret2; история
+#  ОК/СБОЙ в /tmp/bcw_canary.log (ротация 256 КБ -> старый файл).
+#  Во время подбора/классификации проверки пропускаются.
+# ============================================================
+CANARY_PIDF="/tmp/bcw_canary.pid"
+CANARY_STATUS="/tmp/bcw_canary.status"
+CANARY_LOG="/tmp/bcw_canary.log"
+
+canary_alive() {
+    [ -f "$CANARY_PIDF" ] && kill -0 "$(cat "$CANARY_PIDF" 2>/dev/null)" 2>/dev/null
+}
+
+canary_stop_silent() {
+    touch /tmp/bcw_canary.stop 2>/dev/null
+    if canary_alive; then kill "$(cat "$CANARY_PIDF" 2>/dev/null)" 2>/dev/null; fi
+    sleep 1
+    if canary_alive; then kill -9 "$(cat "$CANARY_PIDF" 2>/dev/null)" 2>/dev/null; fi
+    rm -f "$CANARY_PIDF"
+}
+
+cmd_canary_start() {
+    local target="${1:-preset_youtube}"
+    local interval="${2:-300}"
+    case "$interval" in *[!0-9]*) interval=300 ;; esac
+    [ "$interval" -lt 60 ] && interval=60
+    [ "$interval" -gt 3600 ] && interval=3600
+    local domain=$(target_domain "$target")
+    [ -n "$domain" ] || domain="www.youtube.com"
+
+    canary_stop_silent
+    rm -f /tmp/bcw_canary.stop
+    /bin/sh -c "/usr/bin/blockcheckw-helper canary_run '$domain' '$interval' > /tmp/bcw_canary_run.log 2>&1 &"
+    sleep 1
+    if canary_alive; then
+        printf '{"ok":true,"started":true,"domain":"%s","interval":%s}\n' "$domain" "$interval"
+        history_add "canary" "$domain" "канарейка запущена (каждые ${interval} с)" >/dev/null 2>&1 || true
+    else
+        printf '{"ok":false,"error":"не удалось запустить канарейку"}\n'
+        head -n 3 /tmp/bcw_canary_run.log 2>/dev/null
+    fi
+}
+
+cmd_canary_stop() {
+    canary_stop_silent
+    printf '{"ok":true,"stopped":true}\n'
+}
+
+cmd_canary_status() {
+    local last_result="none"
+    local last=""
+    local dom=""
+    if [ -s "$CANARY_STATUS" ]; then
+        last_result=$(sed -n 's/^last_result=//p' "$CANARY_STATUS" 2>/dev/null | tail -n 1)
+        last=$(sed -n 's/^last=//p' "$CANARY_STATUS" 2>/dev/null | tail -n 1)
+        dom=$(sed -n 's/^dom=//p' "$CANARY_STATUS" 2>/dev/null | tail -n 1)
+    fi
+    local oks=0 fails=0 skips=0
+    if [ -s "$CANARY_LOG" ]; then
+        oks=$(grep -c "— ОК" "$CANARY_LOG" 2>/dev/null || echo 0)
+        fails=$(grep -c "— СБОЙ" "$CANARY_LOG" 2>/dev/null || echo 0)
+        skips=$(grep -c "— пропуск" "$CANARY_LOG" 2>/dev/null || echo 0)
+    fi
+    local okn=$(echo "$oks" | tr -dc '0-9')
+    local failn=$(echo "$fails" | tr -dc '0-9')
+    local skipn=$(echo "$skips" | tr -dc '0-9')
+    printf '{"alive":%s,"last_result":"%s","last":"%s","domain":"%s","ok":%s,"fail":%s,"skip":%s}\n' \
+        "$(canary_alive && echo 1 || echo 0)" "$last_result" "$last" "$dom" \
+        "${okn:-0}" "${failn:-0}" "${skipn:-0}"
+}
+
+cmd_canary_log() {
+    if [ -s "$CANARY_LOG" ]; then
+        tail -n "${1:-30}" "$CANARY_LOG" 2>/dev/null
+    else
+        echo "Проверок ещё не было."
+    fi
+}
+
+cmd_canary_run() {
+    local dom="$1" iv="$2"
+    echo $$ > "$CANARY_PIDF"
+    trap 'rm -f "$CANARY_PIDF"' EXIT
+    trap 'rm -f "$CANARY_PIDF"; exit 0' INT TERM
+    # Ротация: как у основного лога — 256 КБ, старый файл
+    if [ -f "$CANARY_LOG" ] && [ "$(wc -c < "$CANARY_LOG" 2>/dev/null)" -gt 262144 ] 2>/dev/null; then
+        mv -f "$CANARY_LOG" "$CANARY_LOG.old" 2>/dev/null || true
+        : > "$CANARY_LOG"
+        echo "$(date '+%Y-%m-%d %H:%M:%S') — (старые записи в $CANARY_LOG.old)" >> "$CANARY_LOG"
+    fi
+    echo "$(date '+%Y-%m-%d %H:%M:%S') — канарейка запущена: домен $dom, проверка каждые ${iv} с" >> "$CANARY_LOG"
+    local lastres="старт"
+    while true; do
+        # Во время подбора/классификации замер ничего не говорит о нашей стратегии
+        if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE" 2>/dev/null)" 2>/dev/null; then
+            echo "$(date '+%Y-%m-%d %H:%M:%S') — пропуск: идёт подбор" >> "$CANARY_LOG"
+            lastres="пропуск"
+        elif tspu_running; then
+            echo "$(date '+%Y-%m-%d %H:%M:%S') — пропуск: идёт классификация" >> "$CANARY_LOG"
+            lastres="пропуск"
+        elif _svc_running; then
+            local r
+            r=$(curl -4 -k -s -o /dev/null --max-time 6 -w "%{http_code}|%{time_total}" "https://$dom/generate_204" 2>/dev/null)
+            local code=$(echo "$r" | cut -d"|" -f1)
+            local tt=$(echo "$r" | cut -d"|" -f2)
+            if [ -n "$code" ] && [ "$code" != "000" ]; then
+                echo "$(date '+%Y-%m-%d %H:%M:%S') — ОК (код=$code, ${tt:-?} с)" >> "$CANARY_LOG"
+                lastres="ОК"
+            else
+                echo "$(date '+%Y-%m-%d %H:%M:%S') — СБОЙ (сайт не открылся)" >> "$CANARY_LOG"
+                lastres="СБОЙ"
+                history_add "canary" "$dom" "СБОЙ — стратегия не отвечает" >/dev/null 2>&1 || true
+            fi
+        else
+            echo "$(date '+%Y-%m-%d %H:%M:%S') — пропуск: служба не запущена" >> "$CANARY_LOG"
+            lastres="пропуск"
+        fi
+        printf 'last_result=%s\nlast=%s\ndom=%s\n' "$lastres" "$(date '+%Y-%m-%d %H:%M:%S')" "$dom" > "$CANARY_STATUS"
+        local slept=0
+        while [ "$slept" -lt "$iv" ]; do
+            [ -f /tmp/bcw_canary.stop ] && { rm -f "$CANARY_PIDF"; exit 0; }
+            sleep 1
+            slept=$((slept + 1))
+        done
+    done
+}
+
 # Ограничиваем /tmp/blockcheckw_run.log: при интенсивном подборе он рос
 # без предела. Ротация только при новом вызове, один старый файл.
 if [ -f "$LOG_FILE" ]; then
@@ -7047,6 +7333,15 @@ fi
 
 case "$1" in
     start) shift; cmd_start "$@" ;;
+    tspu_class) shift; cmd_tspu_class "$@" ;;
+    tspu_class_run) shift; cmd_tspu_class_run "$@" ;;
+    tspu_class_status) cmd_tspu_class_status ;;
+    tspu_class_report) cmd_tspu_class_report ;;
+    canary_start) shift; cmd_canary_start "$@" ;;
+    canary_stop) cmd_canary_stop ;;
+    canary_status) cmd_canary_status ;;
+    canary_log) shift; cmd_canary_log "$@" ;;
+    canary_run) shift; cmd_canary_run "$@" ;;
     start_bg) shift; cmd_start_bg "$@" ;;
     status) cmd_status ;;
     stop) cmd_stop ;;

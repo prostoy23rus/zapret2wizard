@@ -449,6 +449,22 @@ start_service() {
 	fi
 
 	logger -t zapret2wizard "Zapret2Wizard autonomous service started successfully"
+
+	# Канарейка: фоновый контроль живости включённых сервисов. Read-only
+	# (curl раз в N секунд), не блокирует старт и не трогает конфигурацию.
+	# Управление: uci set zapret2wizard.main.canary=1/0,
+	#             uci set zapret2wizard.main.canary_interval=<секунд>
+	local canary_on
+	local canary_iv
+	if command -v uci >/dev/null 2>&1; then
+		canary_on=$(uci -q get zapret2wizard.main.canary 2>/dev/null || echo "0")
+		canary_iv=$(uci -q get zapret2wizard.main.canary_interval 2>/dev/null || echo "300")
+	else
+		canary_on=0
+	fi
+	if [ "$canary_on" = "1" ] && [ -x /usr/bin/blockcheckw-helper ]; then
+		( sleep 15; /usr/bin/blockcheckw-helper canary_start preset_youtube "$canary_iv" >/dev/null 2>&1 ) &
+	fi
 }
 
 stop_service() {
@@ -459,6 +475,8 @@ stop_service() {
 	# заблокированным и YouTube не грузит видео через другие обходы.
 	# При внутренней остановке на время скана правило не трогаем.
 	if [ "${BCW_INTERNAL_STOP:-0}" != "1" ]; then
+		# Канарейку тоже глушим: без службы проверки ничего не показывают
+		[ -x /usr/bin/blockcheckw-helper ] && /usr/bin/blockcheckw-helper canary_stop >/dev/null 2>&1 || true
 		sh /usr/share/zapret2wizard/quic_reject.sh remove >/dev/null 2>&1 || true
 		if uci -q get firewall.reject_quic >/dev/null 2>&1; then
 			uci -q set firewall.reject_quic.enabled=0

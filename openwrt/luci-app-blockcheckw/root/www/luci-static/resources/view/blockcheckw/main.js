@@ -1113,6 +1113,8 @@ return view.extend({
 		function softRefreshAfterScan() {
 			try { if (typeof loadResultsForTarget === 'function') loadResultsForTarget(currentTarget); } catch (e) {}
 			try { if (typeof refreshLogs === 'function') refreshLogs(); } catch (e) {}
+			try { if (typeof loadTspuReport === 'function') loadTspuReport(); } catch (e) {}
+			try { if (typeof loadCanaryStatus === 'function') loadCanaryStatus(); } catch (e) {}
 		}
 		zapretBadgeEl.style.cursor = 'pointer';
 		zapretBadgeEl.addEventListener('click', function() {
@@ -2106,6 +2108,27 @@ return view.extend({
 			resultsCard.style.marginTop = '4px';
 			resultsCard.style.width = '100%';
 			mainLayout.appendChild(resultsCard);
+		// ===== Класс ТСПУ провайдера + Канарейка (порт tspu-class-test) =====
+		var tspuCardTitleRow = E('div', { style: 'display: flex; align-items: center; justify-content: space-between;' }, [
+			E('span', { class: 'bcw-card-title', style: 'margin-bottom: 0;' }, 'Класс ТСПУ провайдера'),
+			E('div', { style: 'display: flex; gap: 6px; align-items: center;' }, [
+				E('button', {
+					class: 'btn cbi-button cbi-button-apply',
+					onclick: startTspuClass
+				}, 'Определить класс ТСПУ'),
+				E('button', {
+					class: 'btn cbi-button cbi-button-neutral',
+					onclick: toggleCanary,
+					title: 'Канарейка: фоновый контроль живости стратегии'
+				}, 'Канарейка: —')
+			])
+		]);
+		var tspuBodyEl = E('div', { style: 'display: flex; flex-direction: column; gap: 8px; padding: 12px 14px;' });
+		var tspuCard = E('div', { id: 'bcw-tspu-card', class: 'bcw-card', style: 'display: none; margin-top: 4px; width: 100%;' }, [
+			tspuCardTitleRow,
+			tspuBodyEl
+		]);
+		mainLayout.appendChild(tspuCard);
 		}
 
 		// Live Logs and Diagnostics Monitor Card
@@ -3895,6 +3918,164 @@ return view.extend({
 		}
 
 		function pluralRu(n, one, few, many) {
+		// ===== Класс ТСПУ провайдера (tspu_class) =====
+		function fmtTspuResult(d) {
+			if (!d || d.ok !== true) {
+				return [{ error: (d && d.error) || 'Классификация ещё не выполнялась' }];
+			}
+			var out = [];
+			['tls12', 'tls13'].forEach(function(key) {
+				var p = d[key];
+				if (!p) return;
+				var label = (key === 'tls12') ? 'TLS 1.2' : 'TLS 1.3';
+				var line = label + ': ' + (p.verdict || 'не определён');
+				if (p.reco && p.reco_args) {
+					line += ' — рекомендация: строка ' + p.reco + ':';
+					out.push({ proto: label, text: line, args: p.reco_args });
+				} else {
+					out.push({ proto: label, text: line, args: null });
+				}
+			});
+			if (d.notes) {
+				var allNotes = [];
+				['tls12', 'tls13'].forEach(function(key) {
+					var p = d[key];
+					if (p && Array.isArray(p.notes)) {
+						p.notes.forEach(function(n) { allNotes.push(n); });
+					}
+				});
+				out.push({ notes: allNotes.slice(0, 6) });
+			}
+			if (d.domain) out.push({ domain: d.domain });
+			return out;
+		}
+
+		function loadTspuReport() {
+			fs.exec(HELPER_BIN, ['tspu_class_report']).then(function(res) {
+				var d = null;
+				try { d = JSON.parse(res.stdout); } catch (e) {}
+				if (!d || d.ok !== true) return; // нет результата — карточку не показываем
+				if (tspuCard) tspuCard.style.display = 'block';
+				tspuBodyEl.innerHTML = '';
+				var rows = fmtTspuResult(d);
+				var dom = (d.domain) ? '<b>Домен:</b> ' + d.domain : '';
+				rows.forEach(function(r) {
+					if (r.error) {
+						tspuBodyEl.appendChild(E('div', { style: 'color: #abb2bf;' }, r.error));
+					} else if (r.notes) {
+						tspuBodyEl.appendChild(E('div', { style: 'color: #abb2bf; font-size: 12px; padding-top: 4px;' }, '💡 ' + r.notes.join(' ')));
+					} else if (r.proto) {
+						var wrap = E('div', { style: 'display: flex; flex-direction: column; gap: 4px;' });
+						wrap.appendChild(E('div', { style: 'color: #e6e6e6;' }, r.text));
+						if (r.args) {
+							var code = E('div', { class: 'bcw-code-box', style: 'font-size: 11px; padding: 6px 8px; margin: 0;' }, r.args);
+							wrap.appendChild(code);
+						}
+						tspuBodyEl.appendChild(wrap);
+					}
+				});
+				// Подсказка про узел googlevideo (DevTools)
+				tspuBodyEl.appendChild(E('details', { style: 'margin-top: 8px;' }, [
+					E('summary', { style: 'cursor: pointer; color: #9fb0c3; font-size: 12px;' }, '🎥 Видео тормозит, а сайт работает? Как проверить узел видеопотока'),
+					E('div', { style: 'color: #abb2bf; font-size: 12px; padding: 6px 0;' },
+						'Видео идёт с отдельных узлов *.googlevideo.com — ТСПУ часто фильтрует их жёстче сайта. ' +
+						'Откройте видео → F12 → Network → в фильтр введите googlevideo → наведите на запрос videoplayback → ' +
+						'скопируйте узел до /videoplayback (например, rr1---sn-xxxx.googlevideo.com) → запустите «Определить класс ТСПУ» с этим узлом. ' +
+						'Красные ERR_CONNECTION_ABORTED на videoplayback — прямой признак, что узел нужно проверять отдельно.')
+				]));
+			}).catch(function() {});
+		}
+
+		function startTspuClass() {
+			var d = (PRESET_DEFS[currentTarget] && PRESET_DEFS[currentTarget].domain) || 'www.youtube.com';
+			var dom = window.prompt('Домен для классификации ТСПУ (прогон займёт 2-5 минут, служба на это время остановится):', d);
+			if (!dom) return;
+			dom = String(dom).trim();
+			if (!/^[A-Za-z0-9.-]+$/.test(dom)) {
+				ui.addNotification(null, E('p', {}, '✗ Некорректный домен'), 'danger');
+				return;
+			}
+			if (tspuCard) tspuCard.style.display = 'block';
+			tspuBodyEl.innerHTML = '';
+			tspuBodyEl.appendChild(E('div', { style: 'color: #00d1b2;' }, '⏳ Запуск классификации (' + dom + ')...'));
+			fs.exec(HELPER_BIN, ['tspu_class', dom, 'bg']).then(function(res) {
+				var started = parseHelperJson(res) || {};
+				if (!started.ok) {
+					if (started.error && /уже/i.test(started.error)) { return started; }
+					ui.addNotification(null, E('p', {}, '✗ ' + (started.error || 'не удалось запустить')), 'danger');
+					tspuBodyEl.innerHTML = '';
+					return null;
+				}
+				return started;
+			}, function() { return { started: true, rpc_timeout: true }; }).then(function(started) {
+				if (!started) return null;
+				return new Promise(function(resolve) {
+					var tries = 0;
+					function poll() {
+						fs.exec(HELPER_BIN, ['tspu_class_status']).then(function(r) {
+							var st = null;
+							try { st = JSON.parse(r.stdout); } catch (e) {}
+							if (!st || st.state === 'running') {
+								tries++;
+								if (tries > 240) { resolve(null); return; } // 8 минут максимум
+								var phase = (st && st.phase) ? st.phase : 'классификация...';
+								tspuBodyEl.innerHTML = '';
+								tspuBodyEl.appendChild(E('div', { style: 'color: #00d1b2;' }, '⏳ ' + phase));
+								setTimeout(poll, 3000);
+							} else {
+								resolve(st);
+							}
+						}).catch(function() {
+							tries++;
+							if (tries > 240) { resolve(null); return; }
+							setTimeout(poll, 3000);
+						});
+					}
+					poll();
+				});
+			}).then(function() {
+				loadTspuReport();
+			});
+		}
+
+		// ===== Канарейка =====
+		function loadCanaryStatus() {
+			fs.exec(HELPER_BIN, ['canary_status']).then(function(res) {
+				var d = null;
+				try { d = JSON.parse(res.stdout); } catch (e) {}
+				if (!d) return;
+				var btns = document.querySelectorAll('#bcw-tspu-card .btn');
+				var btn = null;
+				for (var i = 0; i < btns.length; i++) {
+					if (btns[i].textContent.indexOf('Канарейка') === 0) { btn = btns[i]; break; }
+				}
+				if (!btn) return;
+				if (d.alive == 1) {
+					var sym = (d.last_result === 'СБОЙ') ? '🔴' : (d.last_result === 'ОК' ? '🟢' : '⏳');
+					btn.textContent = 'Канарейка: ' + sym + ' ' + (d.last_result || 'старт') + ' (' + d.ok + ' ОК/' + d.fail + ' СБОЙ)';
+					btn.title = 'Остановить канарейку. Домен: ' + (d.domain || '—') + ', последняя: ' + (d.last || '—');
+				} else {
+					btn.textContent = 'Канарейка: выкл';
+					btn.title = 'Запустить фоновый контроль живости стратегии (curl раз в 5 минут)';
+				}
+			}).catch(function() {});
+		}
+
+		function toggleCanary() {
+			fs.exec(HELPER_BIN, ['canary_status']).then(function(res) {
+				var d = null;
+				try { d = JSON.parse(res.stdout); } catch (e) {}
+				if (d && d.alive == 1) {
+					fs.exec(HELPER_BIN, ['canary_stop']).then(function() { loadCanaryStatus(); });
+				} else {
+					var target = currentTarget || 'preset_youtube';
+					fs.exec(HELPER_BIN, ['canary_start', target, '300']).then(function() {
+						loadCanaryStatus();
+						ui.addNotification(null, E('p', {}, '✓ Канарейка запущена: проверка раз в 5 минут'), 'info');
+					});
+				}
+			});
+		}
 			var a = Math.abs(n) % 100, b = a % 10;
 			if (a > 10 && a < 20) return many;
 			if (b > 1 && b < 5) return few;
@@ -4931,6 +5112,10 @@ return view.extend({
 		if (!statusData.target || statusData.target !== currentTarget) {
 			loadResultsForTarget(currentTarget);
 		}
+
+		// Класс ТСПУ (если уже считался) и статус канарейки — при каждой загрузке
+		try { if (typeof loadTspuReport === 'function') loadTspuReport(); } catch (e) {}
+		try { if (typeof loadCanaryStatus === 'function') loadCanaryStatus(); } catch (e) {}
 
 		return container;
 	},

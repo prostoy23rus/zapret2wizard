@@ -1,0 +1,63 @@
+# TSPU-class catalog (34 strategies, 8 groups) — ported from saitkul/tspu-class-test v2.5
+# Used by tspu_classifier.lua to determine the provider's TSPU class.
+# Format: one strategy per line, comments (#) skipped.
+
+# --- 1-6: чистая нарезка, БЕЗ фейков (техника в чистом виде) ---
+--payload=tls_client_hello --lua-desync=multidisorder:pos=midsld
+--payload=tls_client_hello --lua-desync=multisplit:pos=midsld
+--payload=tls_client_hello --lua-desync=multidisorder:pos=sld
+--payload=tls_client_hello --lua-desync=multidisorder:pos=1,midsld
+--payload=tls_client_hello --lua-desync=multisplit:pos=1,midsld:seqovl=5:seqovl_pattern=0x1603030000
+--payload=tls_client_hello --lua-desync=multidisorder:pos=midsld:seqovl=midsld-1:seqovl_pattern=0x1603030000
+
+# --- 7-10: голый фейк, разная «дурка» (изолирует фулинг от техники) ---
+--payload=tls_client_hello --lua-desync=fake:blob=fake_default_tls:tcp_md5:repeats=6
+--payload=tls_client_hello --lua-desync=fake:blob=fake_default_tls:ip_autottl=-2,3-20:repeats=6
+--payload=tls_client_hello --lua-desync=fake:blob=fake_default_tls:badsum:repeats=6
+--payload=tls_client_hello --lua-desync=fake:blob=fake_default_tls:tcp_md5:tls_mod=rnd,rndsni,dupsid:repeats=6
+
+# --- 11-16: фейк вместе с нарезкой (комбинации) ---
+--payload=tls_client_hello --lua-desync=fake:blob=fake_default_tls:tcp_md5:repeats=6 --lua-desync=multisplit:pos=midsld
+--payload=tls_client_hello --lua-desync=fake:blob=fake_default_tls:tcp_md5:repeats=6 --lua-desync=multidisorder:pos=midsld
+--payload=tls_client_hello --lua-desync=fakeddisorder:pos=midsld:tcp_md5
+--payload=tls_client_hello --lua-desync=fakedsplit:pos=midsld:tcp_md5
+--payload=tls_client_hello --lua-desync=hostfakesplit:tcp_md5
+--payload=tls_client_hello --lua-desync=fake:blob=fake_default_tls:badsum:repeats=6 --lua-desync=multidisorder:pos=midsld
+
+# --- 17: имитация двухпакетного hello (kyber у браузеров) - разрез на 1-м байте ---
+--payload=tls_client_hello --lua-desync=multisplit:pos=1
+
+# --- 18-19: 7-точечный шред по всем границам SNI (мульти-разрез) ---
+--payload=tls_client_hello --lua-desync=multisplit:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1
+--payload=tls_client_hello --lua-desync=multidisorder:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1
+
+# --- 20-21: badsum-фейк внутри нарезки + 7-шред (пара, механика дробилки) ---
+--payload=tls_client_hello --lua-desync=multisplit:blob=fake_default_tls:badsum:pos=2:nodrop:repeats=4 --lua-desync=multisplit:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1
+--payload=tls_client_hello --lua-desync=multidisorder:blob=fake_default_tls:badsum:pos=2:nodrop:repeats=4 --lua-desync=multidisorder:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1
+
+# --- 22: простой разрез с seqovl=1 (без паттерна) ---
+--payload=tls_client_hello --lua-desync=multisplit:pos=1,midsld:seqovl=1
+
+# --- 23: двухсторонний шред (payload=all - режется и ответ сервера) ---
+--payload=all --lua-desync=multisplit:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1
+
+# --- 24-27: шумовая серия дробилки - дозы и позиции badsum-пары ---
+--payload=tls_client_hello --lua-desync=multisplit:blob=fake_default_tls:badsum:pos=2:nodrop:repeats=2 --lua-desync=multisplit:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1
+--payload=tls_client_hello --lua-desync=multisplit:blob=fake_default_tls:badsum:pos=3:nodrop:repeats=6 --lua-desync=multisplit:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1
+--payload=tls_client_hello --lua-desync=multidisorder:blob=fake_default_tls:badsum:pos=2:nodrop:repeats=2 --lua-desync=multidisorder:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1
+--payload=tls_client_hello --lua-desync=multidisorder:blob=fake_default_tls:badsum:pos=3:nodrop:repeats=6 --lua-desync=multidisorder:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1
+
+# --- 28-29: двухсторонняя дробилка целиком (payload=all + пара + шред) ---
+--payload=all --lua-desync=multisplit:blob=fake_default_tls:badsum:pos=2:nodrop:repeats=4 --lua-desync=multisplit:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1
+--payload=all --lua-desync=multidisorder:blob=fake_default_tls:badsum:pos=2:nodrop:repeats=4 --lua-desync=multidisorder:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1
+
+# --- 30-31: шум-проба тяжёлой дозы без шреда (изолирует вклад примесей) ---
+--payload=tls_client_hello --lua-desync=multisplit:blob=fake_default_tls:badsum:pos=2:nodrop:repeats=6
+--payload=tls_client_hello --lua-desync=multidisorder:blob=fake_default_tls:badsum:pos=2:nodrop:repeats=6
+
+# --- 32-33: клон-фейк: фейк с КЛОНИРОВАННЫМ ClientHello клиента ---
+--payload=tls_client_hello --lua-desync=tls_client_hello_clone:blob=hs32 --lua-desync=fake:blob=hs32:tcp_md5:repeats=6
+--payload=tls_client_hello --lua-desync=tls_client_hello_clone:blob=hs33 --lua-desync=fake:blob=hs33:tcp_md5:repeats=6 --lua-desync=multidisorder:pos=midsld
+
+# --- 34: send-эхо: неизменённые копии hello - серверу данные, DPI шум ---
+--payload=tls_client_hello --lua-desync=send:repeats=2 --lua-desync=multidisorder:pos=midsld
