@@ -6572,8 +6572,25 @@ cmd_update() {
     ensure_all_hostlists
     rm -rf "$tmp_dir"
 
+    # kmod-модули: обновление с кнопки обязано не только привезти файлы,
+    # но и довести модули ядра до рабочего состояния (issue #6). Сначала
+    # пробуем загрузить уже установленные; если их нет — доустанавливаем
+    # в фоне (apk/opkg может качать пакет дольше таймаута RPC).
+    modprobe nfnetlink_queue 2>/dev/null || true
+    modprobe nft_queue 2>/dev/null || true
+    local _upd_kmods_ok=0
+    [ -e /proc/net/netfilter/nfnetlink_queue ] && _kmods_nftq_ok && _upd_kmods_ok=1
+    local kmods_note=""
+    if [ "$_upd_kmods_ok" != "1" ]; then
+        rm -f /tmp/bcw_kmods.done
+        ( /usr/bin/blockcheckw-helper kmods_install >/tmp/bcw_kmods.log 2>&1; echo done >/tmp/bcw_kmods.done; _svc_running || /etc/init.d/zapret2wizard start >/dev/null 2>&1 ) &
+        echo $! > /tmp/bcw_kmods.pid
+        kmods_note=". Модули ядра доустанавливаются в фоне (ход: blockcheckw-helper kmods_status)"
+        history_add "kmods" "" "обновление: модули ядра доустанавливаются в фоне" >/dev/null 2>&1 || true
+    fi
+
     echo "[blockcheckw-helper] Successfully updated to version $new_ver" >> "$LOG_FILE"
-    echo '{"success":true,"version":"'"$new_ver"'","message":"Служба успешно обновлена до версии '"$new_ver"'!"}'
+    printf '{"success":true,"version":"%s","message":"Служба успешно обновлена до версии %s!%s"}\n' "$new_ver" "$new_ver" "$kmods_note"
 }
 
 # Удаление наших следов: DNS-записи, Reject-QUIC, nft-таблица.
