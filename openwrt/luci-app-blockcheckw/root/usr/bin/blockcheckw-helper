@@ -5226,9 +5226,20 @@ _info_json_shell() {
         local k=$(basename "$f" .txt); k=${k#zapret_hosts_}
         local c=$(grep -vc '^#' "$f" 2>/dev/null)
         c=${c:-0}
-        local used=$(uci -q show zapret2wizard 2>/dev/null | grep -c "hostlist.*list_hosts_$k")
-        local cfg=false; [ "$used" -gt 0 ] && cfg=true
-        local hobj="{\"key\":\"$k\",\"name\":\"$k\",\"domains_count\":$c,\"uci_configured\":$cfg}"
+        local name="$k" uci_name="list_hosts_$k"
+        case "$k" in
+            youtube) name="YouTube" ;;
+            discord) name="Discord" ;;
+            instagram) name="Instagram" ;;
+            x) name="X (Twitter)" ;;
+            twitch) name="Twitch" ;;
+            user) name="Общие сайты (User)" ;;
+            user_exclude) name="Исключения (не обходить)" ;;
+            ytapi) name="YouTube API"; uci_name="ytapi_hostlist" ;;
+            auto) name="Авто-список" ;;
+        esac
+        local cfg=false; uci -q get "zapret2wizard.$uci_name" >/dev/null 2>&1 && cfg=true
+        local hobj="{\"key\":\"$k\",\"name\":\"$name\",\"file\":\"$f\",\"domains_count\":$c,\"uci_configured\":$cfg}"
         if [ "$first_h" = "1" ]; then hl_json="$hobj"; first_h=0; else hl_json="$hl_json,$hobj"; fi
     done
     local nft_ok=false
