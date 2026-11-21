@@ -6469,7 +6469,7 @@ cmd_update() {
     fetch_remote_version "$tmp_dir/version.json" || ok=0
     fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/luci/menu.d/luci-app-blockcheckw.json" "$tmp_dir/menu.json" 8 || true
     fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/rpcd/acl.d/luci-app-blockcheckw.json" "$tmp_dir/acl.json" 8 || true
-    # Служба обновляет и то, что раньше оставалось старым: init.d (хуки канарейки,
+    # Служба обновляет и то, что раньше оставалось старым: init.d (хуки мониторинга доступности,
     # modprobe veth) и каталог/классификатор ТСПУ. Без них «Обновить службу»
     # из 0.36.x ставила новый UI, но кнопка класса ТСПУ падала с "каталог не найден".
     fetch_file "openwrt/luci-app-blockcheckw/root/etc/init.d/zapret2wizard" "$tmp_dir/zapret2wizard.initd" 8 || true
@@ -7220,7 +7220,7 @@ cmd_tspu_class_report() {
 }
 
 # ============================================================
-#  Канарейка: фоновый контроль живости текущей стратегии.
+#  Мониторинг доступности: фоновый контроль живости текущей стратегии.
 #  Каждые N секунд один запрос через живой Zapret2; история
 #  ОК/СБОЙ в /tmp/bcw_canary.log (ротация 256 КБ -> старый файл).
 #  Во время подбора/классификации проверки пропускаются.
@@ -7256,9 +7256,9 @@ cmd_canary_start() {
     sleep 1
     if canary_alive; then
         printf '{"ok":true,"started":true,"domain":"%s","interval":%s}\n' "$domain" "$interval"
-        history_add "canary" "$domain" "канарейка запущена (каждые ${interval} с)" >/dev/null 2>&1 || true
+        history_add "canary" "$domain" "мониторинг доступности запущен (каждые ${interval} с)" >/dev/null 2>&1 || true
     else
-        printf '{"ok":false,"error":"не удалось запустить канарейку"}\n'
+        printf '{"ok":false,"error":"не удалось запустить мониторинг доступности"}\n'
         head -n 3 /tmp/bcw_canary_run.log 2>/dev/null
     fi
 }
@@ -7310,7 +7310,7 @@ cmd_canary_run() {
         : > "$CANARY_LOG"
         echo "$(date '+%Y-%m-%d %H:%M:%S') — (старые записи в $CANARY_LOG.old)" >> "$CANARY_LOG"
     fi
-    echo "$(date '+%Y-%m-%d %H:%M:%S') — канарейка запущена: домен $dom, проверка каждые ${iv} с" >> "$CANARY_LOG"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') — мониторинг доступности запущен: домен $dom, проверка каждые ${iv} с" >> "$CANARY_LOG"
     local lastres="старт"
     while true; do
         # Во время подбора/классификации замер ничего не говорит о нашей стратегии

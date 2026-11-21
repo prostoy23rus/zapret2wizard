@@ -450,7 +450,7 @@ start_service() {
 
 	logger -t zapret2wizard "Zapret2Wizard autonomous service started successfully"
 
-	# Канарейка: фоновый контроль живости включённых сервисов. Read-only
+	# Мониторинг доступности: фоновый контроль живости включённых сервисов. Read-only
 	# (curl раз в N секунд), не блокирует старт и не трогает конфигурацию.
 	# Управление: uci set zapret2wizard.main.canary=1/0,
 	#             uci set zapret2wizard.main.canary_interval=<секунд>
@@ -475,7 +475,7 @@ stop_service() {
 	# заблокированным и YouTube не грузит видео через другие обходы.
 	# При внутренней остановке на время скана правило не трогаем.
 	if [ "${BCW_INTERNAL_STOP:-0}" != "1" ]; then
-		# Канарейку тоже глушим: без службы проверки ничего не показывают
+		# Мониторинг доступности тоже глушим: без службы проверки ничего не показывают
 		[ -x /usr/bin/blockcheckw-helper ] && /usr/bin/blockcheckw-helper canary_stop >/dev/null 2>&1 || true
 		sh /usr/share/zapret2wizard/quic_reject.sh remove >/dev/null 2>&1 || true
 		if uci -q get firewall.reject_quic >/dev/null 2>&1; then

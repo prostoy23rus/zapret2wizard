@@ -2221,7 +2221,7 @@ return view.extend({
 			});
 		}
 
-		// ===== Канарейка =====
+		// ===== Мониторинг доступности =====
 		function loadCanaryStatus() {
 			fs.exec(HELPER_BIN, ['canary_status']).then(function(res) {
 				var d = null;
@@ -2230,15 +2230,15 @@ return view.extend({
 				var btns = document.querySelectorAll('#bcw-tspu-card .btn');
 				var btn = null;
 				for (var i = 0; i < btns.length; i++) {
-					if (btns[i].textContent.indexOf('Канарейка') === 0) { btn = btns[i]; break; }
+					if (btns[i].textContent.indexOf('Мониторинг доступности') === 0) { btn = btns[i]; break; }
 				}
 				if (!btn) return;
 				if (d.alive == 1) {
 					var sym = (d.last_result === 'СБОЙ') ? '🔴' : (d.last_result === 'ОК' ? '🟢' : '⏳');
-					btn.textContent = 'Канарейка: ' + sym + ' ' + (d.last_result || 'старт') + ' (' + d.ok + ' ОК/' + d.fail + ' СБОЙ)';
-					btn.title = 'Остановить канарейку. Домен: ' + (d.domain || '—') + ', последняя: ' + (d.last || '—');
+					btn.textContent = 'Мониторинг доступности: ' + sym + ' ' + (d.last_result || 'старт') + ' (' + d.ok + ' ОК/' + d.fail + ' СБОЙ)';
+					btn.title = 'Остановить мониторинг доступности. Домен: ' + (d.domain || '—') + ', последняя: ' + (d.last || '—');
 				} else {
-					btn.textContent = 'Канарейка: выкл';
+					btn.textContent = 'Мониторинг доступности: выкл';
 					btn.title = 'Запустить фоновый контроль живости стратегии (curl раз в 5 минут)';
 				}
 			}).catch(function() {});
@@ -2254,7 +2254,7 @@ return view.extend({
 					var target = currentTarget || 'preset_youtube';
 					fs.exec(HELPER_BIN, ['canary_start', target, '300']).then(function() {
 						loadCanaryStatus();
-						ui.addNotification(null, E('p', {}, '✓ Канарейка запущена: проверка раз в 5 минут'), 'info');
+						ui.addNotification(null, E('p', {}, '✓ Мониторинг доступности запущен: проверка раз в 5 минут'), 'info');
 					});
 				}
 			});
@@ -2269,7 +2269,7 @@ return view.extend({
 			mainLayout.appendChild(resultsCard);
 
 
-		// ===== Класс ТСПУ провайдера + Канарейка (порт tspu-class-test) =====
+		// ===== Класс ТСПУ провайдера + Мониторинг доступности (порт tspu-class-test) =====
 		var tspuCardTitleRow = E('div', { style: 'display: flex; align-items: center; justify-content: space-between;' }, [
 			E('span', { class: 'bcw-card-title', style: 'margin-bottom: 0;' }, 'Класс ТСПУ провайдера'),
 			E('div', { style: 'display: flex; gap: 6px; align-items: center;' }, [
@@ -2280,8 +2280,8 @@ return view.extend({
 				E('button', {
 					class: 'btn cbi-button cbi-button-neutral',
 					onclick: toggleCanary,
-					title: 'Канарейка: фоновый контроль живости стратегии'
-				}, 'Канарейка: —')
+					title: 'Мониторинг доступности: фоновый контроль живости стратегии'
+				}, 'Мониторинг доступности: —')
 			])
 		]);
 		var tspuBodyEl = E('div', { style: 'display: flex; flex-direction: column; gap: 8px; padding: 12px 14px;' });
@@ -5117,7 +5117,7 @@ return view.extend({
 			loadResultsForTarget(currentTarget);
 		}
 
-		// Класс ТСПУ (если уже считался) и статус канарейки — при каждой загрузке
+		// Класс ТСПУ (если уже считался) и статус мониторинга доступности — при каждой загрузке
 		try { if (typeof loadTspuReport === 'function') loadTspuReport(); } catch (e) {}
 		try { if (typeof loadCanaryStatus === 'function') loadCanaryStatus(); } catch (e) {}
 
