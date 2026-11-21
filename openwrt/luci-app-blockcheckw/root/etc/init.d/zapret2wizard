@@ -240,6 +240,9 @@ prepare_environment() {
 	[ -e /opt/zapret2/lua ] || ln -sf "$LUA_DIR" /opt/zapret2/lua 2>/dev/null || true
 	# Если /opt/zapret2/lua остался реальным каталогом от старой установки,
 	# симлинк не создастся — helper доложит файлы внутрь (см. ensure_lua).
+	# Load veth kernel module for client_probe_netns
+	modprobe veth 2>/dev/null || logger -t zapret2wizard "veth module load failed"
+
 	[ -x /usr/bin/blockcheckw-helper ] && /usr/bin/blockcheckw-helper ensure_lua >/dev/null 2>&1 || true
 	[ -e /opt/zapret2/ipset ] || ln -sf "$IPSET_DIR" /opt/zapret2/ipset 2>/dev/null || true
 
