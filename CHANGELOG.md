@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.36.30] (2026-11-21)
+
+* `_hostlist_path` понимает ключ `user_exclude`; 
+* редактор «Исключения (не обходить)» открывает `zapret_hosts_user_exclude.txt` без `Unknown hostlist target`.
+
 ## [0.36.29] (2026-11-21)
 
 * `_hostlist_path` знает `ytapi`, `preset_youtubei` и `auto`; 
