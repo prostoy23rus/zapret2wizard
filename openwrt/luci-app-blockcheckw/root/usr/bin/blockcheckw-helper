@@ -6469,6 +6469,12 @@ cmd_update() {
     fetch_remote_version "$tmp_dir/version.json" || ok=0
     fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/luci/menu.d/luci-app-blockcheckw.json" "$tmp_dir/menu.json" 8 || true
     fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/rpcd/acl.d/luci-app-blockcheckw.json" "$tmp_dir/acl.json" 8 || true
+    # Служба обновляет и то, что раньше оставалось старым: init.d (хуки канарейки,
+    # modprobe veth) и каталог/классификатор ТСПУ. Без них «Обновить службу»
+    # из 0.36.x ставила новый UI, но кнопка класса ТСПУ падала с "каталог не найден".
+    fetch_file "openwrt/luci-app-blockcheckw/root/etc/init.d/zapret2wizard" "$tmp_dir/zapret2wizard.initd" 8 || true
+    fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/tspu_catalog.txt" "$tmp_dir/tspu_catalog.txt" 8 || true
+    fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/tspu_classifier.lua" "$tmp_dir/tspu_classifier.lua" 8 || true
 
     if [ ! -s "$tmp_dir/main.js" ] || [ ! -s "$tmp_dir/blockcheckw-helper" ]; then
         rm -rf "$tmp_dir"
@@ -6494,8 +6500,18 @@ cmd_update() {
         echo '{"success":false,"error":"version.json скачался не полностью — обновление отменено."}'
         return 1
     fi
+    # Новые файлы обновляем только если скачались целиком (старые рабочие не трогаем)
+    if [ -s "$tmp_dir/zapret2wizard.initd" ] && ! head -n 1 "$tmp_dir/zapret2wizard.initd" | grep -q '^#!/bin/sh'; then
+        rm -f "$tmp_dir/zapret2wizard.initd"
+    fi
+    if [ -s "$tmp_dir/tspu_catalog.txt" ] && [ "$(grep -c '^--lua-desync\|^--payload' "$tmp_dir/tspu_catalog.txt" 2>/dev/null)" -lt 20 ]; then
+        rm -f "$tmp_dir/tspu_catalog.txt"
+    fi
+    if [ -s "$tmp_dir/tspu_classifier.lua" ] && ! grep -q 'luci.jsonc' "$tmp_dir/tspu_classifier.lua" 2>/dev/null; then
+        rm -f "$tmp_dir/tspu_classifier.lua"
+    fi
 
-    mkdir -p /usr/bin /usr/share/blockcheckw /usr/share/luci/menu.d /usr/share/rpcd/acl.d /www/luci-static/resources/view/blockcheckw
+    mkdir -p /usr/bin /usr/share/blockcheckw /usr/share/luci/menu.d /usr/share/rpcd/acl.d /www/luci-static/resources/view/blockcheckw /usr/share/zapret2wizard
     chmod 755 /www/luci-static/resources/view/blockcheckw /usr/share/blockcheckw 2>/dev/null || true
 
     # Prepare file permissions before moving into place to prevent 403 in uhttpd
@@ -6513,6 +6529,16 @@ cmd_update() {
     cp -f "$tmp_dir/version.json" /usr/share/blockcheckw/version.json
     [ -s "$tmp_dir/menu.json" ] && cp -f "$tmp_dir/menu.json" /usr/share/luci/menu.d/luci-app-blockcheckw.json
     [ -s "$tmp_dir/acl.json" ] && cp -f "$tmp_dir/acl.json" /usr/share/rpcd/acl.d/luci-app-blockcheckw.json
+    # init.d: sed-правки не нужны, файл самодостаточный. Применяется при следующем
+    # старте службы; modprobe veth делаем сразу — тесты клиента без него не идут.
+    if [ -s "$tmp_dir/zapret2wizard.initd" ]; then
+        cp -f "$tmp_dir/zapret2wizard.initd" /etc/init.d/zapret2wizard
+        chmod 755 /etc/init.d/zapret2wizard
+        modprobe veth 2>/dev/null || true
+    fi
+    [ -s "$tmp_dir/tspu_catalog.txt" ] && cp -f "$tmp_dir/tspu_catalog.txt" /usr/share/zapret2wizard/tspu_catalog.txt
+    [ -s "$tmp_dir/tspu_classifier.lua" ] && cp -f "$tmp_dir/tspu_classifier.lua" /usr/share/zapret2wizard/tspu_classifier.lua
+    chmod 644 /usr/share/zapret2wizard/tspu_catalog.txt /usr/share/zapret2wizard/tspu_classifier.lua 2>/dev/null || true
 
     chmod +x /usr/bin/blockcheckw-helper /usr/bin/circular-builder.lua
     chmod 644 /www/luci-static/resources/view/blockcheckw/main.js
