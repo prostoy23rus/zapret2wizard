@@ -1353,6 +1353,7 @@ return view.extend({
 		// её нет намеренно: пресет остаётся доступен бэкенду
 		// (blockcheckw-helper start --target tcp16) и внутренним вызовам.
 		var quickChipsList = [
+			{ id: 'builtin', icon: '🌐', name: 'Встроенные хосты' },
 			{ id: 'preset_youtube', icon: '📺', name: 'YouTube' },
 			{ id: 'preset_discord', icon: '💬', name: 'Discord' },
 			{ id: 'preset_instagram', icon: '📸', name: 'Instagram' },
@@ -4620,9 +4621,9 @@ return view.extend({
 
 		function showHostlistsModal(hostlists) {
 			function allowedHostlists(arr) {
-				return (arr || []).filter(function(h) {
-					return h.key === 'youtube' || h.key === 'discord' || h.key === 'instagram' || h.key === 'exclude';
-				});
+				// Показываем все реально существующие списки, включая user,
+				// exclude, x, twitch и ytapi. Раньше жёсткий фильтр скрывал их.
+				return (arr || []).filter(function(h) { return h && h.key; });
 			}
 			var lists = allowedHostlists(hostlists || zapretInfo.hostlists);
 
@@ -4631,6 +4632,7 @@ return view.extend({
 					{ key: 'youtube', name: 'YouTube', file: '/etc/zapret2wizard/ipset/zapret_hosts_youtube.txt', domains_count: 0, uci_configured: true },
 					{ key: 'discord', name: 'Discord', file: '/etc/zapret2wizard/ipset/zapret_hosts_discord.txt', domains_count: 0, uci_configured: true },
 					{ key: 'instagram', name: 'Instagram', file: '/etc/zapret2wizard/ipset/zapret_hosts_instagram.txt', domains_count: 0, uci_configured: true },
+					{ key: 'user', name: 'Общие сайты (User)', file: '/etc/zapret2wizard/ipset/zapret_hosts_user.txt', domains_count: 0, uci_configured: true },
 					{ key: 'exclude', name: 'Исключения (не обходить)', file: '/etc/zapret2wizard/ipset/zapret_hosts_user_exclude.txt', domains_count: 0, uci_configured: true }
 				];
 			}
@@ -4642,6 +4644,9 @@ return view.extend({
 				var isOk = (count > 0 && hl.uci_configured !== false);
 
 				var status = E('div', { style: 'font-size: 12px; margin-top: 6px; color: #abb2bf;' }, '');
+				if (hl.key === 'user') {
+					status.textContent = 'Список используется целью «Встроенные хосты». Чтобы применить его, выберите эту цель в сканере и запустите поиск/применение.';
+				}
 				var area = E('textarea', {
 					rows: 6,
 					spellcheck: 'false',

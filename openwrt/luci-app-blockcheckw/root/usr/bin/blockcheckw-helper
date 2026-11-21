@@ -1229,8 +1229,8 @@ cmd_start() {
     done
 
     case "$target" in
-        preset_youtube|youtube|preset_discord|discord|preset_instagram|instagram|preset_youtubei|ytapi|preset_x|x|preset_twitch|twitch) ;;
-        *) echo '{"error":"поддерживаются YouTube, Discord, Instagram, YouTube API, X и Twitch"}'; return 1 ;;
+        preset_youtube|youtube|preset_discord|discord|preset_instagram|instagram|preset_youtubei|ytapi|preset_x|x|preset_twitch|twitch|builtin|general) ;;
+        *) echo '{"error":"поддерживаются YouTube, Discord, Instagram, YouTube API, X, Twitch и встроенные хосты"}'; return 1 ;;
     esac
 
     # Clean domain if user entered multiple or dirty string
@@ -2638,8 +2638,8 @@ cmd_apply() {
         return 1
     fi
     case "$target" in
-        preset_youtube|youtube|preset_discord|discord|preset_instagram|instagram|preset_youtubei|ytapi|preset_x|x|preset_twitch|twitch) ;;
-        *) echo '{"success":false,"error":"поддерживаются только YouTube, Discord, Instagram, YouTube API, X и Twitch"}'; return 1 ;;
+        preset_youtube|youtube|preset_discord|discord|preset_instagram|instagram|preset_youtubei|ytapi|preset_x|x|preset_twitch|twitch|builtin|general) ;;
+        *) echo '{"success":false,"error":"поддерживаются только YouTube, Discord, Instagram, YouTube API, X, Twitch и встроенные хосты"}'; return 1 ;;
     esac
 
     # Backup zapret2 config
