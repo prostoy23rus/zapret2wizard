@@ -48,11 +48,7 @@ fetch_file() {
         return 1
     }
 
-    # Ensure /etc/hosts maps raw.githubusercontent.com to Fastly anycast IP if local DNS sinkholes it to 127.0.0.1
-    if ! grep -q 'raw.githubusercontent.com' /etc/hosts 2>/dev/null; then
-        echo '185.199.108.133 raw.githubusercontent.com' >> /etc/hosts
-        /etc/init.d/dnsmasq reload >/dev/null 2>&1 || true
-    fi
+    # Direct download below uses --resolve; no persistent DNS/hosts mutation.
 
     # Жёсткий бюджет на весь вызов: не даём установке и LuCI зависнуть.
     local tmo=5
@@ -1185,13 +1181,16 @@ scan_tunnel_service() {
 # что именно чинить.
 scan_preflight() {
     local miss="" hint=""
+    if [ -d /var/run/bcw_engine_repair.lock ]; then
+        engine_reply 0 "Дождитесь завершения проверки движка после обновления"
+        return 1
+    fi
     ensure_lua_layout
     command -v nft >/dev/null 2>&1 || { miss="$miss nftables"; hint="$hint; установите пакет nftables"; }
     [ -r /opt/zapret2/lua/zapret-lib.lua ] || { miss="$miss lua(zapret-lib.lua)"; hint="$hint; перезапустите службу или install.sh"; }
-    if [ ! -x /usr/bin/nfqws2 ]; then
-        miss="$miss nfqws2"; hint="$hint; переустановите службу или положите движок в /usr/bin/nfqws2"
-    elif ! /usr/bin/nfqws2 --version >/dev/null 2>&1; then
-        miss="$miss nfqws2(не запускается)"; hint="$hint; движок не для этой архитектуры"
+    if ! engine_load || ! bcw_engine_link; then
+        miss="$miss nfqws2: ${BCW_ENGINE_ERROR:-не удалось проверить движок}"
+        hint="$hint; обновите службу — совместимый движок восстанавливается автоматически"
     fi
     modprobe nfnetlink_queue 2>/dev/null || true
     modprobe nft_queue 2>/dev/null || true
@@ -1322,10 +1321,13 @@ cmd_start() {
 
     # Run in background via child process detached from rpcd pipes
     (
+        local scan_service_was_running=0 scan_lock_owned=0
+        _svc_running && scan_service_was_running=1
         cleanup_subshell() {
+            # Ранний отказ/проигрыш гонки не владеет runtime другого скана.
+            [ "$scan_lock_owned" = "1" ] || return 0
             rm -f "$PID_FILE"
             [ -n "${SCAN_KEEPER:-}" ] && kill "$SCAN_KEEPER" 2>/dev/null
-            rm -rf /var/run/bcw_scan.lock 2>/dev/null || true
             # Remove scanner priority bypass rule from fw4 output chain
             local handle=$(nft -a list chain inet fw4 output 2>/dev/null | grep '0x30000000' | awk '{print $NF}')
             [ -n "$handle" ] && nft delete rule inet fw4 output handle "$handle" 2>/dev/null || true
@@ -1341,12 +1343,54 @@ cmd_start() {
             # Restore DPI service if not running — или если исчезла таблица nft:
             # сканер сносит inet zapret2wizard, но процессы nfqws2 при этом
             # остаются живыми, и проверка одного статуса пропускает восстановление.
-            if ! get_dpi_service_status | grep -q running || ! nft list tables 2>/dev/null | grep -q 'inet zapret2wizard'; then
-                restart_dpi_service
+            if [ "$scan_service_was_running" = "1" ]; then
+                if ! get_dpi_service_status | grep -q running || ! nft list tables 2>/dev/null | grep -q 'inet zapret2wizard'; then
+                    restart_dpi_service
+                fi
             fi
             rm -f /tmp/bcw_scan_paused
+            rm -rf /var/run/bcw_scan.active /var/run/bcw_scan.lock 2>/dev/null || true
+            scan_lock_owned=0
         }
-        trap cleanup_subshell EXIT INT TERM
+        trap cleanup_subshell EXIT
+        trap 'exit 1' INT TERM
+
+        # Лок подбора снимаем в конце (trap), а берём его первым делом:
+        # иначе два одновременных запуска успевают пройти проверки до создания лока.
+        SCAN_LOCK="/var/run/bcw_scan.lock"
+        sleep 7200 &
+        SCAN_KEEPER=$!
+        if ! mkdir "$SCAN_LOCK" 2>/dev/null; then
+            _old=$(cat "$SCAN_LOCK/pid" 2>/dev/null)
+            # Пустой pid — лок только что создан другим процессом: даём 2 с и
+            # перепроверяем, иначе второй скан угоняет лок у первого.
+            [ -n "$_old" ] || { sleep 2; _old=$(cat "$SCAN_LOCK/pid" 2>/dev/null); }
+            if [ -n "$_old" ] && _scan_lock_alive "$_old"; then
+                kill "$SCAN_KEEPER" 2>/dev/null
+                write_status "error" 0 "Подбор уже выполняется. Дождитесь завершения."
+                echo '{"success":false,"error":"Подбор уже выполняется. Дождитесь завершения."}'
+                exit 1
+            fi
+            # Лок осиротел (keeper-sleep пережил убитый скан) — снимаем.
+            [ -n "$_old" ] && kill -9 "$_old" 2>/dev/null
+            rm -rf "$SCAN_LOCK"
+            mkdir "$SCAN_LOCK" 2>/dev/null || exit 1
+        fi
+        scan_lock_owned=1
+        if [ -d /var/run/bcw_engine_repair.lock ]; then
+            kill "$SCAN_KEEPER" 2>/dev/null || true
+            rm -rf "$SCAN_LOCK"
+            scan_lock_owned=0
+            write_status "error" 0 "Дождитесь завершения проверки движка после обновления"
+            exit 1
+        fi
+        echo "$SCAN_KEEPER" > "$SCAN_LOCK/pid" 2>/dev/null || true
+        # PID самого shell-скана (subshell): по нему отличаем живой скан от
+        # осиротевшего keeper-sleep.
+        local _scan_self=""
+        read -r _scan_self _ < /proc/self/stat 2>/dev/null || true
+        [ -n "$_scan_self" ] && echo "$_scan_self" > "$SCAN_LOCK/scan_pid" 2>/dev/null || true
+
 
         # Осиротевшие проверки прошлых запусков (без pkill: его нет в busybox)
         for _p in /proc/[0-9]*; do
@@ -1395,34 +1439,6 @@ cmd_start() {
             exit 1
         fi
 
-        # Лок подбора снимаем в конце (trap), а берём его первым делом:
-        # иначе два одновременных запуска успевают пройти проверки до создания лока.
-        SCAN_LOCK="/var/run/bcw_scan.lock"
-        sleep 7200 &
-        SCAN_KEEPER=$!
-        if ! mkdir "$SCAN_LOCK" 2>/dev/null; then
-            _old=$(cat "$SCAN_LOCK/pid" 2>/dev/null)
-            # Пустой pid — лок только что создан другим процессом: даём 2 с и
-            # перепроверяем, иначе второй скан угоняет лок у первого.
-            [ -n "$_old" ] || { sleep 2; _old=$(cat "$SCAN_LOCK/pid" 2>/dev/null); }
-            if [ -n "$_old" ] && _scan_lock_alive "$_old"; then
-                kill "$SCAN_KEEPER" 2>/dev/null
-                write_status "error" 0 "Подбор уже выполняется. Дождитесь завершения."
-                echo '{"success":false,"error":"Подбор уже выполняется. Дождитесь завершения."}'
-                exit 1
-            fi
-            # Лок осиротел (keeper-sleep пережил убитый скан) — снимаем.
-            [ -n "$_old" ] && kill -9 "$_old" 2>/dev/null
-            rm -rf "$SCAN_LOCK"
-            mkdir "$SCAN_LOCK" 2>/dev/null || true
-        fi
-        echo "$SCAN_KEEPER" > "$SCAN_LOCK/pid" 2>/dev/null || true
-        # PID самого shell-скана (subshell): по нему отличаем живой скан от
-        # осиротевшего keeper-sleep.
-        local _scan_self=""
-        read -r _scan_self _ < /proc/self/stat 2>/dev/null || true
-        [ -n "$_scan_self" ] && echo "$_scan_self" > "$SCAN_LOCK/scan_pid" 2>/dev/null || true
-
         echo "[blockcheckw-helper] Starting Unified Smart Scan for $domain (target=$target, workers=$workers, auto_apply=$auto_apply)..." >> "$LOG_FILE"
         history_add "scan_start" "$(metric_target_key "$target")" "Начат подбор для $domain"
         # На время подбора службу останавливаем: иначе её правила перехватывают
@@ -1448,7 +1464,7 @@ cmd_start() {
                     i=$((i + 1))
                 done
                 sleep 5
-                if ! _svc_running; then
+                if [ "$scan_service_was_running" = "1" ] && ! _svc_running; then
                     _svc_start_bg
                     logger -t zapret2wizard "сторож подбора: служба поднята после завершения сканирования"
                 fi
@@ -1503,6 +1519,14 @@ cmd_start() {
 
         # Phase 1: Fast diagnostic probe (3-6s)
         HOME="$scan_home" /usr/bin/blockcheckw --qnum "$scan_qnum" -w "$workers" scan -d "$domain" -p "$protocols" --dns "$scan_dns" --from-file "$probe_corpus" -o "$probe_output" --auto --timeout 120 >> "$LOG_FILE" 2>&1
+
+        local probe_exit=$?
+        # Ошибка прибора — не «0 стратегий». Не запускаем фазу 2 после
+        # отказа prerequisite, иначе теряются причина и время пользователя.
+        if [ "$probe_exit" -ne 0 ]; then
+            scan_failure "$probe_exit" "$LOG_FILE"
+            exit "$probe_exit"
+        fi
 
         local probe_eval=$(lua - "$probe_output" << 'EOF' 2>/dev/null
 local json = require("luci.jsonc")
@@ -2141,7 +2165,7 @@ EOF
             [ "$apply_ok" = "1" ] && history_add "apply" "$(metric_target_key "$target")" "Стратегия применена и проверена в Zapret2"
         else
             if [ "$exit_code" -ne 0 ]; then
-                local last_err=$(tail -n 5 "$LOG_FILE" 2>/dev/null | grep -E 'error|Error|failed|FATAL' | tail -n 1)
+                local last_err=$(scan_error_detail "$LOG_FILE" "$exit_code")
                 # Самая частая причина на чистом роутере — нет модуля ядра nfnetlink_queue.
                 local kmod_err=$(grep -E 'nfq_unbind_pf|nfq_bind_pf|nfq_open\(' "$LOG_FILE" 2>/dev/null | tail -n 1)
                 [ -n "$kmod_err" ] && last_err=""
@@ -2182,9 +2206,7 @@ EOF
             fi
         fi
 
-        rm -f "$PID_FILE"
-        kill "$SCAN_KEEPER" 2>/dev/null
-        rm -rf "$SCAN_LOCK" /var/run/bcw_scan.active 2>/dev/null
+        # EXIT cleanup restores runtime before releasing our scan fence.
     ) </dev/null >/dev/null 2>&1 &
 
     local pid=$!
@@ -2717,6 +2739,21 @@ cmd_apply_status() {
 }
 
 cmd_apply() {
+    if ! mkdir /var/run/bcw_apply_runtime.lock 2>/dev/null; then
+        engine_reply 0 "Применение стратегии уже выполняется"; return 1
+    fi
+    (
+        trap 'rmdir /var/run/bcw_apply_runtime.lock 2>/dev/null || true' EXIT
+        trap 'exit 1' INT TERM HUP
+        cmd_apply_impl "$@"
+    )
+}
+
+cmd_apply_impl() {
+    if [ -d /var/run/bcw_engine_repair.lock ]; then
+        engine_reply 0 "Дождитесь завершения проверки движка после обновления"
+        return 1
+    fi
     local target=""
     local script_text=""
     local script_file=""
@@ -4891,7 +4928,13 @@ cmd_doctor() {
                 printf '      → %s\n' "$hint"
             fi
         fi
-        checks="$checks{\"name\":\"$name\",\"ok\":$([ "$state" = "1" ] && echo true || echo false),\"detail\":\"$detail\",\"hint\":\"$hint\"},"
+        local entry
+        entry=$(lua - "$name" "$state" "$detail" "$hint" << 'DOCTORJSON'
+local json = require("luci.jsonc")
+print(json.stringify({name = arg[1], ok = arg[2] == "1", detail = arg[3], hint = arg[4]}))
+DOCTORJSON
+)
+        checks="$checks$entry,"
     }
 
     local arch=$(uname -m)
@@ -4952,11 +4995,12 @@ cmd_doctor() {
         add_check "flow offloading" 1 "отключён" ""
     fi
 
-    local engine=""
-    for p in /usr/bin/nfqws2 /opt/zapret2/nfq2/nfqws2 /usr/bin/nfqws; do
-        [ -x "$p" ] && { engine="$p"; break; }
-    done
-    if [ -n "$engine" ]; then add_check "движок nfqws2" 1 "$engine" ""; else add_check "движок nfqws2" 0 "бинарник не найден" "Переустановите службу: install.sh скачает nfqws2 под вашу архитектуру"; fi
+    # Проверяем именно тот ABI/опции/Lua, которые нужны сканеру, а не chmod +x.
+    if engine_load && bcw_engine_check && bcw_engine_check "${BCW_ENGINE_ROOT:-}/opt/zapret2/nfq2/nfqws2" "${BCW_ENGINE_ROOT:-}/opt/zapret2/lua"; then
+        add_check "движок nfqws2" 1 "/usr/bin и /opt: filter-mark и Lua совместимы" ""
+    else
+        add_check "движок nfqws2" 0 "${BCW_ENGINE_ERROR:-модуль проверки недоступен}" "Обновите службу: движок и Lua будут проверены и восстановлены автоматически"
+    fi
 
     # nfqws2 из /opt/zapret2/nfq2 ищет zapret-lib.lua в /opt/zapret2/lua.
     # Без этого сканер падает на предполётной проверке (exit code 6).
@@ -5004,102 +5048,220 @@ cmd_doctor() {
     [ "$ok" = "1" ]
 }
 
-# Определяет каталог бинарников zapret2 под архитектуру роутера.
-_engine_arch_dir() {
-    case "$(uname -m)" in
-        aarch64|arm64) echo "linux-arm64" ;;
-        armv7*|armv6*|arm) echo "linux-arm" ;;
-        x86_64|amd64) echo "linux-x86_64" ;;
-        i386|i686) echo "linux-x86" ;;
-        mips64*) echo "linux-mips64" ;;
-        mips) echo "linux-mips" ;;
-        mipsel) echo "linux-mipsel" ;;
-        riscv64) echo "linux-riscv64" ;;
-        ppc|powerpc) echo "linux-ppc" ;;
-        *) echo "" ;;
-    esac
+# Один владелец проверки/замены движка: общий модуль, также используемый install/init.
+engine_load() {
+    local module="${BCW_ENGINE_ROOT:-}/usr/share/zapret2wizard/engine.sh"
+    if [ ! -r "$module" ]; then
+        BCW_ENGINE_ERROR="нет общего модуля проверки движка; обновите службу"
+        return 1
+    fi
+    . "$module"
 }
 
-# Скачивает и устанавливает движок nfqws2 с зеркал GitHub.
+engine_reply() {
+    lua - "$1" "$2" << 'ENGINEJSON'
+local json = require("luci.jsonc")
+print(json.stringify({success = arg[1] == "1", error = arg[1] ~= "1" and arg[2] or nil,
+    message = arg[1] == "1" and arg[2] or nil}))
+ENGINEJSON
+}
+
 cmd_install_engine() {
-    if [ -x /usr/bin/nfqws2 ]; then
-        printf '{"success":true,"already":true,"path":"/usr/bin/nfqws2"}\n'
+    cmd_engine_repair
+}
+
+engine_repair_state() {
+    local tmp
+    tmp=$(mktemp /tmp/bcw-engine-state.XXXXXX) || return 1
+    lua - "$1" "$2" > "$tmp" << 'REPAIRSTATE'
+local j = require("luci.jsonc")
+print(j.stringify({state = arg[1], success = arg[1] == "done", error = arg[1] == "error" and arg[2] or nil,
+    message = arg[2]}))
+REPAIRSTATE
+    mv -f "$tmp" /tmp/bcw_engine_repair.json
+}
+
+cmd_engine_repair() {
+    local token="${1:-}"
+    if [ -z "$token" ]; then
+        if ! mkdir /var/run/bcw_engine_repair.lock 2>/dev/null; then
+            engine_reply 0 "Проверка движка уже выполняется"; return 1
+        fi
+        token="$$-$(date +%s)"
+        printf '%s\n' "$token" > /var/run/bcw_engine_repair.lock/token
+    elif [ "$(cat /var/run/bcw_engine_repair.lock/token 2>/dev/null)" != "$token" ]; then
+        engine_reply 0 "Проверка движка потеряла владение операцией"; return 1
+    fi
+    # Обе стороны сначала берут свой засов, затем перепроверяют чужой:
+    # ни подбор, ни применение не могут войти после этой точки.
+    if [ -d /var/run/bcw_scan.lock ] || [ -d /var/run/bcw_apply_runtime.lock ]; then
+        engine_repair_state error "Дождитесь завершения подбора или применения стратегии"
+        rm -rf /var/run/bcw_engine_repair.lock
+        return 1
+    fi
+    engine_repair_state running "Проверяю совместимость движка и Lua"
+    echo $$ > /var/run/bcw_engine_repair.lock/pid
+    (
+        local work was_running=0 changed=0 committed=0 rollback_ok=1 f
+        work=$(mktemp -d /tmp/bcw-engine-repair.XXXXXX) || exit 1
+        trap 'rm -rf "$work"' EXIT
+        _svc_running && was_running=1
+        # Бэкап включает оба пути и Lua; конфиг пользователя не трогаем.
+        if [ -e /usr/bin/nfqws2 ] || [ -L /usr/bin/nfqws2 ]; then
+            cp -Pp /usr/bin/nfqws2 "$work/nfqws2" || exit 1
+        fi
+        if [ -L /usr/share/zapret2wizard/lua ]; then
+            engine_repair_state error "Каталог Lua службы является внешней ссылкой; автоматическая замена отменена"
+            exit 1
+        fi
+        [ ! -e /usr/share/zapret2wizard/lua ] || cp -RPp /usr/share/zapret2wizard/lua "$work/lua" || exit 1
+        if [ -e /opt/zapret2/lua ] || [ -L /opt/zapret2/lua ]; then
+            cp -RPp /opt/zapret2/lua "$work/scanner-lua" || exit 1
+        fi
+        if [ -e /opt/zapret2/nfq2/nfqws2 ] || [ -L /opt/zapret2/nfq2/nfqws2 ]; then
+            cp -Pp /opt/zapret2/nfq2/nfqws2 "$work/legacy" || exit 1
+        fi
+        engine_repair_cleanup() {
+            if [ "$changed" = "1" ] && [ "$committed" != "1" ]; then
+                if [ -e "$work/nfqws2" ] || [ -L "$work/nfqws2" ]; then
+                    cp -Pp "$work/nfqws2" /usr/bin/nfqws2.rollback && mv -f /usr/bin/nfqws2.rollback /usr/bin/nfqws2 || rollback_ok=0
+                else
+                    rm -f /usr/bin/nfqws2
+                fi
+                rm -f /opt/zapret2/nfq2/nfqws2
+                [ ! -e "$work/legacy" ] && [ ! -L "$work/legacy" ] || cp -Pp "$work/legacy" /opt/zapret2/nfq2/nfqws2 || rollback_ok=0
+                # Восстанавливаем весь набор, включая отсутствие новых файлов и старые ссылки.
+                rm -rf /usr/share/zapret2wizard/lua /opt/zapret2/lua
+                [ ! -d "$work/lua" ] || cp -RPp "$work/lua" /usr/share/zapret2wizard/lua || rollback_ok=0
+                if [ -e "$work/scanner-lua" ] || [ -L "$work/scanner-lua" ]; then
+                    cp -RPp "$work/scanner-lua" /opt/zapret2/lua || rollback_ok=0
+                fi
+                [ "$was_running" != "1" ] || { BCW_ENGINE_ONLY=1 BCW_INTERNAL_STOP=1 timeout -s KILL 30 /etc/init.d/zapret2wizard restart >/dev/null 2>&1 && wait_dpi_ready 25; } || rollback_ok=0
+            fi
+            if [ "$rollback_ok" = "1" ]; then
+                rm -rf "$work"
+            else
+                engine_repair_state error "Не удалось полностью восстановить runtime; резервная копия: $work"
+            fi
+            # Освобождение выполняется единожды внешним владельцем token.
+        }
+        trap engine_repair_cleanup EXIT
+        trap 'engine_repair_state error "Проверка движка прервана; выполнен откат"; exit 1' INT TERM HUP
+        engine_repair_state running "Проверяю совместимость движка, Lua и пути сканера"
+        # Старый updater не знал engine.sh. Новый helper сам довозит модуль.
+        if ! engine_load; then
+            fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/engine.sh" "$work/engine.sh" 12 &&
+                sh -n "$work/engine.sh" && grep -q '^bcw_engine_ensure()' "$work/engine.sh" || {
+                    engine_repair_state error "Не удалось загрузить модуль проверки движка"; exit 1;
+                }
+            mkdir -p /usr/share/zapret2wizard
+            cp "$work/engine.sh" /usr/share/zapret2wizard/engine.sh.new &&
+                mv -f /usr/share/zapret2wizard/engine.sh.new /usr/share/zapret2wizard/engine.sh || exit 1
+            engine_load || exit 1
+        fi
+        # Старый updater мог не довезти init (раньше он был необязательным).
+        # Не допускаем автоматический restart через init с DNS/миграционными хуками.
+        if ! grep -q 'BCW_ENGINE_ONLY' /etc/init.d/zapret2wizard 2>/dev/null; then
+            fetch_file "openwrt/luci-app-blockcheckw/root/etc/init.d/zapret2wizard" "$work/initd" 12 &&
+                sh -n "$work/initd" && grep -q 'BCW_ENGINE_ONLY' "$work/initd" || {
+                    engine_repair_state error "Не удалось загрузить init для безопасного обновления движка"; exit 1;
+                }
+            cp -p /etc/init.d/zapret2wizard /etc/init.d/zapret2wizard.engine-backup || exit 1
+            chmod 755 "$work/initd"
+            cp "$work/initd" /etc/init.d/zapret2wizard.new &&
+                mv -f /etc/init.d/zapret2wizard.new /etc/init.d/zapret2wizard || exit 1
+        fi
+        if bcw_engine_check; then
+            changed=1
+            bcw_engine_ensure || { engine_repair_state error "$BCW_ENGINE_ERROR"; exit 1; }
+            [ "$BCW_ENGINE_CHANGED" = "1" ] || changed=0
+        else
+            # Валидируем скачанный движок именно с полным новым набором Lua.
+            mkdir -p "$work/new-lua"
+            for f in zapret-lib.lua zapret-antidpi.lua zapret-auto.lua zapret-obfs.lua zapret-pcap.lua zapret-tests.lua zapret-wgobfs.lua; do
+                fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/lua/$f" "$work/new-lua/$f" 12 || {
+                    engine_repair_state error "Не удалось загрузить совместимый набор Lua ($f); прежний движок сохранён"; exit 1;
+                }
+            done
+            changed=1
+            BCW_ENGINE_LUA_DIR="$work/new-lua"
+            bcw_engine_ensure || { engine_repair_state error "$BCW_ENGINE_ERROR"; exit 1; }
+            unset BCW_ENGINE_LUA_DIR
+            mkdir -p /usr/share/zapret2wizard/lua
+            for f in "$work/new-lua/"*.lua; do
+                cp "$f" "/usr/share/zapret2wizard/lua/$(basename "$f").new" &&
+                    mv -f "/usr/share/zapret2wizard/lua/$(basename "$f").new" "/usr/share/zapret2wizard/lua/$(basename "$f")" || exit 1
+            done
+        fi
+        local engine_changed="$changed"
+        changed=1 # Lua-layout reconciliation is also covered by rollback.
+        ensure_lua_layout
+        bcw_engine_check && bcw_engine_check /opt/zapret2/nfq2/nfqws2 /opt/zapret2/lua || {
+            engine_repair_state error "$BCW_ENGINE_ERROR"; exit 1;
+        }
+        if [ "$engine_changed" = "1" ] && [ "$was_running" = "1" ]; then
+            BCW_ENGINE_ONLY=1 BCW_INTERNAL_STOP=1 timeout -s KILL 30 /etc/init.d/zapret2wizard restart >/dev/null 2>&1 && wait_dpi_ready 25 || {
+                engine_repair_state error "Обновлённый движок не поднял службу; восстановлен прежний комплект"; exit 1;
+            }
+        fi
+        committed=1
+        engine_repair_state done "Движок и Lua совместимы; служба и сканер используют единый nfqws2"
+        engine_reply 1 "Движок проверен и готов к подбору"
+    )
+    local rc=$?
+    # Ошибки бэкапа/IO до установки trap тоже освобождают засов и не оставляют
+    # статус running/success от предыдущей операции.
+    if [ "$rc" -ne 0 ] && ! grep -q '"state":"error"' /tmp/bcw_engine_repair.json 2>/dev/null; then
+        engine_repair_state error "Не удалось завершить проверку движка; смотрите журнал проверки"
+    fi
+    if [ "$(cat /var/run/bcw_engine_repair.lock/token 2>/dev/null)" = "$token" ]; then
+        rm -f /tmp/bcw_engine_repair.pid
+        rm -rf /var/run/bcw_engine_repair.lock
+    fi
+    return "$rc"
+}
+
+cmd_engine_repair_bg() {
+    local token
+    # Только победитель mkdir публикует статус и запускает worker.
+    if ! mkdir /var/run/bcw_engine_repair.lock 2>/dev/null; then
+        engine_reply 1 "Проверка движка уже выполняется"
         return 0
     fi
-
-    local dir
-    dir=$(_engine_arch_dir)
-    if [ -z "$dir" ]; then
-        printf '{"success":false,"error":"Unsupported architecture: %s"}\n' "$(uname -m)"
-        return 1
+    token="$$-$(date +%s)"
+    printf '%s\n' "$token" > /var/run/bcw_engine_repair.lock/token
+    engine_repair_state running "Запущена проверка движка после обновления"
+    if command -v setsid >/dev/null 2>&1; then
+        setsid /usr/bin/blockcheckw-helper engine_repair "$token" </dev/null >/tmp/bcw_engine_repair.log 2>&1 &
+    else
+        /usr/bin/blockcheckw-helper engine_repair "$token" </dev/null >/tmp/bcw_engine_repair.log 2>&1 &
     fi
-
-    local tag="v1.0.7"
-    local tarball="zapret2-${tag}.tar.gz"
-    local url="https://github.com/bol-van/zapret2/releases/download/${tag}/${tarball}"
-    local work="/tmp/bcw_engine_$$"
-    mkdir -p "$work" 2>/dev/null
-
-    local attempt mirror got=""
-    local raw_engine="https://raw.githubusercontent.com/prostoy23rus/zapret2wizard/main/openwrt/engine/nfqws2-${dir}"
-
-    # 1. Свой репозиторий: тот же канал raw, которым работает обновление.
-    for attempt in 1 2 3; do
-        rm -f "$work/nfqws2"
-        curl -fsSL -k --connect-timeout 6 -m 120 "$raw_engine?_t=$(date +%s)" -o "$work/nfqws2" 2>/dev/null
-        if [ "$(wc -c < "$work/nfqws2" 2>/dev/null || echo 0)" -gt 50000 ]; then
-            got="repo-raw"
-            break
-        fi
-        sleep 2
-    done
-
-    # 2. Если raw недоступен — архив релиза zapret2 с зеркал.
-    if [ -z "$got" ]; then
-        for attempt in 1 2 3; do
-            for mirror in "$url" "https://ghproxy.net/$url" "https://gh-proxy.com/$url"; do
-                rm -f "$work/pkg.tgz" "$work/nfqws2"
-                if ! curl -fsSL -k --connect-timeout 8 -m 180 "$mirror" -o "$work/pkg.tgz" 2>/dev/null; then
-                    continue
-                fi
-                [ -s "$work/pkg.tgz" ] || continue
-
-                tar -xz -O --wildcards "*/binaries/${dir}/nfqws2" < "$work/pkg.tgz" > "$work/nfqws2" 2>/dev/null
-                if [ "$(wc -c < "$work/nfqws2" 2>/dev/null || echo 0)" -lt 50000 ]; then
-                    rm -rf "$work/x"
-                    mkdir -p "$work/x"
-                    tar -xzf "$work/pkg.tgz" -C "$work/x" 2>/dev/null
-                    local found
-                    found=$(find "$work/x" -path "*/binaries/${dir}/nfqws2" -type f 2>/dev/null | head -1)
-                    [ -n "$found" ] && cp -f "$found" "$work/nfqws2" 2>/dev/null
-                fi
-
-                if [ "$(wc -c < "$work/nfqws2" 2>/dev/null || echo 0)" -gt 50000 ]; then
-                    got="$mirror"
-                    break
-                fi
-            done
-            [ -n "$got" ] && break
-            sleep 2
-        done
-    fi
-
-    if [ -z "$got" ]; then
-        rm -rf "$work"
-        printf '{"success":false,"error":"Не удалось скачать nfqws2 ни с одного зеркала","arch":"%s"}\n' "$dir"
-        return 1
-    fi
-
-    cp -f "$work/nfqws2" /usr/bin/nfqws2
-    chmod +x /usr/bin/nfqws2
-    mkdir -p /opt/zapret2/nfq2 2>/dev/null
-    [ -e /opt/zapret2/nfq2/nfqws2 ] || ln -sf /usr/bin/nfqws2 /opt/zapret2/nfq2/nfqws2 2>/dev/null
-    local size=$(wc -c < /usr/bin/nfqws2 2>/dev/null || echo 0)
-    rm -rf "$work"
-
-    history_add "engine" "" "Установлен движок nfqws2 ($dir)"
-    printf '{"success":true,"installed":true,"arch":"%s","size":%s,"mirror":"%s"}\n' "$dir" "$size" "$got"
+    echo $! > /tmp/bcw_engine_repair.pid
+    engine_reply 1 "Совместимость движка проверяется в фоне"
 }
+
+cmd_engine_repair_status() {
+    if [ -s /tmp/bcw_engine_repair.json ]; then
+        cat /tmp/bcw_engine_repair.json
+    else
+        printf '{"state":"idle","success":false}\n'
+    fi
+}
+
+scan_error_detail() {
+    local log="$1" code="$2" detail
+    detail=$(grep -iE 'error|failed|fatal|requires build' "$log" 2>/dev/null | tail -n 1)
+    [ -n "$detail" ] || detail="Сканер завершился с кодом $code; смотрите журнал подбора"
+    printf '%s\n' "$detail"
+}
+
+scan_failure() {
+    local detail
+    detail=$(scan_error_detail "$2" "$1")
+    write_status "error" 0 "Ошибка подбора: $detail" ',"strategies":[]'
+    printf '[blockcheckw-helper] Scan failed with exit code %s: %s\n' "$1" "$detail" >> "$2"
+}
+
 
 # Компактный отчёт: состояние службы + живая проверка сервиса.
 cmd_selftest() {
@@ -6573,6 +6735,12 @@ cmd_update() {
     fetch_file "openwrt/luci-app-blockcheckw/root/www/luci-static/resources/view/blockcheckw/main.js" "$tmp_dir/main.js" 8 || ok=0
     fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/blockcheckw/zapret2_presets.json" "$tmp_dir/zapret2_presets.json" 8 || fetch_file "strategies/zapret2_presets.json" "$tmp_dir/zapret2_presets.json" 8 || ok=0
     fetch_remote_version "$tmp_dir/version.json" || ok=0
+    fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/engine.sh" "$tmp_dir/engine.sh" 12 || ok=0
+    if [ ! -s "$tmp_dir/engine.sh" ] || ! sh -n "$tmp_dir/engine.sh" || ! grep -q '^bcw_engine_ensure()' "$tmp_dir/engine.sh"; then
+        rm -rf "$tmp_dir"
+        engine_reply 0 "Не удалось загрузить модуль совместимости движка; обновление отменено"
+        return 1
+    fi
     fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/luci/menu.d/luci-app-blockcheckw.json" "$tmp_dir/menu.json" 8 || true
     fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/rpcd/acl.d/luci-app-blockcheckw.json" "$tmp_dir/acl.json" 8 || true
     # Служба обновляет и то, что раньше оставалось старым: init.d (хуки мониторинга доступности,
@@ -6627,6 +6795,10 @@ cmd_update() {
     [ -f "$tmp_dir/acl.json" ] && chmod 644 "$tmp_dir/acl.json" 2>/dev/null || true
 
     # Install files atomically
+    cp -f "$tmp_dir/engine.sh" /usr/share/zapret2wizard/engine.sh.new &&
+        mv -f /usr/share/zapret2wizard/engine.sh.new /usr/share/zapret2wizard/engine.sh || {
+            engine_reply 0 "Не удалось установить модуль совместимости движка"; return 1;
+        }
     cp -f "$tmp_dir/blockcheckw-helper" /usr/bin/blockcheckw-helper
     cp -f "$tmp_dir/circular-builder.lua" /usr/bin/circular-builder.lua
     ln -sf /usr/bin/blockcheckw-helper /usr/bin/zapret2wizard 2>/dev/null || true
@@ -6678,7 +6850,10 @@ cmd_update() {
         history_add "kmods" "" "обновление: модули ядра доустанавливаются в фоне" >/dev/null 2>&1 || true
     fi
 
-    echo "[blockcheckw-helper] Successfully updated to version $new_ver" >> "$LOG_FILE"
+    # Выполняется НОВЫМ helper, не старым процессом обновления. Не считаем
+    # загрузку файлов доказательством совместимости движка. UI опрашивает статус.
+    /usr/bin/blockcheckw-helper engine_repair_bg >/dev/null 2>&1
+    echo "[blockcheckw-helper] Files updated to version $new_ver; runtime verification started" >> "$LOG_FILE"
     printf '{"success":true,"version":"%s","message":"Служба успешно обновлена до версии %s!%s"}\n' "$new_ver" "$new_ver" "$kmods_note"
 }
 
@@ -7553,6 +7728,9 @@ quic_probe) cmd_quic_probe && echo ok || echo fail ;;
 quic_mode) shift; cmd_quic_mode "$@" ;;
 optimize_dns) cmd_optimize_dns ;;
     install_engine) cmd_install_engine ;;
+    engine_repair) shift; cmd_engine_repair "$@" ;;
+    engine_repair_bg) cmd_engine_repair_bg ;;
+    engine_repair_status) cmd_engine_repair_status ;;
     selftest) shift; cmd_selftest "$@" ;;
     class) shift; cmd_class "$@" ;;
     netcheck) cmd_netcheck ;;

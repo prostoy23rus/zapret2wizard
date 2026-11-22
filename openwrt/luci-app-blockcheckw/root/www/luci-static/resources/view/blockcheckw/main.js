@@ -5066,12 +5066,43 @@ return view.extend({
 			});
 		}
 
-		// Check if the service was just updated and show friendly notification
-		try {
-			if (localStorage.getItem('bcw_just_updated') === '1') {
-				localStorage.removeItem('bcw_just_updated');
-				ui.addNotification(null, E('p', {}, '✓ Служба Zapret2Wizard успешно обновлена до актуальной версии!'), 'info');
+		// Старый updater довозит новый helper, но не умеет запускать проверку ABI.
+		// Продолжаем обновление новым кодом после перезагрузки страницы, без второго клика.
+		function finishRuntimeUpdate() {
+			var attempts = 0;
+			ui.addNotification(null, E('p', {}, 'Файлы обновлены. Проверяю совместимость движка и Lua…'), 'info');
+			function pollRuntime() {
+				fs.exec(HELPER_BIN, ['engine_repair_status']).then(function(res) {
+					var d = parseHelperJson(res) || {};
+					if (d.state === 'done') {
+						localStorage.removeItem('bcw_just_updated');
+						ui.addNotification(null, E('p', {}, '✓ Обновление проверено: движок и Lua готовы к подбору.'), 'info');
+						return;
+					}
+					if (d.state === 'error') {
+						localStorage.removeItem('bcw_just_updated');
+						ui.addNotification(null, E('p', {}, 'Не удалось завершить проверку обновления: ' + (d.error || d.message || 'см. диагностику')), 'danger');
+						return;
+					}
+					if (++attempts < 120) setTimeout(pollRuntime, 3000);
+					else ui.addNotification(null, E('p', {}, 'Проверка обновления ещё не завершена. Статус: Диагностика, журнал проверки движка.'), 'warning');
+				}).catch(function() {
+					if (++attempts < 120) setTimeout(pollRuntime, 3000);
+					else ui.addNotification(null, E('p', {}, 'Не удалось получить статус проверки движка. Обновите страницу, чтобы повторить проверку.'), 'warning');
+				});
 			}
+			fs.exec(HELPER_BIN, ['engine_repair_bg']).then(function(res) {
+				var started = parseHelperJson(res);
+				if (!started || !started.success) {
+					ui.addNotification(null, E('p', {}, 'Не удалось запустить проверку движка: ' + ((started && started.error) || res.stderr || 'повторите обновление страницы')), 'danger');
+					return;
+				}
+				setTimeout(pollRuntime, 1000);
+			})
+				.catch(function() { setTimeout(pollRuntime, 1000); });
+		}
+		try {
+			if (localStorage.getItem('bcw_just_updated') === '1') finishRuntimeUpdate();
 		} catch(e) {}
 
 		// Show update banner if new version is already detected

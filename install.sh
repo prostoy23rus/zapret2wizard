@@ -300,85 +300,7 @@ cp -f "$TMP_DIR/blockcheckw" /usr/bin/blockcheckw
 chmod +x /usr/bin/blockcheckw
 echo -e "${GREEN}✓${NC} Бинарник установлен: ${BOLD}/usr/bin/blockcheckw${NC}"
 
-# 5.1. Установка автономного бинарника nfqws2 (All-in-One DPI Engine)
-echo -e "${BLUE}ℹ${NC} Проверка и установка ядра десинхронизации nfqws2..."
-if [ ! -x /usr/bin/nfqws2 ]; then
-    if [ -x /opt/zapret2/nfq2/nfqws2 ]; then
-        cp -f /opt/zapret2/nfq2/nfqws2 /usr/bin/nfqws2
-        chmod +x /usr/bin/nfqws2
-    fi
-fi
-if [ ! -x /usr/bin/nfqws2 ]; then
-    # Сначала берём движок из нашего репозитория (raw-канал работает там,
-    # где github.com с релизами недоступен).
-    RAW_ENGINE="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main/openwrt/engine/nfqws2-linux-${ARCH}?_t=$(date +%s)"
-    if curl -fsSL -k --connect-timeout 6 -m 120 "$RAW_ENGINE" -o /tmp/nfqws2.raw 2>/dev/null && [ "$(wc -c < /tmp/nfqws2.raw 2>/dev/null || echo 0)" -gt 50000 ]; then
-        cp -f /tmp/nfqws2.raw /usr/bin/nfqws2
-        chmod +x /usr/bin/nfqws2
-        echo -e "${GREEN}✓${NC} Движок nfqws2 получен из репозитория проекта."
-    fi
-    rm -f /tmp/nfqws2.raw
-fi
-
-if [ ! -x /usr/bin/nfqws2 ]; then
-    ZAPRET_DIR="linux-${ARCH}"
-    ZAPRET_TAG="v1.0.7"
-    ZAPRET_TARBALL="zapret2-${ZAPRET_TAG}.tar.gz"
-    ZAPRET_URL="https://github.com/bol-van/zapret2/releases/download/${ZAPRET_TAG}/${ZAPRET_TARBALL}"
-    echo -e "${BLUE}ℹ${NC} Загрузка ядра nfqws2 для ${BOLD}${ZAPRET_DIR}${NC}..."
-
-    _install_nfqws2() {
-        local url="$1" out="/tmp/zap2.$$.tgz"
-        rm -f "$out" /tmp/nfqws2.$$ 2>/dev/null
-        curl -fsSL -k --connect-timeout 8 -m 180 "$url" -o "$out" 2>/dev/null || { rm -f "$out"; return 1; }
-        [ -s "$out" ] || { rm -f "$out"; return 1; }
-        tar -xz -O --wildcards "*/binaries/${ZAPRET_DIR}/nfqws2" < "$out" > /tmp/nfqws2.$$ 2>/dev/null
-        local size=$(wc -c < /tmp/nfqws2.$$ 2>/dev/null || echo 0)
-        rm -f "$out"
-        if [ "${size:-0}" -gt 50000 ]; then
-            cp -f /tmp/nfqws2.$$ /usr/bin/nfqws2
-            chmod +x /usr/bin/nfqws2
-            rm -f /tmp/nfqws2.$$
-            return 0
-        fi
-        rm -f /tmp/nfqws2.$$
-        return 1
-    }
-
-    # Прямой GitHub, затем зеркала; три попытки, потому что соединение бывает рваным.
-    for attempt in 1 2 3; do
-        _install_nfqws2 "$ZAPRET_URL" && break
-        _install_nfqws2 "https://ghproxy.net/$ZAPRET_URL" && break
-        _install_nfqws2 "https://gh-proxy.com/$ZAPRET_URL" && break
-        echo -e "${YELLOW}ℹ${NC} Попытка ${attempt} не удалась, повтор..."
-        sleep 2
-    done
-fi
-# Бинарник мог скачаться не для этой архитектуры: без запуска движка
-# подбор невозможен, поэтому проверяем, а не просто «файл есть».
-if [ -x /usr/bin/nfqws2 ] && ! /usr/bin/nfqws2 --version >/dev/null 2>&1; then
-    echo -e "${YELLOW}[WARN]${NC} /usr/bin/nfqws2 не запускается (не та архитектура?) — удаляю"
-    rm -f /usr/bin/nfqws2
-    NFQWS2_MISSING=1
-fi
-if [ -x /usr/bin/nfqws2 ]; then
-    echo -e "${GREEN}✓${NC} Бинарник nfqws2 готов: ${BOLD}/usr/bin/nfqws2${NC}"
-else
-    NFQWS2_MISSING=1
-    echo -e "${RED}[ERROR] nfqws2 не установлен — без него служба не запустится.${NC}"
-    echo -e "${YELLOW}Установите вручную:${NC}"
-    echo -e "  cd /tmp"
-    echo -e "  curl -fsSL -k -m 180 \"https://github.com/bol-van/zapret2/releases/download/v1.0.7/zapret2-v1.0.7.tar.gz\" -o zap2.tgz"
-    echo -e "  tar -xz -O --wildcards \"*/binaries/linux-${ARCH}/nfqws2\" < zap2.tgz > /usr/bin/nfqws2"
-    echo -e "  chmod +x /usr/bin/nfqws2 && mkdir -p /opt/zapret2/nfq2 && ln -sf /usr/bin/nfqws2 /opt/zapret2/nfq2/nfqws2"
-fi
-
-# Rust-сканер blockcheckw ищет движок по <base>/nfq2/nfqws2 (src/config.rs),
-# поэтому кладём совместимый симлинк рядом с остальными legacy-путями.
-mkdir -p /opt/zapret2/nfq2 2>/dev/null || true
-if [ -x /usr/bin/nfqws2 ] && [ ! -e /opt/zapret2/nfq2/nfqws2 ]; then
-    ln -sf /usr/bin/nfqws2 /opt/zapret2/nfq2/nfqws2 2>/dev/null || true
-fi
+# Engine installation is owned by engine.sh, after shipped Lua is available.
 
 # Критичный файл: две попытки, ошибка не роняет скрипт, а копится в FAILED
 FAILED=""
@@ -403,6 +325,13 @@ fetch_req "openwrt/luci-app-blockcheckw/root/usr/bin/blockcheckw-helper" /usr/bi
 chmod +x /usr/bin/blockcheckw-helper 2>/dev/null || true
 fetch_file "openwrt/luci-app-blockcheckw/root/usr/bin/circular-builder.lua" /usr/bin/circular-builder.lua 8 || true
 fetch_req "openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/uci2config" /usr/share/zapret2wizard/uci2config 8
+# Always fetch the shared owner alongside helper; source only a complete module.
+fetch_req "openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/engine.sh" /usr/share/zapret2wizard/engine.sh 14
+if ! sh -n /usr/share/zapret2wizard/engine.sh; then
+    echo -e "${RED}[ERROR] Общий модуль движка повреждён.${NC}"
+    exit 1
+fi
+. /usr/share/zapret2wizard/engine.sh
 fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/evolve.lua" /usr/share/zapret2wizard/evolve.lua 8 || true
 fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/strategy_memory.lua" /usr/share/zapret2wizard/strategy_memory.lua 8 || true
 chmod 644 /usr/share/zapret2wizard/strategy_memory.lua 2>/dev/null || true
@@ -475,6 +404,13 @@ fi
 chmod 755 /opt /opt/zapret2 /opt/zapret2/nfq2 /usr/share/zapret2wizard /usr/share/zapret2wizard/lua 2>/dev/null || true
 chmod 755 /opt/zapret2/lua 2>/dev/null || true
 chmod 644 /usr/share/zapret2wizard/lua/*.lua 2>/dev/null || true
+
+# Capability AND shipped-Lua validation, then atomic install and scanner rebind.
+if ! bcw_engine_ensure; then
+    echo -e "${RED}[ERROR] Совместимость движка: $BCW_ENGINE_ERROR${NC}"
+    exit 1
+fi
+echo -e "${GREEN}✓${NC} Совместимый движок nfqws2 и Lua готовы."
 
 # Установка fake-блобов. Существующие файлы не трогаем, общий лимит — 45 секунд:
 # если GitHub недоступен, установка продолжается, а не висит.
@@ -597,15 +533,6 @@ if [ -n "$MISSING" ]; then
 fi
 chmod +x /etc/init.d/zapret2wizard /usr/share/zapret2wizard/uci2config /usr/bin/blockcheckw-helper 2>/dev/null || true
 
-# Без движка и модулей ядра подбор не работает: лучше остановиться с
-# понятным сообщением, чем оставить «установлено, но не сканирует».
-if [ "${NFQWS2_MISSING:-0}" = "1" ]; then
-    echo -e "${RED}[ERROR] Движок nfqws2 не установлен для архитектуры ${ARCH}.${NC}"
-    echo -e "${YELLOW}Проверьте /usr/bin/nfqws2 и повторите установку. Для ручной установки:${NC}"
-    echo -e "  curl -fsSL -k -o /tmp/nfq "https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main/openwrt/engine/nfqws2-linux-${ARCH}""
-    echo -e "  cp /tmp/nfq /usr/bin/nfqws2 && chmod +x /usr/bin/nfqws2"
-    exit 1
-fi
 # Модули ядра зависят от версии ядра и не входят в наш пакет — доставляем их
 # сами из фида прошивки, а не просим пользователя делать это руками.
 modprobe nfnetlink_queue 2>/dev/null || true
@@ -859,11 +786,3 @@ echo -e "  🔗 Ссылка: ${CYAN}http://${ROUTER_IP}/cgi-bin/luci/admin/serv
 echo -e "В будущем вы сможете обновлять службу в 1 клик прямо из веб-интерфейса LuCI"
 echo -e "с помощью кнопки ${BOLD}[ 🔄 Проверить обновление ]${NC}."
 echo ""
-
-if [ "${NFQWS2_MISSING:-0}" = "1" ]; then
-    echo -e "${RED}${BOLD}ВНИМАНИЕ:${NC} ${RED}движок nfqws2 не установлен, служба не запустится.${NC}"
-    echo -e "Выполните команды из блока [ERROR] выше или запустите установщик повторно —"
-    echo -e "он скачает ядро с одного из зеркал. После установки проверьте:"
-    echo -e "  ${BOLD}blockcheckw-helper doctor${NC}"
-    exit 1
-fi

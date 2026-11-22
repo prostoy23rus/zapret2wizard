@@ -51,7 +51,9 @@ jobs:
         run: |
           for f in openwrt/luci-app-blockcheckw/root/usr/bin/blockcheckw-helper \
                    openwrt/luci-app-blockcheckw/root/etc/init.d/zapret2wizard \
-                   openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/uci2config; do
+                   openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/uci2config \
+                   openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/engine.sh \
+                   install.sh; do
             printf '%s: ' "$f"
             busybox ash -n "$f" && echo OK
           done
@@ -60,6 +62,13 @@ jobs:
         run: |
           sh tools/test_quic_mode.sh
           sh tools/test_netcheck.sh
+          sh tools/test_engine_lifecycle.sh
+          busybox ash tools/test_engine_lifecycle.sh
+          sh tools/test_engine_helper.sh
+          busybox ash tools/test_engine_helper.sh
+          sh tools/test_engine_init.sh
+          busybox ash tools/test_engine_init.sh
+          node tools/test_engine_update_ui.js
 
   # Экзотические цели собираются ТОЛЬКО в релизном воркфлоу, поэтому их поломка
   # всплывала уже после нарезки тега: v0.11.0 потерял mips, mipsel и ppc на
