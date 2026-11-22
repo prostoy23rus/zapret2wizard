@@ -69,6 +69,8 @@ jobs:
           sh tools/test_engine_init.sh
           busybox ash tools/test_engine_init.sh
           node tools/test_engine_update_ui.js
+          sh tools/test_timeout_dependency.sh
+          busybox ash tools/test_timeout_dependency.sh
 
   # Экзотические цели собираются ТОЛЬКО в релизном воркфлоу, поэтому их поломка
   # всплывала уже после нарезки тега: v0.11.0 потерял mips, mipsel и ppc на

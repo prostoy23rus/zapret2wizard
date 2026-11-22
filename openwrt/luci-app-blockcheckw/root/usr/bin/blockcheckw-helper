@@ -5149,7 +5149,7 @@ cmd_engine_repair() {
         trap 'engine_repair_state error "Проверка движка прервана; выполнен откат"; exit 1' INT TERM HUP
         engine_repair_state running "Проверяю совместимость движка, Lua и пути сканера"
         # Старый updater не знал engine.sh. Новый helper сам довозит модуль.
-        if ! engine_load; then
+        if ! engine_load || ! command -v bcw_engine_require_timeout >/dev/null 2>&1; then
             fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/engine.sh" "$work/engine.sh" 12 &&
                 sh -n "$work/engine.sh" && grep -q '^bcw_engine_ensure()' "$work/engine.sh" || {
                     engine_repair_state error "Не удалось загрузить модуль проверки движка"; exit 1;
@@ -5159,6 +5159,9 @@ cmd_engine_repair() {
                 mv -f /usr/share/zapret2wizard/engine.sh.new /usr/share/zapret2wizard/engine.sh || exit 1
             engine_load || exit 1
         fi
+        # Дедлайны должны работать ДО любых замен/отката. На OpenWrt timeout
+        # может отсутствовать даже в BusyBox: довозим пакет автоматически.
+        bcw_engine_require_timeout || { engine_repair_state error "$BCW_ENGINE_ERROR"; exit 1; }
         # Старый updater мог не довезти init (раньше он был необязательным).
         # Не допускаем автоматический restart через init с DNS/миграционными хуками.
         if ! grep -q 'BCW_ENGINE_ONLY' /etc/init.d/zapret2wizard 2>/dev/null; then

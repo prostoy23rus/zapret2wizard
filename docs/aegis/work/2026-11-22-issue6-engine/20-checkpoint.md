@@ -1,5 +1,11 @@
 # Issue #6 engine repair
 
+## Live continuation 2026-11-22
+User confirmed new SSH identity. Verified pinned key before sending password. Router25.12.6 aarch64; restricted backup /root/bcw-pre-0378-20261122. Standard0.37.7 updater loaded0.37.8; migration worker found timeout missing (BusyBox applet also absent). Service stayed running and all5 config hashes unchanged. Installed coreutils-timeout9.9-r2; actual engine_repair done, doctor all15true. Full builtin manualapply0 search done100%,21 unique recipes; check12 protocol entries3/3 each,34.96s; original strategies intact; rutracker200/96503bytes/0.582s.
+
+Follow-up0.37.9 centralizes bounded require_timeout before runtime changes, package dependencies all4 metadata owners, installer shared guard only (not unbounded generic loop).21 new regressions sh+ash PASS; lifecycle/helper/init/UI unaffected. Independent review no blocking findings; NanoPi acceptance still unknown.
+
+
 ## Intent / TaskStartSnapshot
 User authorizes repair of diagnosed engine compatibility, update and error propagation defects. Branch main, HEAD b0d1d6a. Tracked tree initially clean. Preexisting untracked packaging/__pycache__, references/, release_0.36.33.md and 3 historical test reports must not be staged or removed. BASELINE.md read: preserve strategies/network/DNS; take router snapshot before mutations.
 

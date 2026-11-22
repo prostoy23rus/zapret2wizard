@@ -293,7 +293,7 @@ def main():
     control = (
         f"Package: {PKG_NAME}\n"
         f"Version: {version}-1\n"
-        f"Depends: libc, luci-base, nftables, curl, ca-bundle, kmod-nfnetlink-queue, kmod-nft-queue\n"
+        f"Depends: libc, luci-base, nftables, curl, coreutils-timeout, ca-bundle, kmod-nfnetlink-queue, kmod-nft-queue\n"
         f"Section: luci\n"
         f"Priority: optional\n"
         f"Architecture: {args.arch}\n"

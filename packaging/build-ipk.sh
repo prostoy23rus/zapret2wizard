@@ -37,7 +37,7 @@ SIZE=$(du -sk "$DATA" | cut -f1)
 cat > "$CTRL/control" <<EOF
 Package: luci-app-blockcheckw
 Version: ${VERSION}-1
-Depends: libc, luci-base, nftables, curl, ca-bundle, kmod-nfnetlink-queue, kmod-nft-queue
+Depends: libc, luci-base, nftables, curl, coreutils-timeout, ca-bundle, kmod-nfnetlink-queue, kmod-nft-queue
 Section: luci
 Priority: optional
 Architecture: ${ARCH}

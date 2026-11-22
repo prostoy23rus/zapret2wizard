@@ -8,6 +8,33 @@
 # Optional BCW_ENGINE_ARCH selects a checked-in architecture (otherwise uname).
 # BCW_ENGINE_BACKUP names the preserved previous canonical binary, if replaced.
 
+# The validation deadline is a real runtime prerequisite, not assumed BusyBox config.
+# Bootstrap it before inspecting/replacing any engine or Lua bytes.
+bcw_engine_require_timeout() {
+    command -v timeout >/dev/null 2>&1 && return 0
+    local pid timer status=0 seconds="${BCW_ENGINE_DEP_TIMEOUT:-90}"
+    case "$seconds" in ''|*[!0-9]*) BCW_ENGINE_ERROR="Некорректный таймаут установки зависимости"; return 1 ;; esac
+    [ "$seconds" -gt 0 ] || { BCW_ENGINE_ERROR="Некорректный таймаут установки зависимости"; return 1; }
+    if ! command -v apk >/dev/null 2>&1 && ! command -v opkg >/dev/null 2>&1; then
+        BCW_ENGINE_ERROR="Нет timeout и пакетного менеджера для установки coreutils-timeout"; return 1
+    fi
+    (
+        if command -v apk >/dev/null 2>&1; then apk add coreutils-timeout
+        else opkg install coreutils-timeout; fi
+    ) >&2 &
+    pid=$!
+    ( sleep "$seconds"; bcw_engine_kill_tree "$pid" ) &
+    timer=$!
+    wait "$pid" 2>/dev/null || status=$?
+    bcw_engine_kill_tree "$timer"
+    wait "$timer" 2>/dev/null || true
+    if [ "$status" != 0 ] || ! command -v timeout >/dev/null 2>&1; then
+        BCW_ENGINE_ERROR="Не удалось установить coreutils-timeout (код $status); прежний runtime не изменён"
+        return 1
+    fi
+    return 0
+}
+
 bcw_engine_timeout() {
     local seconds="${BCW_ENGINE_TIMEOUT:-8}"
     case "$seconds" in ''|*[!0-9]*) return 125 ;; esac

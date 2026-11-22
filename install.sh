@@ -206,7 +206,7 @@ elif command -v apk >/dev/null 2>&1; then
 fi
 
 # 4. Проверка и установка зависимостей
-echo -e "${BLUE}ℹ${NC} Проверка системных зависимостей (curl, ca-certificates/ca-bundle, tar)..."
+echo -e "${BLUE}ℹ${NC} Проверка системных зависимостей (curl, ca-certificates/ca-bundle, tar, coreutils-timeout)..."
 
 if command -v apk >/dev/null 2>&1; then
     # OpenWrt 25.x / Next-Gen с apk-tools
@@ -332,6 +332,10 @@ if ! sh -n /usr/share/zapret2wizard/engine.sh; then
     exit 1
 fi
 . /usr/share/zapret2wizard/engine.sh
+if ! bcw_engine_require_timeout; then
+    echo -e "${RED}[ERROR] Зависимость движка: $BCW_ENGINE_ERROR${NC}"
+    exit 1
+fi
 fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/evolve.lua" /usr/share/zapret2wizard/evolve.lua 8 || true
 fetch_file "openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/strategy_memory.lua" /usr/share/zapret2wizard/strategy_memory.lua 8 || true
 chmod 644 /usr/share/zapret2wizard/strategy_memory.lua 2>/dev/null || true
