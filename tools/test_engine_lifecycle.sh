@@ -216,7 +216,11 @@ ok 'missing engine installed from official project callback'
 case "$(uname -s):$(uname -m)" in
 Linux:x86_64)
     BCW_ENGINE_TIMEOUT=8
-    bcw_engine_check "$REPO/openwrt/engine/nfqws2-linux-x86_64" "$REPO/openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/lua" || fail 'real bundled engine dry-run'
+    # Git stores artifact bytes mode0644; installer grants execution. Mirror that
+    # staging step without changing the checkout, including Linux CI file modes.
+    cp "$REPO/openwrt/engine/nfqws2-linux-x86_64" "$TMP/real-nfqws2"
+    chmod 755 "$TMP/real-nfqws2"
+    bcw_engine_check "$TMP/real-nfqws2" "$REPO/openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/lua" || fail 'real bundled engine dry-run'
     ok 'real bundled x86_64 engine and shipped Lua pass capability dry-run'
     ;;
 *) echo 'SKIP real x86_64 Linux engine check on this host' ;;
