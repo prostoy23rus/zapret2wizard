@@ -96,6 +96,7 @@ jobs:
           node tools/test_lifecycle_ui.js
           node tools/test_transfer_ui.js
           node tools/test_hostlist_integration.js
+          node tools/test_update_notice_ui.js
 
   # Экзотические цели собираются ТОЛЬКО в релизном воркфлоу, поэтому их поломка
   # всплывала уже после нарезки тега: v0.11.0 потерял mips, mipsel и ppc на

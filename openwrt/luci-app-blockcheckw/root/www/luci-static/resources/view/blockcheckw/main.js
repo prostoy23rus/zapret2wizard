@@ -341,6 +341,22 @@ function getLogs() {
 	});
 }
 
+// Missing metadata is not an old installed release.
+function updateVersionLabel(value) {
+	return typeof value === 'string' && value.trim() ? 'v' + value.trim().replace(/^v/, '') : 'не определена';
+}
+
+function updateVersionSummary(current, latest) {
+	return E('div', {
+		class: 'bcw-update-versions', role: 'status',
+		style: 'display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin: 10px 0; font-size: 14px; line-height: 1.5;'
+	}, [
+		E('span', {}, ['Установлена: ', E('strong', {}, updateVersionLabel(current))]),
+		E('span', { 'aria-hidden': 'true', style: 'color: #abb2bf;' }, '→'),
+		E('span', {}, ['Доступна: ', E('strong', { style: 'color: #00d1b2;' }, updateVersionLabel(latest))])
+	]);
+}
+
 function checkVersion() {
 	return fs.exec(HELPER_BIN, ['check_update']).then(function(res) {
 		if (res && res.code == 0 && res.stdout) {
@@ -355,9 +371,9 @@ function checkVersion() {
 				}
 			}
 		}
-		return { success: false, current_version: '0.15.5', has_update: false };
+		return { success: false, current_version: null, has_update: false };
 	}).catch(function() {
-		return { success: false, current_version: '0.15.5', has_update: false };
+		return { success: false, current_version: null, has_update: false };
 	});
 }
 
@@ -549,7 +565,7 @@ return view.extend({
 		var doctorInfo = data[3] || null;
 		var conflictsData = data[4] || null;
 		var logsData = { scanner_log: 'Загрузка логов...', zapret2_log: 'Загрузка логов...', daemons: '' };
-		var curVer = zapretInfo.version || '0.15.12';
+		var curVer = typeof zapretInfo.version === 'string' && zapretInfo.version.trim() ? zapretInfo.version.trim() : null;
 		var versionInfo = {
 			current_version: curVer,
 			has_update: false,
@@ -945,17 +961,18 @@ return view.extend({
 		var btnCheckUpdate = E('button', {
 			class: 'bcw-header-item bcw-header-btn',
 			id: 'bcw-btn-check-update',
+			style: 'white-space: normal; height: auto; min-height: 32px; max-width: 100%; line-height: 1.4;',
 			title: 'Автоматическая проверка обновлений...',
 			click: function() {
 				if (updateCheckStatus.checked && updateCheckStatus.has_update) {
-					doRunUpdate(updateCheckStatus.latest_version);
+					confirmRunUpdate(updateCheckStatus.latest_version);
 				} else {
 					doCheckUpdate(true);
 				}
 			}
 		}, [
 			E('span', {}, '🔄'),
-			document.createTextNode(' Проверка обновлений (v' + curVer + ')...')
+			document.createTextNode(' Установлена: ' + updateVersionLabel(curVer) + ' · Проверка обновлений…')
 		]);
 
 		// Явное управление службой: запуск, остановка, перезапуск.
@@ -4565,7 +4582,7 @@ return view.extend({
 
 			bcwShowModal(title, [
 				E('div', { style: 'border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 12px; margin-bottom: 14px;' }, [
-					E('div', { style: 'font-size: 16px; font-weight: bold; color: #00d1b2; display: flex; align-items: center; gap: 8px;' }, [
+					E('div', { style: 'font-size: 16px; font-weight: bold; color: #00d1b2; display: flex; flex-wrap: wrap; align-items: center; gap: 8px;' }, [
 						isPostUpdate ? '🚀 Обновление успешно установлено' : ('🎉 Релиз v' + ver),
 						E('span', { class: 'badge cbi-color-green', style: 'font-size: 11px;' }, 'v' + ver)
 					]),
@@ -4597,10 +4614,11 @@ return view.extend({
 		function confirmRunUpdate(targetVer) {
 			bcwShowModal('Обновление службы Zapret2Wizard', [
 				E('div', { style: 'margin-bottom: 14px;' }, [
-					E('div', { style: 'font-size: 16px; font-weight: bold; color: #00d1b2; display: flex; align-items: center; gap: 8px;' }, [
-						'🚀 Доступна новая версия: v' + targetVer,
-						E('span', { class: 'badge cbi-color-blue', style: 'font-size: 11px;' }, 'v' + curVer + ' ➔ v' + targetVer)
+					E('div', { style: 'font-size: 16px; font-weight: bold; color: #00d1b2; display: flex; flex-wrap: wrap; align-items: center; gap: 8px;' }, [
+						'Доступно обновление',
+						E('span', { class: 'badge cbi-color-blue', style: 'font-size: 11px;' }, 'Обновление приложения')
 					]),
+					updateVersionSummary(curVer, targetVer),
 					E('p', { style: 'margin-top: 10px; color: #e5e9f0; line-height: 1.5;' },
 						'Обновить службу Zapret2Wizard до версии v' + targetVer + ' прямо сейчас? Все настроенные стратегии в Zapret2 будут сохранены.'
 					)
@@ -4623,7 +4641,8 @@ return view.extend({
 
 		function showUpdateBanner(info) {
 			updateBannerCard.innerHTML = '';
-			var nextVer = info.latest_version || 'новой версии';
+			var nextVer = info.latest_version;
+			var installedVer = Object.prototype.hasOwnProperty.call(info, 'current_version') ? info.current_version : curVer;
 			var releaseDate = info.release_date ? ' (' + info.release_date + ')' : '';
 			var repoName = info.repo || 'prostoy23rus/zapret2wizard';
 
@@ -4648,19 +4667,20 @@ return view.extend({
 				style: 'display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 14px;'
 			}, [
 				E('div', { style: 'flex: 1 1 auto; min-width: 0;' }, [
-					E('div', { style: 'font-size: 15px; font-weight: bold; color: #00d1b2; display: flex; align-items: center; gap: 8px;' }, [
-						'🎉 Доступна новая версия: v' + nextVer,
+					E('div', { style: 'font-size: 15px; font-weight: bold; color: #00d1b2; display: flex; flex-wrap: wrap; align-items: center; gap: 8px;' }, [
+						'Доступно обновление Zapret2Wizard',
 						E('span', { style: 'font-size: 12px; font-weight: normal; color: #828997;' }, releaseDate)
 					]),
-					E('div', { style: 'font-size: 13px; color: #e5e9f0; margin-top: 4px;' }, 'Обнаружена новая версия службы с оптимизацией обхода и точным поиском:'),
+					updateVersionSummary(installedVer, nextVer),
+					E('div', { style: 'font-size: 13px; color: #e5e9f0; margin-top: 4px;' }, 'Изменения в доступной версии:'),
 					changelogNodes.length > 0 ? E('div', {}, changelogNodes) : null,
 					E('div', { style: 'font-size: 11px; color: #abb2bf; margin-top: 6px;' }, 'Репозиторий: ' + repoName + ' (ветка main)')
 				].filter(Boolean)),
-				E('div', { style: 'display: flex; gap: 10px; align-items: center;' }, [
+				E('div', { style: 'display: flex; flex-wrap: wrap; gap: 10px; align-items: center;' }, [
 					E('button', {
 						class: 'bcw-btn-launch',
 						style: 'padding: 8px 18px; font-size: 13px;',
-						click: function() { doRunUpdate(nextVer); }
+						click: function() { confirmRunUpdate(nextVer); }
 					}, '🚀 Обновить до v' + nextVer),
 					E('button', {
 						class: 'bcw-btn-secondary',
@@ -4674,16 +4694,19 @@ return view.extend({
 
 		function applyUpdateResult(parsed, isManual) {
 			updateCheckStatus.checked = true;
-			if (!parsed || !parsed.success) {
+			if (parsed && Object.prototype.hasOwnProperty.call(parsed, 'current_version')) curVer = parsed.current_version;
+			if (!parsed || !parsed.success || updateVersionLabel(curVer) === 'не определена' || updateVersionLabel(parsed.latest_version) === 'не определена') {
+				updateCheckStatus.has_update = false;
+				updateBannerCard.style.display = 'none';
 				btnCheckUpdate.innerHTML = '';
 				btnCheckUpdate.appendChild(E('span', {}, '🔄'));
-				btnCheckUpdate.appendChild(document.createTextNode(' Проверить обновление (v' + curVer + ')'));
-				btnCheckUpdate.title = 'Не удалось проверить автоматически. Нажмите для повторной проверки';
+				btnCheckUpdate.appendChild(document.createTextNode(' Установлена: ' + updateVersionLabel(curVer) + ' · Проверить обновления'));
+				btnCheckUpdate.title = 'Установлена: ' + updateVersionLabel(curVer) + '. Проверка обновлений не завершена; нажмите, чтобы повторить.';
 				btnCheckUpdate.style.borderColor = '#485060';
 				btnCheckUpdate.style.background = '#282c34';
 				btnCheckUpdate.style.color = '#abb2bf';
 				if (isManual) {
-					ui.addNotification(null, E('p', {}, 'Не удалось связаться с GitHub: ' + (parsed && parsed.error ? parsed.error : 'ошибка сети')), 'warning');
+					ui.addNotification(null, E('p', {}, 'Не удалось проверить обновления: ' + (parsed && parsed.error ? parsed.error : 'данные о версиях недоступны')), 'warning');
 				}
 				return;
 			}
@@ -4693,8 +4716,8 @@ return view.extend({
 				updateCheckStatus.latest_version = parsed.latest_version;
 				btnCheckUpdate.innerHTML = '';
 				btnCheckUpdate.appendChild(E('span', { style: 'color: #61afef;' }, '🚀'));
-				btnCheckUpdate.appendChild(document.createTextNode(' Доступно обновление: v' + parsed.latest_version));
-				btnCheckUpdate.title = 'Доступна новая версия v' + parsed.latest_version + '. Нажмите для установки в 1 клик';
+				btnCheckUpdate.appendChild(document.createTextNode(' Установлена: ' + updateVersionLabel(curVer) + ' → Доступна: ' + updateVersionLabel(parsed.latest_version)));
+				btnCheckUpdate.title = 'Установлена: ' + updateVersionLabel(curVer) + '. Доступна: ' + updateVersionLabel(parsed.latest_version) + '. Нажмите для обновления.';
 				btnCheckUpdate.style.borderColor = '#3273dc';
 				btnCheckUpdate.style.background = 'rgba(50, 115, 220, 0.2)';
 				btnCheckUpdate.style.color = '#ffffff';
@@ -4705,8 +4728,8 @@ return view.extend({
 				updateCheckStatus.latest_version = parsed.current_version || curVer;
 				btnCheckUpdate.innerHTML = '';
 				btnCheckUpdate.appendChild(E('span', { style: 'color: #00d1b2; font-weight: bold;' }, '✓'));
-				btnCheckUpdate.appendChild(document.createTextNode(' Стоит последняя версия (v' + (parsed.current_version || curVer) + ')'));
-				btnCheckUpdate.title = 'У вас установлена последняя актуальная версия. Нажмите для повторной проверки';
+				btnCheckUpdate.appendChild(document.createTextNode(' Установлена: ' + updateVersionLabel(curVer) + ' · Обновлений нет'));
+				btnCheckUpdate.title = 'Установлена: ' + updateVersionLabel(curVer) + '. Доступна: ' + updateVersionLabel(parsed.latest_version) + '. Обновлений нет; нажмите для повторной проверки.';
 				btnCheckUpdate.style.borderColor = 'rgba(0, 209, 178, 0.4)';
 				btnCheckUpdate.style.background = 'rgba(0, 209, 178, 0.08)';
 				btnCheckUpdate.style.color = '#e5e9f0';
@@ -4715,7 +4738,7 @@ return view.extend({
 
 				if (isManual && (Date.now() - lastNoUpdateNotifyAt > 8000)) {
 					lastNoUpdateNotifyAt = Date.now();
-					ui.addNotification(null, E('p', {}, '✓ У вас установлена последняя версия Zapret2Wizard (v' + (parsed.current_version || curVer) + '). Обновлений не требуется.'), 'info');
+					ui.addNotification(null, E('p', {}, 'Установлена: ' + updateVersionLabel(curVer) + '. Доступна: ' + updateVersionLabel(parsed.latest_version) + '. Обновлений не требуется.'), 'info');
 				}
 			}
 		}
