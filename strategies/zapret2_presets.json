@@ -116,7 +116,18 @@
         "--payload=tls_client_hello --lua-desync=hostfakesplit:host=vk.com:midhost=midsld",
         "--payload=tls_client_hello --lua-desync=rst:rstack:ip_autottl=-2,3-20",
         "--payload=tls_client_hello --lua-desync=syndata:blob=fake_default_tls:tcp_ts_up",
-        "--payload=tls_client_hello --lua-desync=multidisorder:pos=host+1,midsld:seqovl=1"
+        "--payload=tls_client_hello --lua-desync=multidisorder:pos=host+1,midsld:seqovl=1",
+        "--payload=tls_client_hello --lua-desync=multisplit:pos=1",
+        "--payload=tls_client_hello --lua-desync=multisplit:blob=fake_default_tls:badsum:pos=2:nodrop:repeats=4 --lua-desync=multisplit:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1",
+        "--payload=tls_client_hello --lua-desync=multidisorder:blob=fake_default_tls:badsum:pos=2:nodrop:repeats=4 --lua-desync=multidisorder:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1",
+        "--payload=all --lua-desync=multisplit:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1",
+        "--payload=tls_client_hello --lua-desync=multisplit:blob=fake_default_tls:badsum:pos=2:nodrop:repeats=2 --lua-desync=multisplit:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1",
+        "--payload=tls_client_hello --lua-desync=multidisorder:blob=fake_default_tls:badsum:pos=2:nodrop:repeats=2 --lua-desync=multidisorder:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1",
+        "--payload=all --lua-desync=multisplit:blob=fake_default_tls:badsum:pos=2:nodrop:repeats=4 --lua-desync=multisplit:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1",
+        "--payload=all --lua-desync=multidisorder:blob=fake_default_tls:badsum:pos=2:nodrop:repeats=4 --lua-desync=multidisorder:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1",
+        "--payload=tls_client_hello --lua-desync=tls_client_hello_clone:blob=hs32 --lua-desync=fake:blob=hs32:tcp_md5:repeats=6",
+        "--payload=tls_client_hello --lua-desync=tls_client_hello_clone:blob=hs33 --lua-desync=fake:blob=hs33:tcp_md5:repeats=6 --lua-desync=multidisorder:pos=midsld",
+        "--payload=tls_client_hello --lua-desync=send:repeats=2 --lua-desync=multidisorder:pos=midsld"
       ]
     },
     "preset_discord": {

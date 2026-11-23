@@ -1503,10 +1503,27 @@ cmd_start() {
         fi
         : > /tmp/bcw_scan_paused
 
-        # AI/Spotify: базовый домен может открываться без обхода, а CDN —
-        # нет. Сканер по базовому домену скажет "not_blocked" и не станет
-        # искать. Проверяем все эндпоинты пресета и при необходимости
+        # YouTube: веб-интерфейс www.youtube.com на многих провайдерах не
+        # блокируется, а видео-CDN блокируется/сбрасывается. Сканер по
+        # незаблокированному домену завершится "not_blocked" и не начнёт
+        # перебор. Служба уже остановлена выше, поэтому curl видит сырой
+        # ответ провайдера: если база отвечает, а CDN-кандидат — нет,
         # переключаем домен сканирования на заблокированный CDN.
+        if [ "$target" = "preset_youtube" ] || [ "$target" = "youtube" ]; then
+            local base_code cdn_switch="" cdn_cand cdn_code
+            base_code=$(curl -4 -k -s -o /dev/null -m 6 -w '%{http_code}' "https://$domain/" 2>/dev/null)
+            if [ -n "$base_code" ] && [ "$base_code" != "000" ]; then
+                for cdn_cand in googlevideo.com manifest.googlevideo.com; do
+                    cdn_code=$(curl -4 -k -s -o /dev/null -m 6 -w '%{http_code}' "https://$cdn_cand/" 2>/dev/null)
+                    if [ "$cdn_code" = "000" ]; then cdn_switch="$cdn_cand"; break; fi
+                done
+                if [ -n "$cdn_switch" ]; then
+                    echo "[blockcheckw-helper] YouTube: база отвечает (код $base_code), CDN $cdn_switch недоступен (код 000) — сканирую CDN" >> "$LOG_FILE"
+                    history_add "scan_cdn_switch" "$(metric_target_key "$target")" "Домен сканирования переключён на $cdn_switch" >/dev/null 2>&1 || true
+                    domain="$cdn_switch"
+                fi
+            fi
+        fi
 
             # Сторож: если процесс подбора умрёт (перезагрузка страницы, kill), служба
             # всё равно вернётся. Без этого пользователь оставался без обхода.
@@ -2615,7 +2632,7 @@ local function run(command, limit)
 end
 local e = probe.probe({url=url, endpoint_id=host, role=role, path_mode=mode,
     range={start=0,finish=4194303}, timeout_sec=30, max_bytes=8388608},
-    {role=role,min_bytes=math.max(1,min),sample_bytes=host == "www.youtube.com" and 1258291 or 131072,sample_seconds=0}, {run=run})
+    {role=role,min_bytes=math.max(1,min),sample_bytes=host == "www.youtube.com" and 262144 or 131072,sample_seconds=0}, {run=run})
 local sample_required = host == "www.youtube.com" or host == "discord.com"
 local ok = e.policy_passed and (role ~= "reachability" or e.http_code < 500) and (not sample_required or e.sample_sufficient)
 print(json.stringify({ok=ok,mode=mode,host=host,ip=ip,code=tostring(e.http_code or "000"),
@@ -3362,7 +3379,13 @@ for idx, ep in ipairs(endpoints) do
         local ra, rb = tostring(ep.range or "0-16383"):match("^(%d+)%-(%d+)$")
         local requested = {start = tonumber(ra) or 0, finish = tonumber(rb) or 16383}
         if main_sample then requested = {start=0, finish=4194303} end
-        local sample_min = preset_key == "preset_youtube" and 1258291 or 131072
+        -- Главная страница YouTube не отдаёт Range на динамическом HTML и
+        -- штатно завершается (close-delimited) после ~1 МБ тела: полная
+        -- передача засчитывается от 256 КБ. Жёсткий порог 1.2 МиБ остаётся
+        -- для потоковых/CDN-узлов (googlevideo), которые проверяются
+        -- отдельными пробами (transfer_client_probe / test.googlevideo).
+        local sample_min = 131072
+        if preset_key == "preset_youtube" and idx == 1 then sample_min = 262144 end
         local evidence = probe.probe({url=ep.url, endpoint_id=ep.name, role=role,
             path_mode="router", range=requested, timeout_sec=30, max_bytes=8388608},
             {role=role, min_bytes=1, sample_bytes=sample_min, sample_seconds=0})
@@ -3414,7 +3437,7 @@ local resp = {
     accessible = main_ok,
     all_ok = all_ok,
     schema_version = 1, verification_state = all_ok and "requirements_passed" or "unverified",
-    playback = "unknown", budgetcap = 8388608, data_sample_min_bytes = preset_key == "preset_youtube" and 1258291 or 131072,
+    playback = "unknown", budgetcap = 8388608, data_sample_min_bytes = (preset_key == "preset_youtube" and 262144) or 131072,
     overall_status = overall_status,
     message = status_msg,
     avg_speed_kbs = avg_speed,
@@ -5410,6 +5433,10 @@ cmd_health_tick() {
         n=$(cat "$cfile" 2>/dev/null || echo 0)
         n=$((n + 1))
         echo "$n" > "$cfile"
+        # Причина отказа — в журнал мониторинга: позволяет отличить
+        # ложное срабатывание от реальной деградации стратегии.
+        local hreason=$(lua -e 'local j=require("luci.jsonc"); local f=io.open("/tmp/bcw_health.json","r"); if f then local d=j.parse(f:read("*a")); f:close(); if d then print(tostring(d.message or d.overall_status or "без ответа"):gsub("\n"," ")) end end' 2>/dev/null)
+        echo "$(date '+%Y-%m-%d %H:%M:%S') $tgt сбой#$n: ${hreason:-нет ответа}" >> /tmp/bcw_health.log 2>/dev/null || true
         if [ "$n" -ge 2 ]; then
             echo 0 > "$cfile"
             dom=$(target_domain "$tgt")
@@ -5433,6 +5460,13 @@ cmd_health_tick() {
 }
 
 # Экспорт рабочих геномов провайдера в JSON (для обмена).
+# Кнопка «Очистить» в окне логов: обнуляем сам файл журнала, а не только
+# DOM браузера, иначе старые строки возвращаются при следующем опросе.
+cmd_clear_logs() {
+    : > "$LOG_FILE" 2>/dev/null || true
+    echo '{"success":true}'
+}
+
 cmd_evolve_export() {
     local min_ok="${1:-1}"
     local evo="/usr/share/zapret2wizard/evolve.lua"
@@ -7491,6 +7525,7 @@ optimize_dns) cmd_optimize_dns ;;
     catalog_fetch) shift; cmd_catalog_fetch "$@" ;;
     catalog_export) cmd_catalog_export ;;
     health_tick) cmd_health_tick ;;
+    clear_logs) cmd_clear_logs ;;
     youtube_audit) shift; cmd_youtube_audit "$@" ;;
     tunnel_check) shift; cmd_tunnel_check "$@" ;;
     results) shift; cmd_results "$@" ;;

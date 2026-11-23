@@ -124,15 +124,26 @@ class Production(unittest.TestCase):
         self.assertTrue(manifest['accessible']); self.assertFalse(manifest['data_flow'])
         self.assertEqual(manifest['role'],'reachability')
 
-    def test_complete_one_mib_is_not_enough_youtube_sample(self):
+    def test_complete_one_mib_main_page_passes_youtube(self):
+        # Главная страница YouTube не отдаёт Range и завершается штатно после
+        # ~1 МБ HTML (close-delimited). Полная передача засчитывается от 256 КБ;
+        # жёсткий порог 1.2 МиБ остаётся только для CDN/медиа (cmd_speedtest).
         for size in (980000,1048576):
             r=self.check({'size':size})
-            self.assertFalse(r['all_ok']); self.assertFalse(r['endpoints'][0]['truncated'])
+            self.assertTrue(r['all_ok']); self.assertFalse(r['endpoints'][0]['truncated'])
             self.assertEqual(r['endpoints'][0]['evidence']['completeness'],'complete')
             self.assertEqual(r['endpoints'][0]['verification_kind'],'page_sample')
-            self.assertEqual(r['endpoints'][0]['data_sample_min_bytes'],1258291)
+            self.assertEqual(r['endpoints'][0]['data_sample_min_bytes'],262144)
+            self.assertTrue(r['endpoints'][0]['data_sample'])
             s=self.run_lua('cmd_speedtest',['preset_youtube','',str(PRESETS)],{'*':{'size':size}})
             self.assertFalse(s['success']); self.assertFalse(s['attempts']['success'])
+
+    def test_complete_under_256k_main_page_still_insufficient(self):
+        r=self.check({'size':200000})
+        self.assertFalse(r['all_ok'])
+        self.assertEqual(r['endpoints'][0]['evidence']['completeness'],'complete')
+        self.assertEqual(r['endpoints'][0]['stall_reason'],'insufficient_sample')
+        self.assertFalse(r['endpoints'][0]['data_sample'])
 
     def test_valid206_and_short206(self):
         r=self.check({'code':206,'size':4194304,'range':'0-4194303/8000000'})

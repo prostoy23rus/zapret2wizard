@@ -2357,7 +2357,13 @@ return view.extend({
 					E('button', {
 						class: 'bcw-btn-sm cbi-button cbi-button-reset',
 						style: 'height: 32px; padding: 0 12px; font-size: 12px; display: inline-flex; align-items: center; justify-content: center; gap: 4px;',
-						click: function() { consoleLogEl.textContent = ''; }
+						click: function() {
+							var clearLogView = function() {
+								consoleLogEl.textContent = '';
+								consoleLogEl.removeAttribute('data-raw');
+							};
+							fs.exec(HELPER_BIN, ['clear_logs']).then(clearLogView).catch(clearLogView);
+						}
 					}, '🗑 Очистить'),
 					E('button', {
 						class: 'bcw-btn-sm cbi-button cbi-button-action bcw-btn-diag-copy-header',
@@ -2658,7 +2664,10 @@ return view.extend({
 			var summary = E('div', { id: 'bcw-evo-summary', style: 'font-size: 12px; color: #abb2bf; margin-top: 4px;' }, 'Загрузка...');
 			var targetSel = E('select', { id: 'bcw-evo-target', class: 'cbi-input-select', style: 'height: 34px;' }, [
 				E('option', { value: 'preset_youtube' }, 'YouTube'),
-				E('option', { value: 'preset_discord' }, 'Discord')
+				E('option', { value: 'preset_discord' }, 'Discord'),
+				E('option', { value: 'preset_twitch' }, 'Twitch'),
+				E('option', { value: 'preset_x' }, 'X (Twitter)'),
+				E('option', { value: 'preset_instagram' }, 'Instagram')
 			]);
 			var startBtn = E('button', { class: 'bcw-btn-launch', style: 'height: 34px;' }, '🧬 Запустить эволюцию');
 			var histBtn = E('button', { class: 'bcw-btn-secondary', style: 'height: 34px;' }, '🕓 Установить ночное обучение');
@@ -2791,7 +2800,7 @@ return view.extend({
 
 			histBtn.addEventListener('click', function() {
 				fs.exec(HELPER_BIN, ['cron_install']).then(function() {
-					ui.addNotification(null, E('p', {}, 'Ночное обучение включено: 04:23, один прогон в сутки'), 'info');
+					ui.addNotification(null, E('p', {}, 'Ночное обучение включено: 06:10, один прогон в сутки'), 'info');
 				}).catch(function() {});
 			});
 
@@ -2817,7 +2826,7 @@ return view.extend({
 				'Перебирает новые комбинации уже проверенных техник и запоминает, что держится у вашего провайдера. ' +
 				'Запускайте после обычного «Запустить поиск»: эволюция подсевает найденные стратегии и добавляет кроссоверы с мутациями. ' +
 				'Подбор останавливает обход на 1–3 минуты, затем служба поднимается сама и применяется лучший стабильный кандидат. ' +
-				'Ночное обучение — 04:23, один прогон в сутки; «Каталог по ASN» подтягивает геномы других пользователей.'));
+				'Ночное обучение — 06:10, один прогон в сутки; «Каталог по ASN» подтягивает геномы других пользователей.'));
 			root.appendChild(top);
 			root.appendChild(hist);
 			root.appendChild(logWrap);
@@ -2839,7 +2848,10 @@ return view.extend({
 
 			var targetSel = E('select', { class: 'cbi-input-select', style: 'height:32px;margin-top:8px;' }, [
 				E('option', { value: 'preset_youtube' }, 'YouTube'),
-				E('option', { value: 'preset_discord' }, 'Discord')
+				E('option', { value: 'preset_discord' }, 'Discord'),
+				E('option', { value: 'preset_twitch' }, 'Twitch'),
+				E('option', { value: 'preset_x' }, 'X (Twitter)'),
+				E('option', { value: 'preset_instagram' }, 'Instagram')
 			]);
 
 			var stats = E('div', { style: 'font-size:12px;color:#abb2bf;margin-bottom:8px;' },
