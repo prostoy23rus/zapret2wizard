@@ -207,7 +207,7 @@ bcw_lifecycle_cron_cleanup() {
     [ -f "$cron" ] || return 0
     tmp="$cron.bcw.$$"
     # A generic word such as watchdog is never ownership evidence.
-    awk '!/[/]usr[/]bin[/]blockcheckw-helper[[:space:]]+(health_tick|evolve_nightly|bypass_sync)([[:space:]]|$)/ && !/[[:space:]]#[[:space:]]bcw-(health|evolve|bypass)[[:space:]]*$/' "$cron" > "$tmp" || return 1
+    awk '!/\/usr\/bin\/blockcheckw-helper[[:space:]]+(health_tick|evolve_nightly|bypass_sync)([[:space:]]|$)/ && !/[[:space:]]#[[:space:]]bcw-(health|evolve|bypass)[[:space:]]*$/' "$cron" > "$tmp" || return 1
     if ! cmp -s "$cron" "$tmp"; then
         cat "$tmp" > "$cron" || { rm -f "$tmp"; return 1; }
         rm -f "$tmp"

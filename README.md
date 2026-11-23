@@ -2,7 +2,7 @@
 
 **Автономный обход DPI/ТСПУ для OpenWrt:** движок `zapret2 (nfqws2)`, собственный сканер стратегий, подбор под конкретного провайдера и веб-интерфейс LuCI. Ставится одним пакетом, работает без сторонних зависимостей и без интернета после установки.
 
-[![Version](https://img.shields.io/badge/version-0.37.10-00d1b2?style=flat-square)](https://github.com/prostoy23rus/zapret2wizard/releases)
+[![Version](https://img.shields.io/badge/version-0.37.11-00d1b2?style=flat-square)](https://github.com/prostoy23rus/zapret2wizard/releases)
 [![OpenWrt](https://img.shields.io/badge/OpenWrt-23.05%20|%2024.10%20|%2025.x-blue?style=flat-square)](https://openwrt.org)
 [![Arch](https://img.shields.io/badge/arch-aarch64%20|%20arm%20|%20x86__64%20|%20mips%20|%20mipsel%20|%20riscv64-success?style=flat-square)](#поддерживаемые-архитектуры)
 [![License](https://img.shields.io/badge/license-MIT-yellow?style=flat-square)](LICENSE)
@@ -150,7 +150,11 @@ blockcheckw-helper update      # обновление с GitHub
 
 ## Что проверено
 
-### 0.37.10 — исправления службы и достоверности проверок
+### Текущий релиз 0.37.11 — совместимость очистки cron с BusyBox awk
+
+Исправлен синтаксис регулярного выражения в lifecycle-очистке cron, который не принимался Ubuntu `busybox-static` awk. Отбор по принадлежности приложению сохранён; подробности — в [примечаниях к 0.37.11](release_0.37.11.md). **0.37.11 пока не проверена на реальном роутере**; результаты ниже относятся именно к исторической проверке 0.37.10-r3.
+
+### 0.37.10 — историческая проверка исправлений службы и достоверности проб
 
 На **Routerich AX3000 v1, OpenWrt 25.12.6** проверен пакет **0.37.10-r3**: Stop снимает supervision и собственные правила без возврата движков после прежнего интервала respawn; открытие LuCI/списков не запускает службу; Start возвращает три экземпляра `nfqws2`. Проверены Lua 5.1, curl-loopback и пустые списки в отдельной тестовой папке; реальный редактор User открывается в Chrome без ошибки JavaScript.
 

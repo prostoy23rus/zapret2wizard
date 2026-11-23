@@ -298,7 +298,12 @@ class Lifecycle(unittest.TestCase):
 
     def test_busybox_owner_cleanup(self):
         if not shutil.which("busybox"): self.skipTest("busybox unavailable")
-        self.assert_ok(self.run_shell("bcw_lifecycle_cleanup", shell=["busybox", "ash"]))
+        cron = self.root / "etc/crontabs/root"
+        preserved = ("* * * * * /usr/bin/blockcheckw-helper health_tick_extra\n"
+                     "* * * * * /usr/bin/blockcheckw-helperx health_tick\n")
+        cron.write_text(cron.read_text() + "* * * * * /usr/bin/blockcheckw-helper bypass_sync\n" + preserved)
+        self.assert_ok(self.run_shell("bcw_lifecycle_cleanup; bcw_lifecycle_cleanup", shell=["busybox", "ash"]))
+        self.assertEqual(cron.read_text(), "* * * * * /vendor/watchdog\n* * * * * /other/task # watchdog\n" + preserved)
 
     def test_unknown_user_pins_and_preexisting_identical_not_adopted(self):
         journal = self.root / "etc/zapret2wizard/dns-owned"
