@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Production functions; disposable paths and mocked service/UCI, no host effects."""
-import json, os, shlex, subprocess, tempfile, unittest
+import json, os, shlex, shutil, subprocess, tempfile, unittest
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 HELPER = ROOT / 'openwrt/luci-app-blockcheckw/root/usr/bin/blockcheckw-helper'
@@ -236,7 +236,10 @@ printf '%s\n' "$NFQWS2_OPT"
             else: self.assertIn('--skip',r.stdout)
     def test_engine_empty_hostlist_dry_run(self):
         empty=self.root/'empty.txt';empty.write_text('');self.root.chmod(0o755);empty.chmod(0o644)
-        engine=ROOT/'openwrt/engine/nfqws2-linux-x86_64'
+        # Git stores the bundled engine as data (0644); execute only a private copy.
+        engine=self.root/'nfqws2-dry-run'
+        shutil.copyfile(ROOT/'openwrt/engine/nfqws2-linux-x86_64',engine)
+        engine.chmod(0o755)
         r=subprocess.run([str(engine),'--dry-run','--qnum=64000','--debug=1','--filter-tcp=443','--hostlist='+str(empty)],capture_output=True,text=True,timeout=5)
         self.assertEqual(r.returncode,0,r.stderr)
         self.assertNotIn('failed to register',r.stderr)
