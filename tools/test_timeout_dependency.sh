@@ -87,8 +87,9 @@ done
 # The module gets an isolated PATH containing only sleep, chmod and explicitly
 # selected mock package managers. Even an accidental external apk/opkg call
 # cannot reach the host package managers. The mock itself uses shell builtins.
-SLEEP=$(command -v sleep)
-CHMOD=$(command -v chmod)
+# Resolve external executable paths, not standalone-ash applet names.
+SLEEP=$(/bin/sh -c 'command -v sleep')
+CHMOD=$(/bin/sh -c 'command -v chmod')
 reset() {
     MOCK_BIN="$TMP/bin-$N"
     MOCK_LOG="$TMP/package-$N.log"
@@ -124,7 +125,20 @@ require() {
     # Assignment is not scoped to the function: restore PATH explicitly.
     saved_path=$PATH
     PATH=$MOCK_BIN
+    # Standalone BusyBox ash resolves built-in applets even outside PATH. Model
+    # dependency availability explicitly; leave manager execution and the real
+    # watchdog untouched. Unexpected lookup shapes fail closed, not to the host.
+    command() {
+        [ "$#" -eq 2 ] && [ "$1" = -v ] || return 127
+        case "$2" in timeout|apk|opkg) ;; *) return 127 ;; esac
+        [ -x "$MOCK_BIN/$2" ] || return 1
+        printf '%s\n' "$MOCK_BIN/$2"
+    }
+    # Standalone ash may also dispatch its apk applet ahead of PATH fixtures.
+    apk() { "$MOCK_BIN/apk" "$@"; }
+    opkg() { "$MOCK_BIN/opkg" "$@"; }
     bcw_engine_require_timeout > "$TMP/require-stdout" 2> "$TMP/require-stderr" || rc=$?
+    unset -f command apk opkg
     PATH=$saved_path
     [ ! -s "$TMP/require-stdout" ] || fail 'package-manager output polluted caller stdout'
     return "$rc"
