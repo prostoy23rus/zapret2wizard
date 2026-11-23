@@ -56,7 +56,7 @@ python3 - "$HELPER" "$TMP" <<'PY'
 import pathlib, re, sys
 source = pathlib.Path(sys.argv[1]).read_text()
 out = pathlib.Path(sys.argv[2])
-start = source.index('        HOME="$scan_home" /usr/bin/blockcheckw --qnum "$scan_qnum"')
+start = source.index('        BCW_REPORT_DIR="$report_run/probe" HOME="$scan_home" /usr/bin/blockcheckw --qnum "$scan_qnum"')
 end = source.index('        local probe_eval=', start)
 block = source[start:end]
 assert 'local probe_exit=$?' in block and 'scan_failure ' in block
@@ -92,6 +92,8 @@ printf '#!/bin/sh\nprintf "ERROR fixture preflight failure\\n"\nexit "${SCANNER_
 chmod +x "$TMP/scanner"
 run_probe() (
     scanner="$TMP/scanner"
+    report_run="$TMP/report-run"
+    mkdir -p "$report_run/probe"
     scan_home="$TMP" scan_qnum=49000 workers=1 domain=example.invalid
     protocols=tls12 scan_dns=system probe_corpus="$TMP/corpus" probe_output="$TMP/probe.json"
     LOG_FILE="$TMP/probe.log"
@@ -119,6 +121,7 @@ unset SCANNER_EXIT
 # effects instead of deleting paths, sending signals, or running firewall tools.
 run_probe_cleanup() (
     scan_lock_owned="$1" scan_service_was_running="$2"
+    report_run=""
     LOG_FILE="$TMP/cleanup-probe.log" PID_FILE="$TMP/cleanup.pid"
     scanner="$TMP/scanner" scan_home="$TMP" scan_qnum=49000 workers=1
     domain=example.invalid protocols=tls12 scan_dns=system
@@ -220,7 +223,9 @@ PY
         "$BCW_ENGINE_ROOT/opt/zapret2/nfq2" "$BCW_ENGINE_ROOT/var/run" "$BCW_ENGINE_ROOT/tmp" "$BCW_ENGINE_ROOT/etc/init.d"
     printf '#!/bin/sh\n# BCW_ENGINE_ONLY fixture\nexit 0\n' > "$BCW_ENGINE_ROOT/etc/init.d/zapret2wizard"
     cp "$ENGINE" "$BCW_ENGINE_ROOT/usr/share/zapret2wizard/engine.sh"
+    cp "$ROOT/openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/lifecycle.sh" "$BCW_ENGINE_ROOT/usr/share/zapret2wizard/lifecycle.sh"
     if [ "$case_name" = old-updater-migration ]; then
+        rm -f "$BCW_ENGINE_ROOT/usr/share/zapret2wizard/lifecycle.sh"
         rm -f "$BCW_ENGINE_ROOT/usr/share/zapret2wizard/engine.sh"
         printf '#!/bin/sh\n# old init\nexit 0\n' > "$BCW_ENGINE_ROOT/etc/init.d/zapret2wizard"
     fi
@@ -275,6 +280,8 @@ PY
         [ "$case_name" != download-failure ] || return 1
         case "$1" in
             */engine.sh) cp "$ENGINE" "$2" ;;
+            */transfer_probe.lua|*/hostlist_io.sh) cp "$ROOT/openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/${1##*/}" "$2" ;;
+            */lifecycle.sh) cp "$ROOT/openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/lifecycle.sh" "$2" ;;
             */etc/init.d/zapret2wizard)
                 printf '#!/bin/sh\n# BCW_ENGINE_ONLY fixture\nexit 0\n' > "$2" ;;
             */lua/*.lua) printf 'new Lua %s\n' "${1##*/}" > "$2" ;;
@@ -338,12 +345,19 @@ PY
             fi
             downloads_before=$(wc -l < "$BCW_ENGINE_ROOT/downloads")
             cmd_engine_repair || exit 1
-            [ "$(wc -l < "$BCW_ENGINE_ROOT/downloads")" = "$downloads_before" ] || exit 1
+            # Repeated repair refreshes the two helper modules, never the engine/Lua or service.
+            [ "$(wc -l < "$BCW_ENGINE_ROOT/downloads")" = "$((downloads_before + 2))" ] || exit 1
+            tail -n 2 "$BCW_ENGINE_ROOT/downloads" | grep -q '/transfer_probe.lua$' || exit 1
+            tail -n 2 "$BCW_ENGINE_ROOT/downloads" | grep -q '/hostlist_io.sh$' || exit 1
             [ "$(cat "$BCW_ENGINE_ROOT/state")" = done ] || exit 1
             ;;
         compatible)
             [ "$rc" = 0 ] && [ "$(cat "$BCW_ENGINE_ROOT/state")" = done ] || exit 1
-            [ ! -e "$BCW_ENGINE_ROOT/downloads" ] && [ ! -e "$BCW_ENGINE_ROOT/restarts" ] || exit 1
+            [ "$(wc -l < "$BCW_ENGINE_ROOT/downloads")" = 2 ] && [ ! -e "$BCW_ENGINE_ROOT/restarts" ] || exit 1
+            grep -q '/transfer_probe.lua$' "$BCW_ENGINE_ROOT/downloads" || exit 1
+            grep -q '/hostlist_io.sh$' "$BCW_ENGINE_ROOT/downloads" || exit 1
+            cmp -s "$ROOT/openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/transfer_probe.lua" "$BCW_ENGINE_ROOT/usr/share/zapret2wizard/transfer_probe.lua" || exit 1
+            cmp -s "$ROOT/openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/hostlist_io.sh" "$BCW_ENGINE_ROOT/usr/share/zapret2wizard/hostlist_io.sh" || exit 1
             ;;
         source-lua-symlink)
             [ "$rc" != 0 ] && [ "$(cat "$BCW_ENGINE_ROOT/state")" = error ] || exit 1

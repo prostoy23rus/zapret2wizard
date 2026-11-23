@@ -13,6 +13,8 @@ mkdir -p "$ROOT/usr/bin" "$ROOT/usr/share/zapret2wizard/fake" "$ROOT/etc/zapret2
 # inside the inserted sandbox prefix a second time.
 awk -v prefix="$ROOT" '{gsub(/\/(etc|usr|opt|tmp|var|proc|lib|sbin)\//, prefix "&"); print}' \
     "$REPO/openwrt/luci-app-blockcheckw/root/etc/init.d/zapret2wizard" > "$TMP/init"
+cp "$REPO/openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/lifecycle.sh" "$ROOT/usr/share/zapret2wizard/lifecycle.sh"
+BCW_LIFECYCLE_ROOT="$ROOT"; export BCW_LIFECYCLE_ROOT
 cat > "$TMP/forbidden" <<'HOOK'
 #!/bin/sh
 printf 'FORBIDDEN hook %s %s\n' "$0" "$*" >> "$LOG"
@@ -54,8 +56,10 @@ detect_interfaces() { WAN_IFACE=mockwan; LAN_IFACE=mocklan; WAN6_IFACE=''; }
 nft() {
     printf 'nft %s\n' "$*" >> "$LOG"
     case "$*" in
-        '-f -') while IFS= read -r line; do :; done ;;
-        'delete table inet zapret2wizard'|'list table inet zapret2wizard') ;;
+        '-f -') while IFS= read -r line; do :; done; MOCK_TABLE=1 ;;
+        'list tables') ;;
+        'delete table inet zapret2wizard') MOCK_TABLE=0 ;;
+        'list table inet zapret2wizard') [ "${MOCK_TABLE:-1}" = 1 ] ;;
         *) forbidden "nft $*" ;;
     esac
 }

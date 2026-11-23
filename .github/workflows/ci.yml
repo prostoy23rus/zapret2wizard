@@ -32,6 +32,8 @@ jobs:
       # Снятие фоновых процессов необратимо для всего процесса, поэтому живёт отдельным
       # бинарём: среди юнит-тестов оно убивало чужих детей (`nfqws2::run`).
       - run: cargo test --test background_shutdown
+      - name: Scanner report paths (filesystem only)
+        run: cargo test --test scanner_report_paths
 
   # Скрипты OpenWrt (helper, init, uci2config) живут вне rust-тестов, но это
   # такой же код пакета: проверяем синтаксис busybox ash и гоняем shell-тесты
@@ -41,11 +43,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
 
       - name: Install deps
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq busybox-static nftables
+          sudo apt-get install -y -qq busybox-static nftables lua5.4 lua-dkjson python3 curl
 
       - name: Syntax check (busybox ash)
         run: |
@@ -53,7 +58,9 @@ jobs:
                    openwrt/luci-app-blockcheckw/root/etc/init.d/zapret2wizard \
                    openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/uci2config \
                    openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/engine.sh \
-                   install.sh; do
+                   openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/lifecycle.sh \
+                   openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/hostlist_io.sh \
+                   install.sh uninstall.sh; do
             printf '%s: ' "$f"
             busybox ash -n "$f" && echo OK
           done
@@ -71,6 +78,24 @@ jobs:
           node tools/test_engine_update_ui.js
           sh tools/test_timeout_dependency.sh
           busybox ash tools/test_timeout_dependency.sh
+
+      # Disposable roots, stubbed router commands, and loopback HTTP only; no sudo.
+      - name: Offline repair regressions
+        env:
+          LUA: lua5.4
+        run: |
+          lua5.4 -e 'require("dkjson")'
+          python3 tools/test_lifecycle.py
+          python3 tools/test_lifecycle_packaging.py
+          python3 tools/test_state_integration.py
+          python3 tools/test_hostlist_integration.py
+          python3 tools/test_hostlist_io.py
+          python3 tools/test_helper_transfer.py
+          lua5.4 tools/test_transfer_probe.lua
+          python3 tools/test_transfer_probe.py
+          node tools/test_lifecycle_ui.js
+          node tools/test_transfer_ui.js
+          node tools/test_hostlist_integration.js
 
   # Экзотические цели собираются ТОЛЬКО в релизном воркфлоу, поэтому их поломка
   # всплывала уже после нарезки тега: v0.11.0 потерял mips, mipsel и ppc на

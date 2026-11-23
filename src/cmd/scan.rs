@@ -1,3 +1,6 @@
+mod report_paths;
+
+use report_paths::ReportDirectory;
 use std::sync::Arc;
 
 use console::style;
@@ -88,6 +91,12 @@ pub async fn run_scan(params: ScanParams<'_>) {
         alive_via,
         prereq,
     } = params;
+    // Reject an invalid explicit destination before DNS, routes or scan side effects.
+    // The interrupt writer uses the same resolver; neither falls back to CWD.
+    if let Err(e) = ReportDirectory::from_env() {
+        eprintln!("invalid scan report destination: {e}");
+        std::process::exit(1);
+    }
     let config = Arc::new(scan_core_config(workers, profiles_per_instance));
 
     let cleanup = spawn_cleanup_handler(&config.nft_table);
@@ -177,7 +186,9 @@ pub async fn run_scan(params: ScanParams<'_>) {
                 outcome,
                 run: RunProvenance::of(&config, &dns_mode.to_string(), mark::is_embedded()),
             });
-            let _ = write_report(&format!("{}_scan.json", chrono_local_prefix()), &json);
+            if let Err(e) = write_generated_report(&chrono_local_prefix(), "scan.json", &json) {
+                screen.error(&format!("failed to write scan report: {e}"));
+            }
             // TODO(BL-041): process::exit минует force_flush в main → span'ы сбоя теряются.
             std::process::exit(code);
         }
@@ -281,6 +292,9 @@ pub async fn run_scan(params: ScanParams<'_>) {
             outcome: Outcome::NotBlocked,
             run: RunProvenance::of(&config, &dns_mode.to_string(), mark::is_embedded()),
         });
+        if let Err(e) = write_generated_report(&chrono_local_prefix(), "scan.json", &scan_json) {
+            screen.error(&format!("failed to write scan report: {e}"));
+        }
         super::print_stdout_graceful(&scan_json, &screen);
         // Restore routes + zapret2 before early return
         if let Some(v) = via {
@@ -551,14 +565,17 @@ pub async fn run_scan(params: ScanParams<'_>) {
     let now = chrono_local_prefix();
 
     let (content, count) = report::build_vanilla_report(domain, &summary);
-    let vanilla_path = format!("{now}_report_vanilla.txt");
-    match write_report(&vanilla_path, &content) {
-        Ok(()) => screen.println(&format!(
-            "  {} vanilla report: {} strategies → {}",
-            style("OK").green().bold(),
-            count,
-            style(&vanilla_path).cyan(),
-        )),
+    let mut vanilla_path = None;
+    match write_generated_report(&now, "report_vanilla.txt", &content) {
+        Ok(path) => {
+            vanilla_path = Some(path.clone());
+            screen.println(&format!(
+                "  {} vanilla report: {} strategies → {}",
+                style("OK").green().bold(),
+                count,
+                style(path).cyan(),
+            ));
+        }
         Err(e) => screen.println(&format!(
             "  {} failed to write vanilla report: {e}",
             style("ERROR:").red().bold(),
@@ -576,9 +593,8 @@ pub async fn run_scan(params: ScanParams<'_>) {
         outcome: outcome.clone(),
         run: RunProvenance::of(&config, &dns_mode.to_string(), mark::is_embedded()),
     });
-    let scan_path = format!("{now}_scan.json");
-    match write_report(&scan_path, &content) {
-        Ok(()) => screen.println(&format!(
+    match write_generated_report(&now, "scan.json", &content) {
+        Ok(scan_path) => screen.println(&format!(
             "  {} scan report: {} strategies → {}",
             style("OK").green().bold(),
             count,
@@ -603,7 +619,7 @@ pub async fn run_scan(params: ScanParams<'_>) {
     super::print_stdout_graceful(&scan_json, &screen);
     screen.newline();
 
-    if count > 0 {
+    if let Some(vanilla_path) = vanilla_path.filter(|_| count > 0) {
         screen.println(&format!(
             "\n{}\n",
             style(format!(
@@ -662,6 +678,13 @@ fn write_report(path: &str, content: &str) -> std::io::Result<()> {
     blockcheckw::system::atomic::write_atomic(std::path::Path::new(path), content)
 }
 
+/// Generated report publication shared by completed, failed and interrupted scans.
+fn write_generated_report(prefix: &str, kind: &str, content: &str) -> std::io::Result<String> {
+    let path = ReportDirectory::from_env()?.write(prefix, kind, content)?;
+    blockcheckw::system::elevate::chown_to_caller(path.to_string_lossy().as_ref());
+    Ok(path.to_string_lossy().into_owned())
+}
+
 /// Paths and count produced by [`write_scan_reports`].
 pub(crate) struct WrittenReports {
     pub scan_path: String,
@@ -687,7 +710,7 @@ pub(crate) fn write_scan_reports(
     }
 
     let (content, _) = report::build_vanilla_report(domain, summary);
-    write_report(&format!("{now}_report_vanilla.txt"), &content)?;
+    write_generated_report(&now, "report_vanilla.txt", &content)?;
 
     // Прогон оборван сигналом — это ЦЕНЗУРА замера, а не суждение о мире: найденное
     // сохраняем, но утверждать «ничего нет» не вправе.
@@ -712,8 +735,7 @@ pub(crate) fn write_scan_reports(
             mark::is_embedded(),
         ),
     });
-    let scan_path = format!("{now}_scan.json");
-    write_report(&scan_path, &content)?;
+    let scan_path = write_generated_report(&now, "scan.json", &content)?;
 
     Ok(WrittenReports { scan_path, count })
 }

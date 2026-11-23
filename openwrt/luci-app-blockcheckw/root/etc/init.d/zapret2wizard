@@ -196,19 +196,8 @@ check_config() {
 	[ -x "$UCI2CONFIG" ] && "$UCI2CONFIG" --check
 }
 
-# Flow offloading заставляет ядро пропускать пакеты мимо nfqueue,
-# из-за чего десинк не применяется. Отключаем его для работы обхода.
-disable_flow_offloading() {
-    local cur=$(uci -q get firewall.@defaults[0].flow_offloading)
-    local curhw=$(uci -q get firewall.@defaults[0].flow_offloading_hw)
-    if [ "$cur" = "1" ] || [ "$curhw" = "1" ]; then
-        uci set firewall.@defaults[0].flow_offloading='0' 2>/dev/null
-        uci set firewall.@defaults[0].flow_offloading_hw='0' 2>/dev/null
-        uci commit firewall 2>/dev/null
-        /etc/init.d/firewall reload >/dev/null 2>&1 || true
-        logger -t zapret2wizard "flow offloading отключён: иначе DPI-обход не работает"
-    fi
-}
+# Global firewall offload preferences are user-owned.
+
 
 prepare_environment() {
 	# Engine repair/rollback must reuse the exact generated strategies. The
@@ -220,7 +209,7 @@ prepare_environment() {
 		fi
 		return 0
 	fi
-    disable_flow_offloading
+    # Global firewall offload preferences belong to the user, not service Start.
 
     # nfqws2 работает от пользователя daemon: каталоги и списки должны быть читаемы,
     # иначе основной экземпляр падает с "file_open_test: Permission denied".
@@ -305,39 +294,31 @@ guard_conflicts() {
 }
 
 start_service() {
+	[ "${BCW_ENGINE_ONLY:-0}" != 1 ] || { start_service_locked; return $?; }
+	[ ! -e "${BCW_LIFECYCLE_ROOT:-}/var/run/bcw_service.removing" ] || return 1
+	. "$SHARE_DIR/lifecycle.sh" || return 1
+	# procd/jshn builds its registration in caller shell variables. Never wrap
+	# this callback in a subshell; rc.common closes the service after we return.
+	if [ "${BCW_POLICY_LOCK_HELD:-0}" = 1 ]; then start_service_locked; return $?; fi
+	local rc
+	bcw_lifecycle_policy_lock same-shell || return 1
+	# Never replace rc.common caller traps. Every callback return releases here;
+	# an interrupted shell leaves a fail-closed runtime lock, cleared on reboot.
+	start_service_locked; rc=$?
+	rmdir "${BCW_LIFECYCLE_ROOT:-}/var/run/bcw_policy.lock" || rc=1
+	unset BCW_POLICY_LOCK_HELD
+	return "$rc"
+}
+start_service_locked() {
+	# Direct init start is an explicit request too; boot preference is untouched.
+	if [ "${BCW_ENGINE_ONLY:-0}" != "1" ]; then rm -f /var/run/bcw_service.stopped; fi
 	# nfqws2 не стартует без nfnetlink_queue (nfq_unbind_pf: Invalid argument),
 	# а правило nft queue — без nft_queue. На чистых роутерах модулей может не быть;
 	# modprobe подтянет их, если пакет kmod уже установлен.
 	modprobe nfnetlink_queue 2>/dev/null || true
 	modprobe nft_queue 2>/dev/null || true
-	if [ "${BCW_ENGINE_ONLY:-0}" != "1" ]; then
-	# Миграция старой дефолтной circular-стратегии YouTube на fakeddisorder
-	# (SNI-блок обходится, подписанные URL не ломаются). Один раз.
-	[ -x /usr/bin/blockcheckw-helper ] && /usr/bin/blockcheckw-helper fix_defaults >/dev/null 2>&1 || true
-	[ -x /usr/bin/blockcheckw-helper ] && /usr/bin/blockcheckw-helper ensure_instagram >/dev/null 2>&1 || true
-	[ -x /usr/bin/blockcheckw-helper ] && /usr/bin/blockcheckw-helper prune_services >/dev/null 2>&1 || true
-	[ -x /usr/bin/blockcheckw-helper ] && /usr/bin/blockcheckw-helper save_good --if-missing >/dev/null 2>&1 || true
-	# uci2config обязан быть исполняемым: иначе стратегии применяются в UCI,
-	# но config не пересобирается и движок работает по старому профилю.
-	[ -x /usr/share/zapret2wizard/uci2config ] || chmod 755 /usr/share/zapret2wizard/uci2config 2>/dev/null || true
-	# DNS: уникальные googlevideo-хосты через DoH, иначе dns-failsafe ждёт
-	# медленный upstream и Shorts стартуют с задержкой в секунды.
-	# DNS-оптимизация может ходить в сеть (DoH/Instagram): не блокируем старт службы.
-	[ -x /usr/bin/blockcheckw-helper ] && ( /usr/bin/blockcheckw-helper optimize_dns >/dev/null 2>&1 & ) || true
-	# На чистой 25.12 dnsmasq может вернуть только AAAA для googlevideo;
-	# Раньше gv_fix глобально подменял googlevideo на один CDN-edge; это
-	# ломало подписанные URL. Чистим оставшиеся подмены, дальше работает
-	# обычный DNS + desync по SNI.
-	[ -x /usr/bin/blockcheckw-helper ] && /usr/bin/blockcheckw-helper gv_clear >/dev/null 2>&1 || true
-	# QUIC: если UDP/443 реально проходит — не режем его, приложение не ждёт
-	# fallback; если нет — reject + без ICMP-лимита, чтобы падение на TCP было быстрым.
-	# quic_mode делает сетевую пробу UDP/443 и может ждать; не блокируем старт.
-	[ -x /usr/bin/blockcheckw-helper ] && ( BCW_QUIC_NO_RESTART=1 /usr/bin/blockcheckw-helper quic_mode >/dev/null 2>&1 & ) || true
-	# YTApi: если YouTube-стратегия включена, а API закрыт и профиля YTApi
-	# нет — создаём его в фоне (fix_ytapi сам перезапускает службу, lock
-	# в helper не даёт зациклиться).
-	[ -x /usr/bin/blockcheckw-helper ] && ( /usr/bin/blockcheckw-helper ensure_ytapi >/dev/null 2>&1 & ) || true
-	fi
+	# Startup consumes configured policy; migrations, DNS tuning and strategy
+	# creation are explicit helper actions, not side effects of Start.
 
 	local uci_pkg="zapret2wizard"
 	[ -f /etc/config/zapret2wizard ] || uci_pkg="zapret2"
@@ -351,18 +332,7 @@ start_service() {
 		return 0
 	}
 
-	# Приоритет службы: чужие DPI-демоны не должны держать наши очереди.
-	# Полное отключение чужих zapret-служб (без удаления пакетов) — чтобы
-	# наши queue/marks не делились с другим обходом. Удаление — только по
-	# явной команде пользователя из UI.
-	local _conf_json=""
-	if [ "${BCW_ENGINE_ONLY:-0}" != "1" ] && [ -x /usr/bin/blockcheckw-helper ]; then
-		_conf_json=$(/usr/bin/blockcheckw-helper conflicts_resolve --action disable --auto 2>/dev/null)
-		case "$_conf_json" in
-			*'"remaining_foreign":0,"remaining_tables":0'*) ;;
-			*) logger -t zapret2wizard "осторожно: сторонние nfqws2 всё ещё работают — возможен конфликт queue/marks" ;;
-		esac
-	fi
+	# Foreign services/engines are user-owned. Conflict resolution is explicit only.
 	[ "${BCW_ENGINE_ONLY:-0}" = "1" ] || guard_conflicts
 
 	[ -x "$NFQWS_BIN" ] || {
@@ -399,11 +369,24 @@ start_service() {
 	# висеть на QUIC. Ставим до старта движков.
 	if [ "${BCW_ENGINE_ONLY:-0}" != "1" ]; then
 	local _qm=$(uci -q get zapret2wizard.main.quic_mode 2>/dev/null)
-	local _qr=$(uci -q get firewall.reject_quic.enabled 2>/dev/null)
-	if [ "$_qm" = "reject" ] || { [ "$_qm" != "allow" ] && [ "$_qr" = "1" ]; }; then
-		sh /usr/share/zapret2wizard/quic_reject.sh apply >/dev/null 2>&1 || true
+	local _want_quic=0 _profile _profile_enabled
+	case "$_qm" in
+		reject) _want_quic=1 ;;
+		allow|fake) ;;
+		*)
+			# Auto follows configured profiles, never runtime rules removed by Stop.
+			# Keep the prior no-network YouTube/General reject policy across restart.
+			for _profile in BlockcheckW_YouTube youtube BlockcheckW_General; do
+				uci -q get "zapret2wizard.$_profile" >/dev/null 2>&1 || continue
+				_profile_enabled=$(uci -q get "zapret2wizard.$_profile.enabled" 2>/dev/null)
+				[ "$_profile_enabled" = 0 ] || _want_quic=1
+			done
+			;;
+	esac
+	if [ "$_want_quic" = 1 ]; then
+		sh /usr/share/zapret2wizard/quic_reject.sh apply >/dev/null 2>&1 || { bcw_lifecycle_table_remove zapret2wizard; return 1; }
 	else
-		sh /usr/share/zapret2wizard/quic_reject.sh remove >/dev/null 2>&1 || true
+		sh /usr/share/zapret2wizard/quic_reject.sh remove >/dev/null 2>&1 || { bcw_lifecycle_table_remove zapret2wizard; return 1; }
 	fi
 	fi
 
@@ -479,27 +462,16 @@ start_service() {
 		canary_on=0
 	fi
 	if [ "${BCW_ENGINE_ONLY:-0}" != "1" ] && [ "$canary_on" = "1" ] && [ -x /usr/bin/blockcheckw-helper ]; then
-		( sleep 15; /usr/bin/blockcheckw-helper canary_start preset_youtube "$canary_iv" >/dev/null 2>&1 ) &
+		( unset BCW_POLICY_LOCK_HELD; sleep 15; /usr/bin/blockcheckw-helper canary_start preset_youtube "$canary_iv" >/dev/null 2>&1 ) &
 	fi
 }
 
 stop_service() {
 	logger -t zapret2wizard "Stopping Zapret2Wizard service and firewall..."
-	nft delete table inet zapret2wizard 2>/dev/null || true
-	rm -f "$PIDDIR/zapret2wizard_"*.pid
-	# Пользовательская остановка: снимаем Reject-QUIC, иначе UDP/443 остаётся
-	# заблокированным и YouTube не грузит видео через другие обходы.
-	# При внутренней остановке на время скана правило не трогаем.
-	if [ "${BCW_INTERNAL_STOP:-0}" != "1" ] && [ "${BCW_ENGINE_ONLY:-0}" != "1" ]; then
-		# Мониторинг доступности тоже глушим: без службы проверки ничего не показывают
-		[ -x /usr/bin/blockcheckw-helper ] && /usr/bin/blockcheckw-helper canary_stop >/dev/null 2>&1 || true
-		sh /usr/share/zapret2wizard/quic_reject.sh remove >/dev/null 2>&1 || true
-		if uci -q get firewall.reject_quic >/dev/null 2>&1; then
-			uci -q set firewall.reject_quic.enabled=0
-			uci -q commit firewall 2>/dev/null || true
-			/etc/init.d/firewall reload >/dev/null 2>&1 || true
-		fi
-	fi
+	local module="$SHARE_DIR/lifecycle.sh"
+	[ -r "$module" ] || return 1
+	. "$module"
+	bcw_lifecycle_stop_effects
 }
 
 reload_service() {

@@ -17,6 +17,9 @@ BCW_LIB_ONLY=1
 T=$(mktemp -d /tmp/bcw-quic-test.XXXXXX)
 trap 'rm -rf "$T"' EXIT INT TERM
 : > "$T/sets"
+BCW_LIFECYCLE_ROOT="$T"; export BCW_LIFECYCLE_ROOT
+mkdir -p "$T/usr/share/zapret2wizard" "$T/var/run"
+cp "$ROOT/openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/lifecycle.sh" "$T/usr/share/zapret2wizard/lifecycle.sh"
 
 uci() {
     case "$*" in

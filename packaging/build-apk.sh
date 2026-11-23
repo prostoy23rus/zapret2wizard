@@ -16,6 +16,8 @@ set -e
 BUNDLE=""
 OUT="dist"
 PKGNAME="zapret2wizard"
+PKG_RELEASE="${PKG_RELEASE:-1}"
+case "$PKG_RELEASE" in ''|*[!0-9]*) echo "invalid package release" >&2; exit 1 ;; esac
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -69,26 +71,25 @@ chmod 755 /usr/bin/blockcheckw-helper /usr/share/zapret2wizard/uci2config \
 /usr/bin/blockcheckw-helper cron_install >/dev/null 2>&1 || true
 /etc/init.d/zapret2wizard restart >/dev/null 2>&1 || true
 /usr/bin/blockcheckw-helper postinstall >/dev/null 2>&1 || true
-if [ "$(uci show zapret2wizard 2>/dev/null | grep -c '=strategy')" -eq 0 ]; then
-    (/usr/bin/blockcheckw-helper autosetup >/tmp/bcw_autosetup.log 2>&1 &) || true
-fi
+# Eligibility is checked by the helper; never infer it from any strategy count.
+(/usr/bin/blockcheckw-helper autosetup --if-needed >/tmp/bcw_autosetup.log 2>&1 </dev/null &) || true
 exit 0
 EOF
 
 cat > "$WORK/pre-deinstall" <<'EOF'
 #!/bin/sh
-/etc/init.d/zapret2wizard stop >/dev/null 2>&1 || true
-/etc/init.d/zapret2wizard disable >/dev/null 2>&1 || true
+. /usr/share/zapret2wizard/lifecycle.sh || exit 1
+bcw_lifecycle_prepare_remove || exit 1
 exit 0
 EOF
 chmod 755 "$WORK/post-install" "$WORK/pre-deinstall"
 
 mkdir -p "$OUT"
-OUTFILE="$OUT/${PKGNAME}_${VERSION}-r1_${ARCH}.apk"
+OUTFILE="$OUT/${PKGNAME}_${VERSION}-r${PKG_RELEASE}_${ARCH}.apk"
 
 "$APK_BIN" mkpkg \
     --info "name:$PKGNAME" \
-    --info "version:${VERSION}-r1" \
+    --info "version:${VERSION}-r${PKG_RELEASE}" \
     --info "description:Zapret2Wizard ${VERSION} - autonomous DPI bypass (Zapret2) with LuCI, scanner and engine" \
     --info "arch:$ARCH" \
     --info "license:MIT" \

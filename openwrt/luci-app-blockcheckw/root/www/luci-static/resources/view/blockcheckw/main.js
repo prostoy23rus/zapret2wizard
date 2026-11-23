@@ -960,7 +960,9 @@ return view.extend({
 
 		// Явное управление службой: запуск, остановка, перезапуск.
 		function svcAction(action) {
-			return fs.exec(HELPER_BIN, ['service', action]).then(function() {
+			return fs.exec(HELPER_BIN, ['service', action]).then(function(res) {
+				var state = parseHelperJson(res);
+				if (!state || state.ok !== true) throw new Error(state && state.error || 'Состояние службы не подтверждено');
 				var label = { start: 'запущена', stop: 'остановлена', restart: 'перезапущена' }[action] || 'изменена';
 				ui.addNotification(null, E('p', {}, 'Служба ' + label), 'info');
 				setTimeout(function() { location.reload(); }, 1500);
@@ -4307,14 +4309,14 @@ return view.extend({
 				var statusType = parsed.overall_status || (isAllOk ? 'optimal' : isAccessible ? 'degraded' : 'blocked');
 
 				var bannerColor = (statusType === 'optimal') ? '#00d1b2' :
-				                  (statusType === 'degraded') ? '#f59e0b' : '#ef4444';
+				                  (statusType === 'degraded') ? '#f59e0b' : '#94a3b8';
 				var bannerBg = (statusType === 'optimal') ? 'rgba(0, 209, 178, 0.12)' :
 				               (statusType === 'degraded') ? 'rgba(245, 158, 11, 0.12)' : 'rgba(239, 68, 68, 0.12)';
 				var bannerIcon = (statusType === 'optimal') ? '🟢' :
-				                 (statusType === 'degraded') ? '🟡' : '🔴';
-				var bannerTitle = (statusType === 'optimal') ? '100% сервиса доступно (Данные передаются без помех)' :
-				                  (statusType === 'degraded') ? 'Частичная доступность (Основной сайт отвечает, но часть потоков блокируется)' :
-				                  'Сервис заблокирован ТСПУ или недоступен';
+				                 (statusType === 'degraded') ? '🟡' : '⚪';
+				var bannerTitle = (statusType === 'optimal') ? 'Требования проверки выполнены (не тест воспроизведения)' :
+				                  (statusType === 'degraded') ? 'Часть требований не подтверждена' :
+				                  'Результат неизвестен / передача не подтверждена';
 
 				var rows = [];
 				if (parsed.endpoints && Array.isArray(parsed.endpoints)) {
@@ -4330,9 +4332,9 @@ return view.extend({
 							]),
 							E('div', { style: 'display: flex; align-items: center; gap: 8px;' }, [
 								epOk ? E('span', { class: 'badge cbi-color-green', style: 'font-size: 11px;' }, '✓ HTTP ' + ep.http_code) :
-								       (ep.truncated ? E('span', { class: 'badge cbi-color-amber', style: 'font-size: 11px; background: #d19a66; color: #000; font-weight: bold;' }, '⚠️ Обрыв ТСПУ (0 Б)') :
-								                       E('span', { class: 'badge cbi-color-red', style: 'font-size: 11px;' }, '✗ Код ' + ep.http_code)),
-								ep.size_bytes > 0 ? E('span', { style: 'font-size: 11px; color: #61afef; font-weight: bold;' }, '⚡ ' + speedText) : null,
+								       (ep.truncated ? E('span', { class: 'badge cbi-color-amber', style: 'font-size: 11px; background: #d19a66; color: #000; font-weight: bold;' }, '⚠️ Неполный ответ') :
+								                       E('span', { class: 'badge cbi-color-red', style: 'font-size: 11px;' }, 'Не подтверждено, код ' + ep.http_code + ' / ' + (ep.stall_reason || 'unknown'))),
+								ep.size_bytes > 0 ? E('span', { style: 'font-size: 11px; color: #61afef; font-weight: bold;' }, ep.size_bytes + ' Б / ' + speedText) : null,
 								ep.time_sec ? E('span', { style: 'font-size: 11px; color: #5c6370;' }, ep.time_sec + 'с') : null
 							].filter(Boolean))
 						]));
@@ -4399,12 +4401,12 @@ return view.extend({
 				}
 			}
 
-			bcwShowModal('⚡ Замер реальной скорости видео и проверка DPI', [
+			bcwShowModal('⚡ Ограниченный HTTP-образец', [
 				E('div', { style: 'text-align: center; padding: 18px 10px;' }, [
 					E('p', { class: 'spinning', style: 'font-size: 15px; font-weight: bold; color: #61afef;' },
-						'Тестирование пропускной способности видеопотока к ' + (pDef.name || currentTarget) + '...'),
+						'Проверка передачи HTTP-данных к ' + (pDef.name || currentTarget) + '...'),
 					E('p', { style: 'font-size: 12px; color: #abb2bf; margin-top: 6px;' },
-						'Загрузка тестового 2 МБ медиа-сегмента через активную стратегию Zapret2, вычисление задержки и анализ DPI-троттлинга...')
+						'Ограниченный объём, время и скорость запроса. Воспроизведение и причина сетевых ошибок не определяются.')
 				])
 			]);
 
@@ -4423,14 +4425,16 @@ return view.extend({
 				var bannerBg = isThrottled ? 'rgba(239, 68, 68, 0.12)' : (parsed.rating_badge === 'cbi-color-green' ? 'rgba(0, 209, 178, 0.12)' : 'rgba(245, 158, 11, 0.12)');
 				var icon = isThrottled ? '🔴' : (parsed.rating === '4k' ? '🚀' : parsed.rating === '2k' ? '🟢' : '🟡');
 
-				var speedVal = parsed.speed_mbs > 0 ? (parsed.speed_mbs + ' МБ/с') : (parsed.speed_kbs + ' КБ/с');
-				var speedMbps = parsed.speed_mbps ? (parsed.speed_mbps + ' Мбит/с') : '';
+				var speedVal = parsed.speed_known === false ? 'Не измерено' : (parsed.speed_mbs > 0 ? (parsed.speed_mbs + ' МБ/с') : (parsed.speed_kbs + ' КБ/с'));
+				var speedMbps = parsed.speed_known === false ? '' : (parsed.speed_mbps != null ? (parsed.speed_mbps + ' Мбит/с') : '');
+				var connectText = parsed.connect_known === false ? 'Не измерено' : (parsed.latency_ms || 0) + ' мс';
+				var volumeText = (parsed.bytes_known === false ? 'Объём не измерен' : (parsed.size_mb || '0') + ' МБ') + ' / ' + (parsed.elapsed_known === false ? 'время не измерено' : (parsed.total_time_sec || '0') + 'с');
 
 				var modalBody = [
 					E('div', {
 						style: 'background: ' + bannerBg + '; border: 1.5px solid ' + badgeColor + '; border-radius: 8px; padding: 16px; margin-bottom: 16px; text-align: center;'
 					}, [
-						E('div', { style: 'font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: #abb2bf; font-weight: 600;' }, 'Реальная скорость видеопотока'),
+						E('div', { style: 'font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: #abb2bf; font-weight: 600;' }, 'Измеренная скорость образца (ограничена бюджетом)'),
 						E('div', { style: 'font-size: 32px; font-weight: 900; color: ' + badgeColor + '; margin: 6px 0;' }, speedVal),
 						speedMbps ? E('div', { style: 'font-size: 14px; color: #abb2bf; font-weight: 600;' }, '≈ ' + speedMbps) : null,
 						E('div', { style: 'display: inline-flex; align-items: center; gap: 6px; margin-top: 10px; padding: 4px 14px; border-radius: 20px; background: rgba(0,0,0,0.25); font-weight: bold; font-size: 13px; color: ' + badgeColor + ';' }, [
@@ -4443,16 +4447,16 @@ return view.extend({
 						style: 'display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px;'
 					}, [
 						E('div', { style: 'background: rgba(0,0,0,0.2); border-radius: 6px; padding: 10px; text-align: center;' }, [
-							E('div', { style: 'font-size: 11px; color: #abb2bf;' }, 'Пинг до CDN'),
-							E('div', { style: 'font-size: 15px; font-weight: bold; color: #e5e9f0; margin-top: 4px;' }, (parsed.latency_ms || 0) + ' мс')
+							E('div', { style: 'font-size: 11px; color: #abb2bf;' }, 'TCP connect'),
+							E('div', { style: 'font-size: 15px; font-weight: bold; color: #e5e9f0; margin-top: 4px;' }, connectText)
 						]),
 						E('div', { style: 'background: rgba(0,0,0,0.2); border-radius: 6px; padding: 10px; text-align: center;' }, [
 							E('div', { style: 'font-size: 11px; color: #abb2bf;' }, 'Время отклика (TTFB)'),
-							E('div', { style: 'font-size: 15px; font-weight: bold; color: #e5e9f0; margin-top: 4px;' }, (parsed.ttfb_ms || 0) + ' мс')
+							E('div', { style: 'font-size: 15px; font-weight: bold; color: #e5e9f0; margin-top: 4px;' }, parsed.ttfb_known === false ? 'Не измерено' : (parsed.ttfb_ms || 0) + ' мс')
 						]),
 						E('div', { style: 'background: rgba(0,0,0,0.2); border-radius: 6px; padding: 10px; text-align: center;' }, [
 							E('div', { style: 'font-size: 11px; color: #abb2bf;' }, 'Объем теста'),
-							E('div', { style: 'font-size: 15px; font-weight: bold; color: #e5e9f0; margin-top: 4px;' }, (parsed.size_mb || '0') + ' МБ за ' + (parsed.total_time_sec || '0') + 'с')
+							E('div', { style: 'font-size: 15px; font-weight: bold; color: #e5e9f0; margin-top: 4px;' }, volumeText)
 						])
 					]),
 
@@ -4477,8 +4481,9 @@ return view.extend({
 						style: 'padding: 12px 14px; background: rgba(0,0,0,0.2); border-left: 3px solid ' + badgeColor + '; border-radius: 6px; font-size: 13px; line-height: 1.5; color: #e5e9f0; margin-bottom: 14px;'
 					}, [
 						E('strong', { style: 'display: block; margin-bottom: 4px; color: ' + badgeColor + ';' },
-							isThrottled ? '⚠️ Анализ троттлинга ТСПУ:' : '✓ Анализ качества:'),
-						E('span', {}, parsed.verdict || '')
+							'Наблюдение (воспроизведение неизвестно):'),
+						E('span', {}, (parsed.verdict || '') + ' Бюджет: ' + (parsed.budgetcap || 0) + ' Б; предел скорости: ' + (parsed.speed_cap_bytes_per_sec || 0) + ' Б/с.'),
+						parsed.fallback ? E('p', {}, 'Резервный узел: ' + (parsed.fallback.endpoint_id || '') + ' — ' + (parsed.fallback.reason || 'unknown') + '. Не заменяет основной результат.') : null
 					]),
 
 					E('div', { style: 'font-size: 11px; color: #5c6370; text-align: center;' },
@@ -4847,22 +4852,16 @@ return view.extend({
 
 			function buildRow(hl) {
 				var count = hl.domains_count || 0;
-				var isOk = (count > 0 && hl.uci_configured !== false);
-
-				var status = E('div', { style: 'font-size: 12px; margin-top: 6px; color: #abb2bf;' }, '');
-				if (hl.key === 'user') {
-					var builtinSvc = (zapretInfo && zapretInfo.services) ? zapretInfo.services.builtin : null;
-					// fallback-секция Routerich_circular не означает, что User-список
-					// реально применяется: нужна именно BlockcheckW_General.
-					var builtinReady = builtinSvc && builtinSvc.script && String(builtinSvc.script).trim() !== '' &&
-						String(builtinSvc.section || '').indexOf('BlockcheckW_General') === 0;
-					if (builtinReady) {
-						status.textContent = 'Применяется стратегией «Встроенные хосты».';
-					} else {
-						status.textContent = '⚠ Цель «Встроенные хосты» не настроена: домены из этого списка сейчас не обходятся. Выберите её в сканере и примените рабочую стратегию.';
-						status.style.color = '#e5c07b';
-					}
-				}
+				var isOk = hl.exists === true && hl.attached === true && hl.enabled === true && hl.service_running === true && count > 0;
+				var stateText = hl.exists !== true ? 'Файл отсутствует или недоступен' :
+					hl.attached !== true ? 'Список не привязан к стратегии' :
+					hl.enabled !== true ? 'Привязанная стратегия выключена' :
+					hl.service_running !== true ? 'Служба не запущена' :
+					count === 0 ? 'Список пуст — домены не выбраны' : 'Стратегия включена; служба запущена';
+				var warning = E('div', { role: 'status', style: 'font-size: 12px; margin-top: 6px; color: #e5c07b;' },
+					(isOk ? '' : '⚠ ') + stateText + (isOk ? '. Обработка конкретного домена не проверена.' : '. Сохранение списка само по себе не включает обход.'));
+				var revision = null;
+				var status = E('div', { role: 'status', 'aria-live': 'polite', style: 'font-size: 12px; margin-top: 6px; color: #abb2bf;' }, '');
 				var area = E('textarea', {
 					rows: 6,
 					spellcheck: 'false',
@@ -4871,7 +4870,7 @@ return view.extend({
 
 				var editor = E('div', { style: 'display: none; margin-top: 10px;' }, [
 					E('div', { style: 'font-size: 12px; color: #abb2bf; margin-bottom: 6px;' },
-						'По одному домену в строке. Префикс «^» исключает поддомен. После сохранения служба перезапустится.'),
+						'По одному домену в строке. Префикс «^» исключает поддомен. Сохранение и готовность службы проверяются отдельно.'),
 					area,
 					E('div', { style: 'margin-top: 8px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;' }, [
 						E('button', {
@@ -4886,19 +4885,25 @@ return view.extend({
 								});
 								self.disabled = true;
 								status.textContent = '⏳ Сохраняю и перезапускаю службу...';
-								fs.exec(HELPER_BIN, ['write_hostlist', hl.key].concat(domains)).then(function(res) {
+								if (revision === null) { status.textContent = '✗ Сначала прочитайте список повторным нажатием «Изменить».'; self.disabled = false; return; }
+								fs.exec(HELPER_BIN, ['write_hostlist', hl.key, '--revision', revision].concat(domains.length ? domains : ['--empty'])).then(function(res) {
 									var out = parseHelperJson(res);
-									if (!out || !out.success) {
-										status.textContent = '✗ ' + ((out && out.error) || 'не удалось сохранить список');
+									if (!out || out.saved !== true || out.success !== true || out.restart_verified !== true) {
+										if (out && out.saved === true) {
+											revision = out.revision || null;
+											status.textContent = '⚠ Список сохранён, но готовность службы не подтверждена. ' + (out.error || out.restart || 'Проверьте службу.');
+											ui.addNotification(null, E('p', {}, status.textContent), 'warning');
+										} else status.textContent = '✗ Список не сохранён: ' + ((out && out.error) || 'не удалось подтвердить запись; перечитайте список');
 										return null;
 									}
+									revision = out.revision || null;
 									status.textContent = '✓ Записано: ' + out.written + ', пропущено: ' + out.skipped + ', всего: ' + out.count;
 									return getZapretInfo().then(function(info) {
 										zapretInfo = info || {};
 										try { updateSummaryBox(); } catch (e) {}
 										lists = allowedHostlists(zapretInfo.hostlists || lists);
 										renderAll();
-										ui.addNotification(null, E('p', {}, '✓ Список «' + hl.name + '» сохранён'), 'info');
+										ui.addNotification(null, E('p', {}, '✓ Список «' + hl.name + '» сохранён; готовность службы подтверждена. Обработка доменов не проверялась.'), 'info');
 									});
 								}).catch(function(err) {
 									status.textContent = '✗ Ошибка: ' + err;
@@ -4923,11 +4928,12 @@ return view.extend({
 						var opening = (editor.style.display === 'none');
 						editor.style.display = opening ? 'block' : 'none';
 						if (!opening) return;
-						area.value = '';
+						revision = null;
 						status.textContent = '⏳ Читаю список...';
 						fs.exec(HELPER_BIN, ['read_hostlist', hl.key]).then(function(res) {
 							var out = parseHelperJson(res);
 							if (out && out.success) {
+								revision = typeof out.revision === 'string' ? out.revision : null;
 								area.value = (out.domains || []).join('\n');
 								status.textContent = 'Доменов: ' + out.count + ' — правьте и сохраняйте';
 							} else {
@@ -4954,10 +4960,11 @@ return view.extend({
 							E('div', { style: 'font-weight: bold; color: ' + (count > 0 ? '#98c379' : '#e06c75') + '; font-size: 13px;' },
 								count + ' доменов'),
 							E('div', { style: 'font-size: 11px; white-space: nowrap; color: ' + (hl.uci_configured === false ? '#e5c07b' : '#61afef') + ';' },
-								(hl.uci_configured === false ? (count > 0 ? 'Нет стратегии — запустите поиск' : 'Список пуст') : 'Zapret2 подключен'))
+								stateText)
 						]),
 						E('div', { style: 'display: flex; justify-content: flex-end;' }, [ btnEdit ])
 					]),
+					warning,
 					editor
 				]);
 			}
@@ -4979,12 +4986,14 @@ return view.extend({
 					self.disabled = true;
 					self.textContent = '⏳ Проверка и восстановление...';
 					fs.exec(HELPER_BIN, ['ensure_hostlists']).then(function(res) {
+						var out = parseHelperJson(res);
+						if (!out || !Array.isArray(out.hostlists) || (typeof res.code === 'number' && res.code !== 0)) throw new Error((out && out.error) || 'состояние списков не получено');
 						return getZapretInfo();
 					}).then(function(info) {
 						zapretInfo = info || {};
 						lists = allowedHostlists(zapretInfo.hostlists || lists);
 						renderAll();
-						ui.addNotification(null, E('p', {}, '✓ Все списки доменов проверены и синхронизированы с Zapret2!'), 'info');
+						ui.addNotification(null, E('p', {}, 'Состояние списков обновлено. Активность смотрите отдельно в каждой строке.'), 'info');
 					}).catch(function(err) {
 						ui.addNotification(null, E('p', {}, 'Ошибка проверки: ' + err), 'danger');
 					}).then(function() {
@@ -5005,7 +5014,7 @@ return view.extend({
 					'Списки лежат в ',
 					E('code', { style: 'color: #98c379;' }, '/etc/zapret2wizard/ipset/'),
 					'. Кнопка «Изменить» открывает редактор: правки сохраняются в файл и применяются перезапуском службы. ',
-					'Список «Исключения» работает наоборот — его домены служба обходить не будет.'
+					'Список «Исключения» запрещает обход в привязанных стратегиях; фактическая обработка трафика здесь не проверяется.'
 				]),
 				listContainer
 			], [ refreshBtn, closeBtn ]);
@@ -5020,9 +5029,9 @@ return view.extend({
 						E('li', {}, 'Исполняемый файл сканера /usr/bin/blockcheckw'),
 						E('li', {}, 'Веб-интерфейс OpenWrt LuCI и пункт в меню служб'),
 						E('li', {}, 'Вспомогательные скрипты и база пресетов'),
-						E('li', {}, 'Временные файлы и кэш LuCI')
+						E('li', {}, 'Служба, автозапуск, принадлежащие приложению правила DNS/QUIC и задания cron')
 					]),
-					E('p', { style: 'margin-top: 10px; color: #98c379;' }, '✓ Ваши сохранённые стратегии в Zapret2 продолжат работать без изменений.')
+					E('p', { style: 'margin-top: 10px; color: #98c379;' }, '✓ Пользовательские стратегии и списки будут сохранены для переустановки. Обход этой службой остановится.')
 				])
 			], [
 				E('button', {
@@ -5042,27 +5051,32 @@ return view.extend({
 
 		function doUninstallService() {
 			bcwShowModal('Удаление службы...', [
-				E('p', { class: 'spinning' }, 'Удаление файлов Zapret2Wizard и сброс кэша роутера...')
+				E('p', { class: 'spinning', role: 'status' }, 'Остановка службы и проверка удаления пакета…')
 			]);
-
+			var attempts = 0;
+			function pollRemoval(operation) {
+				return fs.read('/tmp/blockcheckw_uninstall.json').then(function(text) {
+					var status = JSON.parse(text);
+					if (status.operation !== operation) throw new Error('Получен статус другого удаления');
+					if (status.status === 'done' && status.success === true) {
+						bcwShowModal('Удаление завершено', [
+							E('p', { role: 'status' }, '✓ Служба и пакет удалены. Пользовательские стратегии и списки сохранены.')
+						]);
+						setTimeout(function() { window.location.href = L.url('admin/status/overview'); }, 2500);
+						return;
+					}
+					if (status.status === 'error') throw new Error(status.error || 'Удаление не завершено');
+					if (++attempts >= 120) throw new Error('Результат удаления не подтверждён. Проверьте журнал /tmp/blockcheckw_uninstall.json перед повтором.');
+					return new Promise(function(resolve) { setTimeout(resolve, 1000); }).then(function() { return pollRemoval(operation); });
+				});
+			}
 			fs.exec(HELPER_BIN, ['uninstall']).then(function(res) {
-				var parsed = null;
-				try { parsed = JSON.parse(res.stdout); } catch(e) {}
-				if (parsed && parsed.success) {
-					bcwShowModal('Удаление завершено', [
-						E('p', { style: 'color: #00d1b2; font-weight: bold; font-size: 15px;' }, '✓ ' + (parsed.message || 'Zapret2Wizard успешно удалён с роутера!')),
-						E('p', { style: 'font-size: 13px; margin-top: 8px;' }, 'Сейчас вы будете перенаправлены на главную страницу OpenWrt...')
-					]);
-					setTimeout(function() {
-						window.location.href = L.url('admin/status/overview');
-					}, 2500);
-				} else {
-					ui.hideModal();
-					ui.addNotification(null, E('p', {}, 'Ошибка удаления: ' + (parsed ? parsed.error : res.stderr)), 'danger');
-				}
+				var parsed = parseHelperJson(res);
+				if (!parsed || parsed.started !== true || !parsed.operation) throw new Error(parsed && parsed.error || res.stderr || 'Удаление не запущено');
+				return pollRemoval(parsed.operation);
 			}).catch(function(err) {
 				ui.hideModal();
-				ui.addNotification(null, E('p', {}, 'Ошибка удаления: ' + err), 'danger');
+				ui.addNotification(null, E('p', {}, 'Удаление не подтверждено: ' + err), 'danger');
 			});
 		}
 

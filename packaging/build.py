@@ -194,12 +194,11 @@ sleep 2
 echo "  установлено. Проверка:"
 /usr/bin/blockcheckw-helper doctor 2>/dev/null | head -14 || true
 echo
-# Если стратегий ещё нет — предлагаем автонастройку (занимает 5-10 минут).
-STRATS=$(uci show zapret2wizard 2>/dev/null | grep -c '=strategy')
-if [ "${STRATS:-0}" -eq 0 ] && [ "$AUTOSETUP" != "0" ]; then
-    echo "Стратегий пока нет. Запускаю автонастройку в фоне (5-10 минут),"
+# Helper owns first-run eligibility; generated unrelated profiles are not a gate.
+if [ "$AUTOSETUP" != "0" ]; then
+    echo "Проверяю необходимость первичной автонастройки в фоне,"
     echo "прогресс будет виден на странице службы: Службы → Zapret2Wizard."
-    (/usr/bin/blockcheckw-helper autosetup >/tmp/bcw_autosetup.log 2>&1 &) || true
+    (/usr/bin/blockcheckw-helper autosetup --if-needed >/tmp/bcw_autosetup.log 2>&1 </dev/null &) || true
 else
     echo "Откройте LuCI → Службы → Zapret2Wizard."
 fi
@@ -263,13 +262,18 @@ rm -rf /tmp/luci-indexcache* /tmp/luci-modulecache* 2>/dev/null || true
 /etc/init.d/uhttpd restart >/dev/null 2>&1 || true
 /etc/init.d/zapret2wizard enable >/dev/null 2>&1 || true
 ( /etc/init.d/zapret2wizard restart >/dev/null 2>&1 </dev/null & )
+( /usr/bin/blockcheckw-helper autosetup --if-needed >/tmp/bcw_autosetup.log 2>&1 </dev/null & )
 exit 0
 """
 
 PRERM = """#!/bin/sh
 [ -n "$IPKG_INSTROOT" ] && exit 0
-/etc/init.d/zapret2wizard stop >/dev/null 2>&1 || true
-/etc/init.d/zapret2wizard disable >/dev/null 2>&1 || true
+. /usr/share/zapret2wizard/lifecycle.sh || exit 1
+if [ "$1" = upgrade ]; then
+    BCW_INTERNAL_STOP=1 /etc/init.d/zapret2wizard stop || exit 1
+else
+    bcw_lifecycle_prepare_remove || exit 1
+fi
 exit 0
 """
 

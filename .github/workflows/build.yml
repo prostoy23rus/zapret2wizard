@@ -114,14 +114,15 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq build-essential git zlib1g-dev libssl-dev libzstd-dev lua5.4
-          sudo ln -sf /usr/bin/lua5.4 /usr/bin/lua5.3
           git clone -q --depth 1 --branch v3.0.5 https://github.com/alpinelinux/apk-tools.git /tmp/apk-tools
-          cd /tmp/apk-tools && make -j"$(nproc)" >/tmp/apkbuild.log 2>&1 || true
+          cd /tmp/apk-tools
+          make -j"$(nproc)" LUA=lua5.4 LUAAPK=no
           ls -l src/apk
 
       - name: Build bundle and apk
         env:
           LD_LIBRARY_PATH: /tmp/apk-tools/src
+          PKG_RELEASE: "3"
         run: |
           # dist/ хранится в репозитории, и пакеты прошлых версий уезжали
           # в релиз следующей (в v0.18.65 лежали файлы 0.18.64).
@@ -149,7 +150,11 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: packages-${{ matrix.openwrt_arch }}
-          path: dist/*
+          path: |
+            dist/*.apk
+            dist/*.ipk
+            dist/*-bundle.tar.gz
+          if-no-files-found: error
           retention-days: 14
 
   release:
@@ -160,6 +165,25 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+      - name: Select release notes
+        id: release-notes
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || github.ref_name }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          notes="release_${RELEASE_TAG#v}.md"
+          if [ "$EVENT_NAME" = release ]; then
+            # A published release already owns its hand-edited body. Attach assets only.
+            echo "generate=false" >> "$GITHUB_OUTPUT"
+          elif [ -f "$notes" ]; then
+            echo "body_path=$notes" >> "$GITHUB_OUTPUT"
+            echo "generate=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "generate=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Prepare release artifact directory
+        run: rm -rf dist && mkdir -p dist
       - uses: actions/download-artifact@v4
         with:
           pattern: packages-*
@@ -173,10 +197,19 @@ jobs:
       - name: Create checksums
         run: |
           cd dist
-          sha256sum * > SHA256SUMS
+          files=( *.apk *.ipk *-bundle.tar.gz blockcheckw-linux-*.tar.gz )
+          for file in "${files[@]}"; do test -f "$file"; done
+          sha256sum -- "${files[@]}" > SHA256SUMS
+          sha256sum --check SHA256SUMS
           ls -l SHA256SUMS
       - uses: softprops/action-gh-release@v2
         with:
-          files: dist/*
-          generate_release_notes: true
+          files: |
+            dist/*.apk
+            dist/*.ipk
+            dist/*-bundle.tar.gz
+            dist/blockcheckw-linux-*.tar.gz
+            dist/SHA256SUMS
+          body_path: ${{ steps.release-notes.outputs.body_path }}
+          generate_release_notes: ${{ steps.release-notes.outputs.generate }}
           fail_on_unmatched_files: true

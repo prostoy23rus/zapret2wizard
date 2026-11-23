@@ -325,6 +325,12 @@ fetch_req "openwrt/luci-app-blockcheckw/root/usr/bin/blockcheckw-helper" /usr/bi
 chmod +x /usr/bin/blockcheckw-helper 2>/dev/null || true
 fetch_file "openwrt/luci-app-blockcheckw/root/usr/bin/circular-builder.lua" /usr/bin/circular-builder.lua 8 || true
 fetch_req "openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/uci2config" /usr/share/zapret2wizard/uci2config 8
+fetch_req "openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/transfer_probe.lua" /usr/share/zapret2wizard/transfer_probe.lua 8
+fetch_req "openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/hostlist_io.sh" /usr/share/zapret2wizard/hostlist_io.sh 8
+lua -e 'assert(loadfile("/usr/share/zapret2wizard/transfer_probe.lua"))' || exit 1
+sh -n /usr/share/zapret2wizard/hostlist_io.sh || exit 1
+fetch_req "openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/lifecycle.sh" /usr/share/zapret2wizard/lifecycle.sh 8
+sh -n /usr/share/zapret2wizard/lifecycle.sh || exit 1
 # Always fetch the shared owner alongside helper; source only a complete module.
 fetch_req "openwrt/luci-app-blockcheckw/root/usr/share/zapret2wizard/engine.sh" /usr/share/zapret2wizard/engine.sh 14
 if ! sh -n /usr/share/zapret2wizard/engine.sh; then

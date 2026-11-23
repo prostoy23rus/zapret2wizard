@@ -62,13 +62,19 @@ chmod 755 /usr/bin/blockcheckw-helper /usr/share/zapret2wizard/uci2config \
 # возвращаться раньше, чем nfqws2/nft готовы.
 /etc/init.d/zapret2wizard restart >/dev/null 2>&1 || true
 /usr/bin/blockcheckw-helper postinstall >/dev/null 2>&1 || true
+( exec 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&-; /usr/bin/blockcheckw-helper autosetup --if-needed >/tmp/bcw_autosetup.log 2>&1 ) </dev/null >/dev/null 2>&1 &
 exit 0
 EOF
 
 cat > "$CTRL/prerm" <<'EOF'
 #!/bin/sh
 [ -n "$IPKG_INSTROOT" ] && exit 0
-/etc/init.d/zapret2wizard stop >/dev/null 2>&1 || true
+. /usr/share/zapret2wizard/lifecycle.sh || exit 1
+if [ "$1" = upgrade ]; then
+    BCW_INTERNAL_STOP=1 /etc/init.d/zapret2wizard stop || exit 1
+else
+    bcw_lifecycle_prepare_remove || exit 1
+fi
 exit 0
 EOF
 
