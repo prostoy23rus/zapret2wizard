@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+<title id="title">Zapret2Wizard — одна точка управления для домашней сети</title><desc id="desc">Продуктовый рендер: объёмный роутер соединён с ноутбуком, телефоном и телевизором; панель показывает функции службы, без измерений производительности.</desc>
+<defs>
+ <linearGradient id="canvas" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0b1119"/><stop offset="1" stop-color="#172633"/></linearGradient>
+ <radialGradient id="halo"><stop stop-color="#22dbc2" stop-opacity=".23"/><stop offset="1" stop-color="#22dbc2" stop-opacity="0"/></radialGradient>
+ <linearGradient id="surface" x1="0" y1="0" x2=".8" y2="1"><stop stop-color="#283c49"/><stop offset="1" stop-color="#15222e"/></linearGradient>
+ <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#66f8d5"/><stop offset="1" stop-color="#0caeae"/></linearGradient>
+ <linearGradient id="edge" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#447080"/><stop offset="1" stop-color="#223646"/></linearGradient>
+ <pattern id="grid" width="56" height="56" patternUnits="userSpaceOnUse"><path d="M56 0H0V56" fill="none" stroke="#92d1d9" stroke-opacity=".045"/></pattern>
+ <filter id="shadow" x="-35%" y="-40%" width="175%" height="200%"><feDropShadow dx="0" dy="22" stdDeviation="22" flood-color="#000b13" flood-opacity=".65"/></filter>
+ <filter id="glow"><feGaussianBlur stdDeviation="5"/></filter>
+ <style>text{font-family:Segoe UI,Arial,sans-serif;fill:#eef8fa} .eyebrow{font-size:19px;font-weight:700;letter-spacing:3px;fill:#49e5cb}.title{font-size:53px;font-weight:750;letter-spacing:-1px}.body{font-size:25px;fill:#b4cbd4}.muted{fill:#8eaab9}.aqua{fill:#55ead1}.amber{fill:#f7c878}.mono{font-family:Consolas,monospace}.panel{fill:url(#surface);stroke:#3a5668;stroke-width:1.5}.line{fill:none;stroke:#3c6c7d;stroke-width:2}.caption{font-size:18px;fill:#90aebb}</style>
+ </defs>
+<rect width="1600" height="900" rx="28" fill="url(#canvas)"/><rect width="1600" height="900" rx="28" fill="url(#grid)"/>
+
+<ellipse cx="1160" cy="440" rx="540" ry="440" fill="url(#halo)"/>
+<text x="78" y="100" class="eyebrow">OPENWRT / ZAPRET2 / LUCI</text>
+<text x="76" y="196" class="title" style="font-size:66px">Zapret2Wizard</text>
+<text x="80" y="256" class="body">Одна точка управления.</text><text x="80" y="296" class="body">Вся домашняя сеть.</text>
+<rect x="80" y="348" width="490" height="112" rx="18" fill="#172b35" stroke="#2f5964"/><circle cx="116" cy="390" r="7" fill="#4ce7c9"/><text x="140" y="399" font-size="25" font-weight="700">Подбор под вашу сеть</text><text x="112" y="436" font-size="21" class="muted">Сканер → проверка → применение</text>
+<g font-size="23"><text x="86" y="525" class="aqua">01</text><text x="137" y="525">Домены и исключения</text><text x="86" y="579" class="aqua">02</text><text x="137" y="579">Проверки с понятным результатом</text><text x="86" y="633" class="aqua">03</text><text x="137" y="633">Контроль службы через LuCI</text></g>
+<path d="M740 535C740 440 820 415 880 370M1120 550C1220 520 1260 434 1260 375M1010 620C1170 650 1320 680 1375 630" stroke="#32bfae" stroke-opacity=".18" stroke-width="13" fill="none" filter="url(#glow)"/>
+<path d="M740 535C740 440 820 415 880 370M1120 550C1220 520 1260 434 1260 375M1010 620C1170 650 1320 680 1375 630" stroke="#41d9c4" stroke-opacity=".8" stroke-width="2" stroke-dasharray="6 9" fill="none"/>
+<!-- Laptop: shallow 3D chassis, separate display and base. -->
+<g transform="translate(690 215) rotate(-5 160 95)" filter="url(#shadow)"><rect x="18" y="0" width="300" height="185" rx="15" fill="#172731" stroke="#567888" stroke-width="3"/><rect x="32" y="14" width="272" height="156" rx="7" fill="#0d1b26"/><circle cx="168" cy="7" r="2" fill="#8aadb9"/><path d="M18 185-15 211Q-18 224 6 226H330Q351 225 344 212L318 185Z" fill="url(#surface)" stroke="#527382" stroke-width="2"/><path d="M120 186H221L229 199H110Z" fill="#0f202b"/><rect x="54" y="40" width="228" height="22" rx="6" fill="#254d55"/><rect x="54" y="79" width="92" height="66" rx="8" fill="#173b44"/><path d="m68 126 18-15 20 6 22-20" fill="none" stroke="#55ead1" stroke-width="3"/><path d="M164 88H267M164 110H248M164 132H258" stroke="#426777" stroke-width="6" stroke-linecap="round"/></g>
+<!-- Television -->
+<g transform="translate(1130 192) rotate(4 140 100)" filter="url(#shadow)"><rect width="315" height="188" rx="14" fill="#11202b" stroke="#537786" stroke-width="3"/><rect x="12" y="12" width="291" height="163" rx="7" fill="#152e3a"/><circle cx="158" cy="92" r="37" fill="#23545a"/><path d="m150 72 31 20-31 20Z" fill="url(#accent)"/><path d="M156 188V220M108 221H207" stroke="#577a88" stroke-width="6" stroke-linecap="round"/></g>
+<!-- Router, isometric body with antennas, ports and status LEDs -->
+<g filter="url(#shadow)"><path d="M780 532 970 472 1214 551 1019 628Z" fill="#355564" stroke="#60828e" stroke-width="2"/><path d="M780 532V601L1019 685V628Z" fill="#1a2b39" stroke="#335161" stroke-width="2"/><path d="M1019 628 1214 551V614L1019 685Z" fill="#11212d" stroke="#335161" stroke-width="2"/><path d="M834 521 949 486 1147 550" fill="none" stroke="#6e909c" stroke-opacity=".5"/>
+<path d="M819 545 979 597M837 536 999 588M855 531 1018 582M875 525 1036 575" stroke="#122c39" stroke-width="4"/>
+<path d="M810 539 801 413" stroke="#587b87" stroke-width="15" stroke-linecap="round"/><path d="M811 536 801 413" stroke="#243c4c" stroke-width="10" stroke-linecap="round"/><path d="M1167 541 1186 415" stroke="#587b87" stroke-width="15" stroke-linecap="round"/><path d="M1167 541 1186 415" stroke="#243c4c" stroke-width="10" stroke-linecap="round"/>
+<path d="M925 486 919 377" stroke="#577987" stroke-width="14" stroke-linecap="round"/><path d="M925 486 919 377" stroke="#253d4c" stroke-width="9" stroke-linecap="round"/>
+<text x="887" y="589" transform="rotate(19 887 589)" font-size="20" font-weight="700" fill="#b4dae2">Z2W</text>
+<circle cx="810" cy="573" r="4" fill="#54f5ce"/><circle cx="828" cy="580" r="4" fill="#54f5ce"/><circle cx="846" cy="586" r="4" fill="#54f5ce"/>
+<path d="m1054 632 24-9v17l-24 9Zm37-14 24-9v17l-24 9Zm37-14 24-9v17l-24 9Z" fill="#080f18" stroke="#557582"/>
+</g>
+<!-- Phone -->
+<g transform="translate(1330 500) rotate(10 50 90)" filter="url(#shadow)"><rect width="112" height="209" rx="21" fill="#111f2b" stroke="#62828e" stroke-width="3"/><rect x="9" y="13" width="94" height="184" rx="14" fill="#16303d"/><rect x="35" y="19" width="43" height="7" rx="3" fill="#0a1720"/><path d="M32 84Q56 60 80 84M42 98Q56 84 70 98" fill="none" stroke="#5becd3" stroke-width="4" stroke-linecap="round"/><circle cx="56" cy="111" r="4" fill="#5becd3"/><rect x="25" y="141" width="62" height="6" rx="3" fill="#467785"/><rect x="33" y="158" width="46" height="6" rx="3" fill="#315967"/></g>
+<rect x="745" y="729" width="660" height="62" rx="14" fill="#10272f" stroke="#2c676a"/><circle cx="780" cy="760" r="6" fill="#51e6cb"/><text x="802" y="768" font-size="22">nfqws2 · Rust-сканер · веб-панель LuCI</text>
+<text x="80" y="838" class="caption">Продуктовый рендер · схема возможностей, не скриншот и не сетевой замер</text>
+</svg>
