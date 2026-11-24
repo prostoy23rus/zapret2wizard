@@ -2449,6 +2449,13 @@ return view.extend({
 		}
 		rebuildHistory();
 
+		// Объявлено ДО mainTabDefs: buildMemoryPanel() ниже присваивает сюда
+		// функцию обновления. Раньше `var memoryPanelRefresh = null` шёл
+		// ПОСЛЕ сборки панели и обнулял её — панель «Память стратегий» не
+		// обновлялась при переключении вкладки и после эволюции.
+		var memoryPanelRefresh = null;
+		var lastEvoRunning = false;
+
 		var mainTabDefs = [
 			{ id: 'scan', label: '🔍 Сканер', nodes: [targetSectionCard, unifiedScanCard] },
 			{ id: 'history', label: '🕘 История', nodes: [historyCard] },
@@ -2457,7 +2464,6 @@ return view.extend({
 		];
 
 		var mainTabBar = E('div', { class: 'bcw-main-tabs' });
-		var memoryPanelRefresh = null;
 		var mainTabPanels = {};
 
 		mainTabDefs.forEach(function(def) {
@@ -2518,6 +2524,7 @@ return view.extend({
 			var bansBox = E('div', { style: 'margin-top: 14px;' });
 			var refreshBtn = E('button', { class: 'bcw-btn-secondary', style: 'height: 30px; font-size: 12px;' }, '🔄 Обновить');
 			var clearBtn = E('button', { class: 'bcw-btn-secondary', style: 'height: 30px; font-size: 12px; color: #e06c75;' }, '🧹 Очистить память');
+			var updatedEl = E('div', { style: 'font-size: 11px; color: #98c379; margin: -4px 0 8px;' }, '');
 
 			function renderTop(d) {
 				topBox.innerHTML = '';
@@ -2621,7 +2628,12 @@ return view.extend({
 					var btn = E('button', { class: 'bcw-btn-secondary', style: 'height: 26px; font-size: 11.5px; white-space: nowrap;' }, 'Забыть');
 					btn.addEventListener('click', function() {
 						btn.disabled = true;
-						fs.exec(HELPER_BIN, ['memory_forget', dom]).then(function() { load(); }).catch(function() { btn.disabled = false; });
+						fs.exec(HELPER_BIN, ['memory_forget', dom]).then(function(res) {
+							var ok = false;
+							try { var out = JSON.parse(String((res && res.stdout) || '{}')); ok = !!(out && out.ok); } catch (e) {}
+							if (!ok) { ui.addNotification(null, E('p', {}, 'Не удалось забыть ' + dom), 'warning'); btn.disabled = false; return; }
+							load();
+						}).catch(function() { ui.addNotification(null, E('p', {}, 'Не удалось забыть ' + dom), 'danger'); btn.disabled = false; });
 					});
 					list.appendChild(E('div', { style: 'display: grid; grid-template-columns: minmax(0,1fr) 92px 90px; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--bcw-border-sub); border-radius: 6px;' }, [
 						E('div', {}, [
@@ -2637,21 +2649,47 @@ return view.extend({
 			}
 
 			function load() {
+				// Кнопка обязана давать видимую реакцию: disable на время RPC и
+				// метка «обновлено HH:MM:SS» (без неё пользователь думает, что
+				// кнопка не работает — данные-то не меняются).
+				refreshBtn.disabled = true;
+				refreshBtn.classList.add('bcw-busy');
+				updatedEl.textContent = '⏳ обновляю…';
 				fs.exec(HELPER_BIN, ['memory_dump']).then(function(res) {
 					var d = null;
-					try { d = JSON.parse((res && res.stdout) ? String(res.stdout) : '{}'); } catch (e) {}
-					render(d || {});
-				}).catch(function() { stats.textContent = 'Не удалось прочитать память'; });
+					try { d = JSON.parse((res && res.stdout) ? String(res.stdout).trim() : '{}'); } catch (e) {}
+					if (!d) { stats.textContent = 'Не удалось разобрать ответ памяти'; updatedEl.textContent = '✗ ошибка'; return; }
+					render(d);
+					var t = new Date();
+					var hh = ('0' + t.getHours()).slice(-2), mm = ('0' + t.getMinutes()).slice(-2), ss = ('0' + t.getSeconds()).slice(-2);
+					updatedEl.textContent = '✔ обновлено ' + hh + ':' + mm + ':' + ss;
+				}).catch(function() {
+					stats.textContent = 'Не удалось прочитать память';
+					updatedEl.textContent = '✗ ошибка';
+				}).then(function() {
+					refreshBtn.disabled = false;
+					refreshBtn.classList.remove('bcw-busy');
+				});
 			}
-			refreshBtn.addEventListener('click', load);
+			refreshBtn.addEventListener('click', function() { load(); });
 			clearBtn.addEventListener('click', function() {
-				if (!confirm('Очистить всю память стратегий?')) return;
-				fs.exec(HELPER_BIN, ['memory_clear']).then(function() { load(); });
+				if (!confirm('Очистить память стратегий (L1/L2)?\n\nБудут удалены домены, подсети и статистика рецептов. Память эволюции (геномы) не затрагивается.')) return;
+				clearBtn.disabled = true;
+				fs.exec(HELPER_BIN, ['memory_clear']).then(function(res) {
+					var ok = true;
+					try { var out = JSON.parse(String((res && res.stdout) || '{}')); ok = !!(out && out.ok); } catch (e) {}
+					if (ok) ui.addNotification(null, E('p', {}, '🧹 Память стратегий очищена'), 'info');
+					else ui.addNotification(null, E('p', {}, 'Не удалось очистить память'), 'warning');
+					load();
+				}).catch(function() {
+					ui.addNotification(null, E('p', {}, 'Не удалось очистить память'), 'danger');
+				}).then(function() { clearBtn.disabled = false; });
 			});
 			load();
 			memoryPanelRefresh = load;
 			root.appendChild(E('div', { style: 'display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;' }, [title, E('div', { style: 'display:flex;gap:8px;' }, [refreshBtn, clearBtn])]));
 			root.appendChild(stats);
+			root.appendChild(updatedEl);
 			root.appendChild(list);
 			root.appendChild(topBox);
 			root.appendChild(bansBox);
@@ -2982,6 +3020,10 @@ return view.extend({
 					if (wrap) wrap.style.display = 'none';
 				});
 
+				// Память стратегий меняется после прогона эволюции — обновляем
+				// панель сразу, как только прогон завершился.
+				if (!st.running && lastEvoRunning && typeof memoryPanelRefresh === 'function') memoryPanelRefresh();
+				lastEvoRunning = !!st.running;
 				if (st.running) {
 					if (evoPollTimer) clearTimeout(evoPollTimer);
 					evoPollTimer = setTimeout(refreshEvolution, 4000);
