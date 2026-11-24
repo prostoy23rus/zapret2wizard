@@ -2888,7 +2888,7 @@ return view.extend({
 				'Ночное обучение — 06:10, один прогон в сутки; «Каталог по ASN» подтягивает геномы других пользователей.'));
 			root.appendChild(E('div', { style: 'font-size:11.5px;color:#e5c07b;line-height:1.5;margin-top:6px;' },
 				'⏱ Прогон идёт в фоне: в журнале ниже видны этапы, счётчик «кандидат N/M» и heartbeat каждые ~20 с — ' +
-				'если строки обновляются, процесс жив. Обычно 1–2 мин на кандидата; если кандидат «висит» дольше 5 мин, ' +
+				'если строки обновляются, процесс жив. Обычно 2–4 мин на кандидата (зависит от числа тестов); если кандидат «висит» дольше 5 мин, ' +
 				'прогон пропустит его и восстановит рабочий конфиг. Страницу закрывать не нужно.'));
 			root.appendChild(top);
 			root.appendChild(hist);
@@ -2975,10 +2975,15 @@ return view.extend({
 
 				var summary = document.getElementById('bcw-evo-summary');
 				if (summary) {
+					// Живость прогона: маркер PID ИЛИ свежий журнал. Иначе при сбое
+					// маркера UI перестаёт опрашивать статус и лог «зависает» визуально
+					// (issue: «13 минут без изменений»).
+					var live = st.running || (typeof st.log_age_sec === 'number' && st.log_age_sec <= 20);
 					var runState = '';
-					if (st.running) {
+					if (live) {
 						runState = ' · ⏳ ' + (st.phase || 'выполняется');
 						if (st.progress_total) runState += ' (' + (st.progress_done || 0) + '/' + st.progress_total + ')';
+						if (!st.running) runState += ' (по журналу)';
 					}
 					summary.textContent = 'Провайдер: ' + (st.provider || '—') +
 						' · геномов: ' + (st.total_genomes || 0) +
@@ -3054,7 +3059,7 @@ return view.extend({
 				// панель сразу, как только прогон завершился.
 				if (!st.running && lastEvoRunning && typeof memoryPanelRefresh === 'function') memoryPanelRefresh();
 				lastEvoRunning = !!st.running;
-				if (st.running) {
+				if (live) {
 					if (evoPollTimer) clearTimeout(evoPollTimer);
 					evoPollTimer = setTimeout(refreshEvolution, 4000);
 				}

@@ -1523,7 +1523,7 @@ cmd_start() {
         # стратегии подбираются против реально блокируемого видео-хоста.
         # Иначе остаёмся на базовом домене пресета.
         if [ "$target" = "preset_youtube" ] || [ "$target" = "youtube" ]; then
-            local cdn_switch="" cdn_cand cdn_code vpage="/tmp/bcw_yt_cdn_page.$" _try base_code
+            local cdn_switch="" cdn_cand cdn_code vpage="/tmp/bcw_yt_cdn_page.$$" _try base_code
             # Переключаемся на видео-CDN только когда база ОТКРЫТА — иначе
             # сканировать нечего (not_blocked) и подбор уходит на CDN, где
             # стратегий нет: поиск выдаёт 0 результатов (#11). Если база
@@ -2788,13 +2788,18 @@ probe_volume_gate() {
 }
 
 probe_youtube_video_host() {
-    local q="$1" pageip="$2" page="/tmp/bcw_yt_video_page.$" vhost vip out vpath vol_res vol_json
+    local q="$1" pageip="$2" page="/tmp/bcw_yt_video_page.$$" vhost vip out vpath vol_res vol_json
     # Страница тянется через тот же временный nfqws (правила очереди для
     # www.youtube.com уже стоят): если стратегия не поднимает даже базу —
     # видео-хост проверять нечего.
     [ -n "$pageip" ] || pageip=$(probe_resolve www.youtube.com) || true
     [ -n "$pageip" ] || { echo '{"ok":false,"video_error":"no youtube A"}'; return 1; }
-    curl -4 -sS -m 25 --resolve "www.youtube.com:443:$pageip" "https://www.youtube.com/watch?v=dQw4w9WgXcQ" -o "$page" 2>/dev/null || true
+    local _ptry
+    for _ptry in 1 2; do
+        curl -4 -sS -m 25 --resolve "www.youtube.com:443:$pageip" "https://www.youtube.com/watch?v=dQw4w9WgXcQ" -o "$page" 2>/dev/null || true
+        [ -s "$page" ] && break
+        [ "$_ptry" -lt 2 ] && sleep 3
+    done
     [ -s "$page" ] || { rm -f "$page"; echo '{"ok":false,"video_error":"empty page"}'; return 1; }
     vhost=$(grep -o 'https://[A-Za-z0-9._-]*googlevideo\.com/' "$page" 2>/dev/null | head -n1 | sed 's#https://##; s#/$##')
     # Статика плеера с объявленным размером — материал для объёмного гейта.
@@ -2805,7 +2810,12 @@ probe_youtube_video_host() {
     [ -n "$vip" ] || { echo '{"ok":false,"video_host":"'"$vhost"'","video_error":"no video A"}'; return 1; }
     nft add rule inet bcwprobe out meta mark and 0x40000000 == 0 ip daddr "$vip" tcp dport 443 queue num "$q" bypass 2>/dev/null || true
     nft add rule inet bcwprobe in meta mark and 0x40000000 == 0 ip saddr "$vip" tcp sport 443 queue num "$q" bypass 2>/dev/null || true
-    out=$(transfer_client_probe output "$vhost" "$vip" "https://$vhost/robots.txt" 1 1 "" 2>/dev/null || true)
+    local _vtry
+    for _vtry in 1 2 3; do
+        out=$(transfer_client_probe output "$vhost" "$vip" "https://$vhost/robots.txt" 1 1 "" 2>/dev/null || true)
+        case "$out" in *'"ok":true'*) break ;; esac
+        [ "$_vtry" -lt 3 ] && sleep 2
+    done
     vol_json='{"ok":true,"skipped":"no asset"}'
     if [ -n "$vpath" ]; then
         vol_res=$(probe_volume_gate "https://www.youtube.com$vpath" "$q" 2>/dev/null || true)
@@ -6071,7 +6081,17 @@ cmd_evolve_status() {
     local genomes="/etc/zapret2wizard/genomes.json"
     local provider=$(evolve_provider)
     [ -n "$provider" ] || provider="default"
-    lua "$evo" status "$genomes" "$provider" 2>/dev/null || echo '{"provider":"default","running":false,"history":[],"top":[]}'
+    local out
+    out=$(lua "$evo" status "$genomes" "$provider" 2>/dev/null)
+    [ -n "$out" ] || out='{"provider":"default","running":false,"history":[],"top":[]}'
+    # Возраст журнала: UI продолжает опрос, пока журнал свежий, даже если
+    # маркер PID по какой-то причине не читается (страховка от зависшего UI).
+    local age=999
+    if [ -f /tmp/bcw_evolve.log ]; then
+        local mt=$(stat -c %Y /tmp/bcw_evolve.log 2>/dev/null || echo 0)
+        [ "${mt:-0}" -gt 0 ] && age=$(( $(date +%s) - mt ))
+    fi
+    printf '%s' "$out" | sed "s/}$/,\"log_age_sec\":$age}/"
 }
 
 # Запуск эволюции в фоне (для кнопки в LuCI).
@@ -6325,8 +6345,8 @@ cmd_evolve() (
     corpus="$report_run/corpus.txt"
     scan="$report_run/scan.json"
     verified="$report_run/verified.txt"
-    echo $ > /var/run/bcw_scan.lock/pid 2>/dev/null || true
-    echo $ > /tmp/bcw_evolve.running 2>/dev/null || true
+    echo $$ > /var/run/bcw_scan.lock/pid 2>/dev/null || true
+    echo $$ > /tmp/bcw_evolve.running 2>/dev/null || true
     trap 'rm -f /tmp/bcw_evolve.running /tmp/bcw_evolve.progress /tmp/bcw_evolve.hb.* /tmp/bcw_evolve_cfg.* 2>/dev/null; rm -rf "$report_run" /var/run/bcw_scan.lock; _svc_running || _svc_start_bg' EXIT
     trap 'exit 1' INT TERM
 
@@ -6345,7 +6365,8 @@ cmd_evolve() (
     echo "  домен:      $domain"
     echo "  кандидатов: $count, проверка до $verify_n, тестов на стабильность: $tests"
     echo "  Фоновый прогон: страницу закрывать не нужно, журнал обновляется каждые 4 с."
-    echo "  Длительность: генерация и TLS-проба ~1–3 мин, затем проверка ~1–2 мин на кандидата."
+    echo "  Длительность: генерация и TLS-проба ~1–3 мин, затем проверка 2–4 мин на кандидата"
+    echo "  (зависит от числа тестов; при 12 кандидатах и 3 тестах — обычно 20–40 минут)."
     _evo_phase "генерация кандидатов (память + подсев последнего поиска)"
 
     if _svc_running; then
