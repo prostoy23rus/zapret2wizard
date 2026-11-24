@@ -179,6 +179,88 @@ end
 
 -- -------------------------------------------------------------- режим gen ----
 
+-- Эволюционная память исторически раскладывалась по РАЗНЫМ ключам провайдера:
+-- ключ строится из строки ISP и block_type («AS12389» до fallback из
+-- /etc/zapret2wizard/provider, «ASN_AS12389_sni_blocked» после, «auto_unknown»
+-- без ISP). Из-за этого ранее найденные стратегии становились недоступны,
+-- эволюция генерировала только случайные кандидаты и выдавала «0 рабочих».
+local function provider_tokens(provider)
+    local t = {}
+    for tok in tostring(provider or ""):upper():gmatch("ASN?[%s_%-]*([0-9]+)") do
+        t[#t + 1] = tok
+    end
+    return t
+end
+
+local function sibling_providers(db, provider)
+    local out = { provider }
+    local seen = { [provider] = true }
+    local toks = provider_tokens(provider)
+    for k in pairs((db and db.providers) or {}) do
+        if not seen[k] then
+            local norm = tostring(k):upper()
+            local match = false
+            for _, tok in ipairs(toks) do
+                if norm:find(tok, 1, true) then match = true; break end
+            end
+            if not match and (norm:find("AUTO", 1, true) or norm:find("DEFAULT", 1, true) or norm:find("UNKNOWN", 1, true)) then
+                match = true
+            end
+            if match then seen[k] = true; out[#out + 1] = k end
+        end
+    end
+    return out
+end
+
+local function merged_genomes(db, provider)
+    local prov = db.providers[provider] or { genomes = {} }
+    db.providers[provider] = prov
+    prov.genomes = prov.genomes or {}
+    local merged = {}
+    for _, key in ipairs(sibling_providers(db, provider)) do
+        local p = db.providers[key]
+        if p and p.genomes then
+            for _, g in pairs(p.genomes) do
+                local a = g and g.args
+                if a and a ~= "" then
+                    local mine = merged[a]
+                    if not mine then
+                        merged[a] = g
+                    else
+                        mine.ok = math.max(mine.ok or 0, g.ok or 0)
+                        mine.fail = math.min(mine.fail or 0, g.fail or 0)
+                        mine.stability = math.max(mine.stability or 0, g.stability or 0)
+                        mine.best = math.max(mine.best or 0, g.best or 0)
+                    end
+                end
+            end
+        end
+    end
+    return merged
+end
+
+-- Перелить родственные бакеты в текущий ключ: дальнейшие прогоны читают один
+-- ключ, а стратегии из старых ключей не теряются. Идемпотентно.
+local function adopt_merged(db, provider)
+    local prov = db.providers[provider]
+    if not prov then return 0 end
+    local merged = merged_genomes(db, provider)
+    local added = 0
+    for args, g in pairs(merged) do
+        local id = hash(args)
+        local mine = prov.genomes[id]
+        if not mine then
+            prov.genomes[id] = g
+            added = added + 1
+        else
+            mine.ok = math.max(mine.ok or 0, g.ok or 0)
+            mine.fail = math.min(mine.fail or 0, g.fail or 0)
+            mine.stability = math.max(mine.stability or 0, g.stability or 0)
+            mine.best = math.max(mine.best or 0, g.best or 0)
+        end
+    end
+    return added
+end
 local function mode_gen()
     local genomes_path = arg[2]
     local provider = arg[3] or "default"
@@ -194,11 +276,14 @@ local function mode_gen()
     db.providers[provider] = prov
     prov.genomes = prov.genomes or {}
 
-    -- эксплуатация: лучшие известные геномы провайдера
+    -- Режим эксплуатации: лучшие известные геномы провайдера, включая
+    -- стратегии из старых ключей того же ASN (см. merged_genomes).
+    local adopted = adopt_merged(db, provider)
+    local merged = merged_genomes(db, provider)
     local known = {}
-    for id, g in pairs(prov.genomes) do
+    for _, g in pairs(merged) do
         if g.args and (g.ok or 0) > 0 then
-            known[#known + 1] = { id = id, args = g.args, score = (g.ok or 0) * 1000 + (g.stability or 0) * 2 + (g.best or 0) / 1024 }
+            known[#known + 1] = { args = g.args, score = (g.ok or 0) * 1000 + (g.stability or 0) * 2 + (g.best or 0) / 1024 }
         end
     end
     table.sort(known, function(a, b) return a.score > b.score end)
@@ -268,6 +353,9 @@ local function mode_update()
     local prov = db.providers[provider] or { genomes = {} }
     db.providers[provider] = prov
     prov.genomes = prov.genomes or {}
+    -- переносим стратегии из старых ключей провайдера, иначе статистика
+    -- «теряется» при смене ключа (ISP/block_type)
+    adopt_merged(db, provider)
 
     local candidates = read_json(candidates_path) or {}
     local scan = read_json(scan_path) or {}
@@ -464,12 +552,16 @@ local function mode_status()
     local provider = arg[3] or "default"
 
     local db = read_json(genomes_path) or { providers = {} }
-    local prov = (db.providers or {})[provider] or { genomes = {}, history = {} }
+    db.providers = db.providers or {}
+    local prov = db.providers[provider] or { genomes = {}, history = {} }
+    db.providers[provider] = prov
+    -- показываем объединённую память (свои + старые ключи того же ASN)
+    local merged = merged_genomes(db, provider)
 
     local running, pid = is_running()
 
     local top = {}
-    for id, g in pairs(prov.genomes or {}) do
+    for id, g in pairs(merged) do
         if g.args then
             top[#top + 1] = {
                 id = id,
