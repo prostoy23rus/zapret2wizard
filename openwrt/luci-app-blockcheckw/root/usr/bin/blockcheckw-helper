@@ -645,6 +645,17 @@ if log_tail ~= "" then
     end
 end
 
+-- ISP ушёл из окна последних строк журнала или сканер не отдал его:
+-- берём сохранённого провайдера (пишется cmd_asn/cmd_provider_save).
+if isp == "" then
+    local pf = io.open("/etc/zapret2wizard/provider", "r")
+    if pf then
+        local v = pf:read("*l")
+        pf:close()
+        if v and v:match("%S") then isp = v:gsub("^%s+", ""):gsub("%s+$", "") end
+    end
+end
+
 local scf = io.open(scan_file, "r")
 if scf then
     local sc = json.parse(scf:read("*a"))
@@ -1504,24 +1515,44 @@ cmd_start() {
         : > /tmp/bcw_scan_paused
 
         # YouTube: веб-интерфейс www.youtube.com на многих провайдерах не
-        # блокируется, а видео-CDN блокируется/сбрасывается. Сканер по
-        # незаблокированному домену завершится "not_blocked" и не начнёт
-        # перебор. Служба уже остановлена выше, поэтому curl видит сырой
-        # ответ провайдера: если база отвечает, а CDN-кандидат — нет,
-        # переключаем домен сканирования на заблокированный CDN.
+        # блокируется, а видео-CDN (rr*.googlevideo.com, test.googlevideo.com)
+        # блокируется/сбрасывается. Корни googlevideo.com и manifest отвечают
+        # даже при режущемся видео, поэтому канарейка — test.googlevideo.com.
+        # Служба уже остановлена выше, поэтому curl видит сырой ответ
+        # провайдера: если CDN-канарейка недоступна (код 000) — сканируем её,
+        # стратегии подбираются против реально блокируемого видео-хоста.
+        # Иначе остаёмся на базовом домене пресета.
         if [ "$target" = "preset_youtube" ] || [ "$target" = "youtube" ]; then
-            local base_code cdn_switch="" cdn_cand cdn_code
-            base_code=$(curl -4 -k -s -o /dev/null -m 6 -w '%{http_code}' "https://$domain/" 2>/dev/null)
-            if [ -n "$base_code" ] && [ "$base_code" != "000" ]; then
+            local cdn_switch="" cdn_cand cdn_code vpage="/tmp/bcw_yt_cdn_page.$" _try
+            # Реальный видео-хост берём из страницы просмотра (служба уже
+            # остановлена, curl видит сырой ответ провайдера). Имя rr*---sn-*.
+            # googlevideo.com живёт недолго и привязано к региону, поэтому
+            # канарейки-константы (googlevideo.com/manifest) ненадёжны: они
+            # отвечают даже при режущемся видео. Волны блокировки меняются
+            # за минуты — повторяем попытку, чтобы не промахнуться мимо окна.
+            for _try in 1 2 3; do
+                curl -4 -k -sS -m 20 "https://www.youtube.com/watch?v=dQw4w9WgXcQ" -o "$vpage" 2>/dev/null || true
+                [ -s "$vpage" ] && break
+                rm -f "$vpage"; sleep 6
+            done
+            if [ -s "$vpage" ]; then
+                cdn_switch=$(grep -o 'https://[A-Za-z0-9._-]*googlevideo\.com/' "$vpage" 2>/dev/null | head -n1 | sed 's#https://##; s#/$##')
+            fi
+            rm -f "$vpage"
+            if [ -n "$cdn_switch" ]; then
+                cdn_code=$(curl -4 -k -s -o /dev/null -m 6 -w '%{http_code}' "https://$cdn_switch/" 2>/dev/null)
+                [ "$cdn_code" = "000" ] || cdn_switch=""
+            fi
+            if [ -z "$cdn_switch" ]; then
                 for cdn_cand in googlevideo.com manifest.googlevideo.com; do
                     cdn_code=$(curl -4 -k -s -o /dev/null -m 6 -w '%{http_code}' "https://$cdn_cand/" 2>/dev/null)
                     if [ "$cdn_code" = "000" ]; then cdn_switch="$cdn_cand"; break; fi
                 done
-                if [ -n "$cdn_switch" ]; then
-                    echo "[blockcheckw-helper] YouTube: база отвечает (код $base_code), CDN $cdn_switch недоступен (код 000) — сканирую CDN" >> "$LOG_FILE"
-                    history_add "scan_cdn_switch" "$(metric_target_key "$target")" "Домен сканирования переключён на $cdn_switch" >/dev/null 2>&1 || true
-                    domain="$cdn_switch"
-                fi
+            fi
+            if [ -n "$cdn_switch" ]; then
+                echo "[blockcheckw-helper] YouTube: видео-CDN $cdn_switch недоступен (код 000) — сканирую видео-CDN" >> "$LOG_FILE"
+                history_add "scan_cdn_switch" "$(metric_target_key "$target")" "Домен сканирования переключён на $cdn_switch" >/dev/null 2>&1 || true
+                domain="$cdn_switch"
             fi
         fi
 
@@ -2383,6 +2414,17 @@ if not st.isp or st.isp == "" then
     end
 end
 
+-- Провайдер сохраняется cmd_asn/cmd_provider_save: не теряем его при
+-- ротации журнала сканирования.
+if not st.isp or st.isp == "" then
+    local pf = io.open("/etc/zapret2wizard/provider", "r")
+    if pf then
+        local v = pf:read("*l")
+        pf:close()
+        if v and v:match("%S") then st.isp = v:gsub("^%s+", ""):gsub("%s+$", "") end
+    end
+end
+
 -- Enrich with block_type from scan or log if missing
 if not st.block_type or st.block_type == "" then
     local scf = io.open(scan_file, "r")
@@ -2633,9 +2675,9 @@ end
 local e = probe.probe({url=url, endpoint_id=host, role=role, path_mode=mode,
     range={start=0,finish=4194303}, timeout_sec=30, max_bytes=8388608},
     {role=role,min_bytes=math.max(1,min),sample_bytes=host == "www.youtube.com" and 262144 or 131072,sample_seconds=0}, {run=run})
-local sample_required = host == "www.youtube.com" or host == "discord.com"
+local sample_required = host == "www.youtube.com" or host == "discord.com" or host:match("googlevideo%.com$") ~= nil
 local ok = e.policy_passed and (role ~= "reachability" or e.http_code < 500) and (not sample_required or e.sample_sufficient)
-print(json.stringify({ok=ok,mode=mode,host=host,ip=ip,code=tostring(e.http_code or "000"),
+print(json.stringify({ok=ok,mode=mode,host=host,ip=ip,url=url,code=tostring(e.http_code or "000"),
     bytes=e.bytes_received or 0,min=min,allow_4xx=allow4 == "1",bytes_known=e.bytes_known,
     transfer_verified=e.transfer_verified,data_sample=e.transfer_verified and e.sample_sufficient,
     verification_state=ok and (role == "reachability" and "reachable" or "data_sample") or "unverified",
@@ -2643,23 +2685,61 @@ print(json.stringify({ok=ok,mode=mode,host=host,ip=ip,code=tostring(e.http_code 
 EOF
 }
 
+# Извлекает прямой URL видеопотока из HTML страницы просмотра YouTube.
+# Вход: файл с HTML (ytInitialPlayerResponse содержит signatureCipher/url).
+# Выход: полный https://...googlevideo.com/videoplayback?... или пусто.
+yt_extract_videoplayback_url() {
+    lua - "$1" << 'EOF'
+local f = io.open(arg[1], "r")
+local s = f and f:read("*a") or ""
+if f then f:close() end
+if s == "" then os.exit(1) end
+-- Снять JSON-экранирование ytInitialPlayerResponse.
+s = s:gsub("\\/", "/")
+s = s:gsub("\\u0026", "&")
+s = s:gsub("\\u0025", "%%")
+s = s:gsub("\\u003d", "=")
+local function pct(t)
+    t = t:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16)) end)
+    return t
+end
+-- 1) Прямое url-поле форматов.
+local u = s:match('"url":"(https://[^"]*googlevideo%.com/videoplayback[^"]*)"')
+if u then print(pct(u)) os.exit(0) end
+-- 2) signatureCipher (itag 18): url= идёт до первого сырого & — внутри него
+--    параметры %-кодированы.
+local ci = s:match('"signatureCipher":"([^"]+)"')
+if ci then
+    local v = ci:match("url=([^&]+)")
+    if v then print(pct(v)) os.exit(0) end
+end
+os.exit(1)
+EOF
+}
+
 probe_youtube_video_host() {
-    local q="$1" pageip="$2" page="/tmp/bcw_yt_video_page.$$" vhost vip out code size=0
+    local q="$1" pageip="$2" page="/tmp/bcw_yt_video_page.$" vurl vhost vip out
+    # Страница тянется через тот же временный nfqws (правила очереди для
+    # www.youtube.com уже стоят): если стратегия не поднимает даже базу —
+    # видеопоток проверять нечего. URL потока IP-привязан к публичному IP
+    # роутера, пробуем с него же.
+    # pageip может быть пустым при ошибке резолва — дорезолвим сами.
+    [ -n "$pageip" ] || pageip=$(probe_resolve www.youtube.com) || true
+    [ -n "$pageip" ] || { echo '{"ok":false,"video_error":"no youtube A"}'; return 1; }
     curl -4 -sS -m 25 --resolve "www.youtube.com:443:$pageip" "https://www.youtube.com/watch?v=dQw4w9WgXcQ" -o "$page" 2>/dev/null || true
-    if [ ! -s "$page" ]; then
-        rm -f "$page"
-        echo '{"ok":false,"video_error":"empty page"}'
+    [ -s "$page" ] || { rm -f "$page"; echo '{"ok":false,"video_error":"empty page"}'; return 1; }
+    vurl=$(yt_extract_videoplayback_url "$page")
+    rm -f "$page"
+    if [ -z "$vurl" ]; then
+        echo '{"ok":false,"video_error":"no videoplayback url"}'
         return 1
     fi
-    vhost=$(grep -o 'https://[A-Za-z0-9._-]*googlevideo\.com/' "$page" 2>/dev/null | head -n1 | sed 's#https://##; s#/$##')
-    rm -f "$page"
-    [ -n "$vhost" ] || { echo '{"ok":false,"video_error":"no googlevideo host"}'; return 1; }
+    vhost=${vurl#https://}; vhost=${vhost%%/*}
     vip=$(probe_resolve "$vhost") || true
     [ -n "$vip" ] || { echo '{"ok":false,"video_host":"'"$vhost"'","video_error":"no video A"}'; return 1; }
     nft add rule inet bcwprobe out meta mark and 0x40000000 == 0 ip daddr "$vip" tcp dport 443 queue num "$q" bypass 2>/dev/null || true
     nft add rule inet bcwprobe in meta mark and 0x40000000 == 0 ip saddr "$vip" tcp sport 443 queue num "$q" bypass 2>/dev/null || true
-    # Root response is HTTP reachability only, never signed video/media proof.
-    out=$(transfer_client_probe output "$vhost" "$vip" "https://$vhost/" 0 1 "")
+    out=$(transfer_client_probe output "$vhost" "$vip" "$vurl" 131072 0 "")
     printf '%s\n' "$out"
     echo "$out" | grep -q '"ok":true'
 }
@@ -2712,8 +2792,26 @@ client_probe_output() {
     nft add rule inet bcwprobe in meta mark and 0x40000000 == 0 ip saddr "$ip" tcp sport 443 queue num "$q" bypass 2>/dev/null || true
     sleep 1
     out=$(transfer_client_probe output "$host" "$ip" "$url" "$min" "$allow4" "")
+    # Видео-CDN — обязательная часть проверки YouTube: страница может
+    # открываться при стратегии, которая не поднимает видеопоток.
+    local video_res='{"ok":true}'
+    if [ "$target" = "preset_youtube" ] || [ "$target" = "youtube" ]; then
+        video_res=$(probe_youtube_video_host "$q" "$ip" 2>/dev/null || true)
+        [ -n "$video_res" ] || video_res='{"ok":false,"video_error":"no video probe result"}'
+    fi
     _probe_cleanup
     trap - EXIT INT TERM
+    out=$(lua - "$out" "$video_res" <<'EOF'
+local json = require("luci.jsonc")
+local out = json.parse(arg[1]) or {}
+local v = json.parse(arg[2]) or {}
+if out and v then
+    out.video = v
+    if v.ok ~= true then out.ok = false end
+end
+print(json.stringify(out))
+EOF
+)
     printf '%s\n' "$out"
     echo "$out" | grep -q '"ok":true'
 }
@@ -3563,8 +3661,71 @@ EOF
 
 cmd_test() {
     ensure_dpi_service
-    local out
+    local out vres merged
     out=$(cmd_test_impl "$@")
+    # YouTube: роутерные пробы видят сырую сеть и не проверяют стратегию,
+    # а видео-CDN блокируется провайдером чаще базы. Добавляем клиентский
+    # probe (временный nfqws с текущей стратегией): страница + реальный
+    # видеопоток googlevideo. Без него «оптимально» могло значить
+    # «видео не работает».
+    case "${1:-}" in
+        preset_youtube|youtube)
+            vres=$(client_probe_output "${1:-}" 2>/dev/null || true)
+            if [ -n "$vres" ] && ! printf '%s' "$vres" | grep -q '"error":"probe busy"'; then
+                merged=$(lua - "$out" "$vres" <<'EOF'
+local json = require("luci.jsonc")
+local out = json.parse(arg[1])
+local v = json.parse(arg[2])
+if out and v then
+    out.client_probe = v
+    local vid = v.video or {}
+    if v.ok ~= true then
+        out.all_ok = false
+        out.overall_status = "degraded"
+        if type(out.endpoints) == "table" then
+            table.insert(out.endpoints, {
+                name = "Видеопоток googlevideo (реальный)",
+                url = vid.url or "https://test.googlevideo.com",
+                http_code = vid.code or "000",
+                accessible = false,
+                data_sample = false,
+                role = "bounded_data",
+                required = true,
+                verification_state = "unverified",
+                playback = "blocked",
+                size_bytes = vid.bytes or 0,
+                stall_reason = vid.video_error or "video_blocked"
+            })
+        end
+        out.message = "Видео-CDN googlevideo не подтверждён через обход: " ..
+            tostring(vid.video_error or ("код " .. (vid.code or "000"))) ..
+            ". Видео может не воспроизводиться."
+    else
+        if type(out.endpoints) == "table" then
+            table.insert(out.endpoints, {
+                name = "Видеопоток googlevideo (реальный)",
+                url = vid.url or "https://test.googlevideo.com",
+                http_code = vid.code or "200",
+                accessible = true,
+                data_sample = vid.data_sample == true,
+                role = "bounded_data",
+                required = true,
+                verification_state = (vid.data_sample == true) and "data_sample" or "unverified",
+                playback = "unknown",
+                size_bytes = vid.bytes or 0,
+                stall_reason = vid.stall_reason or "transfer_complete"
+            })
+        end
+    end
+    out = json.stringify(out)
+end
+print(out)
+EOF
+)
+                [ -n "$merged" ] && out="$merged"
+            fi
+            ;;
+    esac
     # Метрики печатаем ПЕРВЫМИ: все вызывающие берут `cmd_test | tail -1`
     # и ждут JSON проверки. Раньше последней строкой шла запись истории,
     # из-за чего selftest и стабильность всегда видели 000/неудачу.
