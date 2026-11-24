@@ -389,12 +389,15 @@ local function mode_shortlist()
         end
     end
 
+    -- limit <= 0 — проверяем ВСЕХ прошедших пробу (issue #9d): эволюция не
+    -- должна отбрасывать равных кандидатов только из-за порядка ранга.
+    local all = limit <= 0
     local n = 0
     for _, c in ipairs(candidates) do
         if c.args and ok[c.args] then
             print(c.id .. "|" .. c.args)
             n = n + 1
-            if n >= limit then break end
+            if not all and n >= limit then break end
         end
     end
 end

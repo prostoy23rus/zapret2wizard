@@ -51,7 +51,9 @@ class StateIntegration(unittest.TestCase):
         self.work=Path(self.tmp.name)
         self.shim=self.work/'json-shim.lua'
         self.shim.write_text("package.preload['luci.jsonc']=function() local j=require('dkjson'); return {parse=j.decode,stringify=function(v) return j.encode(v) end} end\n")
-        self.env=dict(os.environ, LUA_INIT='@'+str(self.shim), STATE=str(self.work/'state.json'))
+        # BCW_CANDIDATE_SEED=0 — детерминированный порядок равных кандидатов
+        # (в проде они перемешиваются, issue #9c); тест проверяет сам поток.
+        self.env=dict(os.environ, LUA_INIT='@'+str(self.shim), STATE=str(self.work/'state.json'), BCW_CANDIDATE_SEED='0')
         self.state={'attempts':[], 'active':'prior'}; self.save()
         self.fixture=self.work/'apply'; self.fixture.write_text(APPLY_STUB); self.fixture.chmod(0o755)
 
@@ -100,7 +102,12 @@ wait_dpi_ready() { :; }
 
     def test_A_rejected_B_accepted_circular_rejected_restores_records_B(self):
         r,m,a,b=self.autoapply()
-        self.assertEqual(self.current()['attempts'],[a,b,'--lua-desync=circular:strategy=1 --x:strategy=2 ',b])
+        attempts=self.current()["attempts"]
+        # issue #9c: кандидаты с равным coverage проверяются в случайном
+        # порядке. Важна последовательность: оба кандидата → circular →
+        # восстановление принятого B.
+        self.assertEqual(sorted(attempts[:2]),sorted([a,b]))
+        self.assertEqual(attempts[2:],['--lua-desync=circular:strategy=1 --x:strategy=2 ',b])
         self.assertEqual(self.current()['active'],b)
         self.assertIn('put discord.com 1.2.3.4 '+b+' 1 ',m)
         self.assertNotIn('put discord.com 1.2.3.4 '+a,m)
