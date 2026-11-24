@@ -1523,7 +1523,13 @@ cmd_start() {
         # стратегии подбираются против реально блокируемого видео-хоста.
         # Иначе остаёмся на базовом домене пресета.
         if [ "$target" = "preset_youtube" ] || [ "$target" = "youtube" ]; then
-            local cdn_switch="" cdn_cand cdn_code vpage="/tmp/bcw_yt_cdn_page.$" _try
+            local cdn_switch="" cdn_cand cdn_code vpage="/tmp/bcw_yt_cdn_page.$" _try base_code
+            # Переключаемся на видео-CDN только когда база ОТКРЫТА — иначе
+            # сканировать нечего (not_blocked) и подбор уходит на CDN, где
+            # стратегий нет: поиск выдаёт 0 результатов (#11). Если база
+            # заблокирована — сканируем её, как до 0.37.13.
+            base_code=$(curl -4 -k -s -o /dev/null -m 8 -w '%{http_code}' "https://$domain/" 2>/dev/null)
+            if [ -n "$base_code" ] && [ "$base_code" != "000" ]; then
             # Реальный видео-хост берём из страницы просмотра (служба уже
             # остановлена, curl видит сырой ответ провайдера). Имя rr*---sn-*.
             # googlevideo.com живёт недолго и привязано к региону, поэтому
@@ -1550,9 +1556,12 @@ cmd_start() {
                 done
             fi
             if [ -n "$cdn_switch" ]; then
-                echo "[blockcheckw-helper] YouTube: видео-CDN $cdn_switch недоступен (код 000) — сканирую видео-CDN" >> "$LOG_FILE"
+                echo "[blockcheckw-helper] YouTube: база открыта (код $base_code), видео-CDN $cdn_switch недоступен — сканирую видео-CDN" >> "$LOG_FILE"
                 history_add "scan_cdn_switch" "$(metric_target_key "$target")" "Домен сканирования переключён на $cdn_switch" >/dev/null 2>&1 || true
                 domain="$cdn_switch"
+            fi
+            else
+                echo "[blockcheckw-helper] YouTube: база $domain блокирована (код ${base_code:-000}) — сканирую базу" >> "$LOG_FILE"
             fi
         fi
 
@@ -2659,6 +2668,7 @@ transfer_client_probe() {
 local json = require("luci.jsonc")
 local probe = dofile("/usr/share/zapret2wizard/transfer_probe.lua")
 local mode,host,ip,url,min,allow4,ns = arg[1],arg[2],arg[3],arg[4],tonumber(arg[5]) or 1,arg[6],arg[7]
+local range_finish = tonumber(arg[8]) or 4194303
 local function quote(s) return "'" .. s:gsub("'", "'\\''") .. "'" end
 local role = allow4 == "1" and "reachability" or "bounded_data"
 local function run(command, limit)
@@ -2673,9 +2683,9 @@ local function run(command, limit)
     return out
 end
 local e = probe.probe({url=url, endpoint_id=host, role=role, path_mode=mode,
-    range={start=0,finish=4194303}, timeout_sec=30, max_bytes=8388608},
+    range={start=0,finish=range_finish}, timeout_sec=30, max_bytes=8388608},
     {role=role,min_bytes=math.max(1,min),sample_bytes=host == "www.youtube.com" and 262144 or 131072,sample_seconds=0}, {run=run})
-local sample_required = role ~= "reachability" and (host == "www.youtube.com" or host == "discord.com" or host:match("googlevideo%.com$") ~= nil)
+local sample_required = role ~= "reachability" and (host == "www.youtube.com" or host:match("googlevideo%.com$") ~= nil)
 local ok = e.policy_passed and (role ~= "reachability" or e.http_code < 500) and (not sample_required or e.sample_sufficient)
 print(json.stringify({ok=ok,mode=mode,host=host,ip=ip,url=url,code=tostring(e.http_code or "000"),
     bytes=e.bytes_received or 0,min=min,allow_4xx=allow4 == "1",bytes_known=e.bytes_known,
@@ -2695,8 +2705,33 @@ EOF
 # когда канал открыт. Поэтому проверяем сам видео-хост: TLS-канал до него
 # через обход должен отдавать HTTP (у канала нет n-параметра). Это точно
 # отличает «канал режется» (000/RST) от «канал жив» (любой HTTP-ответ).
+# Объёмный гейт (issue #9): качаем 2-МБ диапазон статики с объявленным
+# Content-Length через тот же временный nfqws. Усечение ниже объявленного
+# размера = побайтовый кап провайдера; ClientHello-стратегии его не снимают,
+# поэтому это единственный способ отличить «канал открыт» от «канал капается».
+# $1 — URL, $2 — qnum. Печатает JSON {ok,passes,total,bytes,expected,code,host}.
+probe_volume_gate() {
+    local url="$1" q="$2" vhost vip out code=000 bytes=0 passes=2 okc=0 i=1 okjson=false reason=""
+    vhost=${url#https://}; vhost=${vhost%%/*}
+    vip=$(probe_resolve "$vhost") || true
+    [ -n "$vip" ] || { echo '{"ok":false,"skipped":"no A","host":"'"$vhost"'"}'; return 1; }
+    nft add rule inet bcwprobe out meta mark and 0x40000000 == 0 ip daddr "$vip" tcp dport 443 queue num "$q" bypass 2>/dev/null || true
+    nft add rule inet bcwprobe in meta mark and 0x40000000 == 0 ip saddr "$vip" tcp sport 443 queue num "$q" bypass 2>/dev/null || true
+    while [ "$i" -le "$passes" ]; do
+        out=$(transfer_client_probe output "$vhost" "$vip" "$url" 2097152 0 "" 2097151 2>/dev/null || true)
+        code=$(printf '%s' "$out" | sed -n 's/.*"code":"\([0-9]*\)".*/\1/p')
+        bytes=$(printf '%s' "$out" | sed -n 's/.*"bytes_received":\([0-9]*\).*/\1/p')
+        [ -n "$bytes" ] || bytes=0
+        printf '%s' "$out" | grep -q '"ok":true' && okc=$((okc+1))
+        i=$((i+1))
+    done
+    [ "$okc" = "$passes" ] && okjson=true || reason=flow_truncated
+    printf '{"ok":%s,"passes":%s,"total":%s,"bytes":%s,"expected":2097152,"code":"%s","host":"%s","reason":"%s"}\n' \
+        "$okjson" "$okc" "$passes" "$bytes" "${code:-000}" "$vhost" "$reason"
+}
+
 probe_youtube_video_host() {
-    local q="$1" pageip="$2" page="/tmp/bcw_yt_video_page.$" vhost vip out
+    local q="$1" pageip="$2" page="/tmp/bcw_yt_video_page.$" vhost vip out vpath vol_res vol_json
     # Страница тянется через тот же временный nfqws (правила очереди для
     # www.youtube.com уже стоят): если стратегия не поднимает даже базу —
     # видео-хост проверять нечего.
@@ -2705,13 +2740,29 @@ probe_youtube_video_host() {
     curl -4 -sS -m 25 --resolve "www.youtube.com:443:$pageip" "https://www.youtube.com/watch?v=dQw4w9WgXcQ" -o "$page" 2>/dev/null || true
     [ -s "$page" ] || { rm -f "$page"; echo '{"ok":false,"video_error":"empty page"}'; return 1; }
     vhost=$(grep -o 'https://[A-Za-z0-9._-]*googlevideo\.com/' "$page" 2>/dev/null | head -n1 | sed 's#https://##; s#/$##')
+    # Статика плеера с объявленным размером — материал для объёмного гейта.
+    vpath=$(grep -o '/s/player/[A-Za-z0-9_-]*/player_ias\.vflset/[A-Za-z0-9_-]*/base\.js' "$page" 2>/dev/null | head -n1)
     rm -f "$page"
     [ -n "$vhost" ] || { echo '{"ok":false,"video_error":"no googlevideo host"}'; return 1; }
     vip=$(probe_resolve "$vhost") || true
     [ -n "$vip" ] || { echo '{"ok":false,"video_host":"'"$vhost"'","video_error":"no video A"}'; return 1; }
     nft add rule inet bcwprobe out meta mark and 0x40000000 == 0 ip daddr "$vip" tcp dport 443 queue num "$q" bypass 2>/dev/null || true
     nft add rule inet bcwprobe in meta mark and 0x40000000 == 0 ip saddr "$vip" tcp sport 443 queue num "$q" bypass 2>/dev/null || true
-    out=$(transfer_client_probe output "$vhost" "$vip" "https://$vhost/robots.txt" 1 1 "")
+    out=$(transfer_client_probe output "$vhost" "$vip" "https://$vhost/robots.txt" 1 1 "" 2>/dev/null || true)
+    vol_json='{"ok":true,"skipped":"no asset"}'
+    if [ -n "$vpath" ]; then
+        vol_res=$(probe_volume_gate "https://www.youtube.com$vpath" "$q" 2>/dev/null || true)
+        [ -n "$vol_res" ] && vol_json="$vol_res"
+    fi
+    out=$(lua - "$out" "$vol_json" <<'EOF'
+local json = require("luci.jsonc")
+local v = json.parse(arg[1]) or {}
+local vol = json.parse(arg[2]) or {}
+v.volume = vol
+if vol and vol.skipped == nil and vol.ok ~= true then v.ok = false end
+print(json.stringify(v))
+EOF
+)
     printf '%s\n' "$out"
     echo "$out" | grep -q '"ok":true'
 }
@@ -2764,22 +2815,32 @@ client_probe_output() {
     nft add rule inet bcwprobe in meta mark and 0x40000000 == 0 ip saddr "$ip" tcp sport 443 queue num "$q" bypass 2>/dev/null || true
     sleep 1
     out=$(transfer_client_probe output "$host" "$ip" "$url" "$min" "$allow4" "")
-    # Видео-CDN — обязательная часть проверки YouTube: страница может
-    # открываться при стратегии, которая не поднимает видеопоток.
-    local video_res='{"ok":true}'
+    # Видео-CDN и объёмный гейт — обязательные части проверки YouTube:
+    # страница открывается и при стратегии, которая не поднимает видеопоток
+    # и не снимает побайтовый кап провайдера (issue #9).
+    local video_res='{"ok":true}' vol_res='{"ok":true,"skipped":"n/a"}'
     if [ "$target" = "preset_youtube" ] || [ "$target" = "youtube" ]; then
         video_res=$(probe_youtube_video_host "$q" "$ip" 2>/dev/null || true)
         [ -n "$video_res" ] || video_res='{"ok":false,"video_error":"no video probe result"}'
+    elif [ "$target" = "preset_discord" ] || [ "$target" = "discord" ]; then
+        vol_res=$(probe_volume_gate "https://stable.dl2.discordapp.net/distro/app/stable/win/x86/1.0.9059/DiscordSetup.exe" "$q" 2>/dev/null || true)
+        [ -n "$vol_res" ] || vol_res='{"ok":false,"skipped":"no volume probe result"}'
     fi
     _probe_cleanup
     trap - EXIT INT TERM
-    out=$(lua - "$out" "$video_res" <<'EOF'
+    out=$(lua - "$out" "$video_res" "$vol_res" <<'EOF'
 local json = require("luci.jsonc")
 local out = json.parse(arg[1]) or {}
 local v = json.parse(arg[2]) or {}
+local vol = json.parse(arg[3]) or {}
 if out and v then
     out.video = v
     if v.ok ~= true then out.ok = false end
+    local volobj = v.volume or vol
+    if volobj then
+        out.volume = volobj
+        if volobj.skipped == nil and volobj.ok ~= true then out.ok = false end
+    end
 end
 print(json.stringify(out))
 EOF
@@ -3641,7 +3702,7 @@ cmd_test() {
     # видеопоток googlevideo. Без него «оптимально» могло значить
     # «видео не работает».
     case "${1:-}" in
-        preset_youtube|youtube)
+        preset_youtube|youtube|preset_discord|discord)
             vres=$(client_probe_output "${1:-}" 2>/dev/null || true)
             if [ -n "$vres" ] && ! printf '%s' "$vres" | grep -q '"error":"probe busy"'; then
                 merged=$(lua - "$out" "$vres" <<'EOF'
@@ -3651,45 +3712,59 @@ local v = json.parse(arg[2])
 if out and v then
     out.client_probe = v
     local vid = v.video or {}
-    local vurl = "https://" .. tostring(vid.host or "googlevideo.com")
-    if v.ok ~= true then
+    local has_video = next(vid) ~= nil
+    local vol = (vid.volume and not vid.volume.skipped) and vid.volume
+        or ((v.volume and not v.volume.skipped) and v.volume or nil)
+    if type(out.endpoints) == "table" and has_video then
+        table.insert(out.endpoints, {
+            name = "Видео-хост googlevideo (через обход)",
+            url = "https://" .. tostring(vid.host or "googlevideo.com"),
+            http_code = vid.code or (vid.ok == true and "200" or "000"),
+            accessible = vid.ok == true,
+            data_sample = false,
+            role = "reachability",
+            required = true,
+            verification_state = vid.ok == true and "reachable" or "unverified",
+            verification_kind = "reachability",
+            playback = vid.ok == true and "unknown" or "blocked",
+            size_bytes = vid.bytes or 0,
+            stall_reason = vid.ok == true and "transfer_complete" or (vid.video_error or "video_host_unreachable")
+        })
+    end
+    if type(out.endpoints) == "table" and vol then
+        table.insert(out.endpoints, {
+            name = "Объёмный гейт (2×2 МБ статика)",
+            url = "https://" .. tostring(vol.host or ""),
+            http_code = vol.code or "000",
+            accessible = vol.ok == true,
+            data_sample = vol.ok == true,
+            role = "bounded_data",
+            required = true,
+            verification_state = vol.ok == true and "data_sample" or "unverified",
+            playback = "unknown",
+            size_bytes = vol.bytes or 0,
+            stall_reason = vol.ok == true and "transfer_complete" or "volume_capped"
+        })
+    end
+    if vid.ok ~= true and has_video then
         out.all_ok = false
         out.overall_status = "degraded"
-        if type(out.endpoints) == "table" then
-            table.insert(out.endpoints, {
-                name = "Видео-хост googlevideo (через обход)",
-                url = vurl,
-                http_code = vid.code or "000",
-                accessible = false,
-                data_sample = false,
-                role = "reachability",
-                required = true,
-                verification_state = "unverified",
-                playback = "blocked",
-                size_bytes = vid.bytes or 0,
-                stall_reason = vid.video_error or "video_host_unreachable"
-            })
-        end
         out.message = "Видео-хост googlevideo не отвечает через обход: " ..
             tostring(vid.video_error or ("код " .. (vid.code or "000"))) ..
             ". Видео не заработает, пока канал до видео-CDN режется."
-    else
-        if type(out.endpoints) == "table" then
-            table.insert(out.endpoints, {
-                name = "Видео-хост googlevideo (через обход)",
-                url = vurl,
-                http_code = vid.code or "200",
-                accessible = true,
-                data_sample = false,
-                role = "reachability",
-                required = true,
-                verification_state = "reachable",
-                verification_kind = "reachability",
-                playback = "unknown",
-                size_bytes = vid.bytes or 0,
-                stall_reason = "transfer_complete"
-            })
-        end
+    elseif vol and vol.ok ~= true then
+        out.all_ok = false
+        out.overall_status = "degraded"
+        out.message = "Канал открывается, но поток рвётся по объёму (" ..
+            tostring(vol.bytes or 0) .. " из " .. tostring(vol.expected or 0) ..
+            " байт): это побайтовый кап провайдера. Против этого DPI стратегий нет —",
+            " помогает только смена пути/протокола или ожидание."
+    elseif v.ok ~= true then
+        out.all_ok = false
+        out.overall_status = "degraded"
+        out.message = "Клиентская проверка через обход не пройдена."
+    elseif vol and out.all_ok == true then
+        out.message = "Видео-хост и объёмный поток подтверждены через обход (воспроизведение не проверялось)."
     end
     out = json.stringify(out)
 end
