@@ -1049,6 +1049,15 @@ return view.extend({
 			' Откат'
 		]);
 
+		var btnGoodHistory = E('button', {
+			class: 'bcw-header-item bcw-header-btn',
+			title: 'История проверенных конфигураций: вернуть рабочую стратегию',
+			click: function() { showGoodHistoryModal(); }
+		}, [
+			E('span', {}, '🕘'),
+			' История'
+		]);
+
 		var btnFeedback = E('a', {
 			class: 'bcw-header-item bcw-header-btn',
 			href: 'https://github.com/prostoy23rus/zapret2wizard/issues',
@@ -1089,6 +1098,7 @@ return view.extend({
 			btnSvcRestart,
 			btnDiagnostics,
 			btnRollback,
+			btnGoodHistory,
 			btnCheckUpdate,
 			btnFeedback,
 			btnUninstall
@@ -2109,8 +2119,220 @@ return view.extend({
 			toggleStrategiesSpoiler();
 		});
 
+		// ===== issue #12: перебор всех найденных (A) + история хороших конфигураций (B) =====
+		function truncArgs(s, n) {
+			s = String(s || '');
+			return s.length > n ? s.slice(0, n) + '…' : s;
+		}
+
+		function batchTargetLabel() {
+			var d = PRESET_DEFS[currentTarget];
+			return (d && d.name) || currentTarget;
+		}
+
+		function batchTargetSupported() {
+			return ['preset_youtube', 'preset_discord', 'preset_twitch', 'preset_x', 'preset_instagram', 'builtin'].indexOf(currentTarget) !== -1;
+		}
+
+		var batchInfoEl = E('div', { style: 'font-size: 12px; color: #abb2bf; line-height: 1.5;' }, '');
+		var btnBatchStop = E('button', {
+			class: 'bcw-btn-sm cbi-button cbi-button-negative',
+			style: 'height: 30px; padding: 0 12px; font-size: 12px; white-space: nowrap;',
+			click: function() {
+				btnBatchStop.disabled = true;
+				batchInfoEl.textContent = '⏹ Останавливаю после текущего кандидата (текущая проверка не прерывается)…';
+				fs.exec(HELPER_BIN, ['apply_all_stop']).catch(function() {});
+			}
+		}, '⏹ Остановить');
+		var btnBatchApply = E('button', {
+			class: 'bcw-btn-sm cbi-button cbi-button-action',
+			style: 'height: 30px; padding: 0 12px; font-size: 12px; font-weight: 600; white-space: nowrap;',
+			title: 'Применить и проверить все найденные стратегии по очереди; остановка на первой подтверждённой',
+			click: function() { confirmBatchApply(); }
+		}, '🔁 Перебрать все найденные');
+		var batchBar = E('div', {
+			style: 'display: none; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 12px; padding: 10px 12px; background: rgba(97,175,239,0.07); border: 1px solid rgba(97,175,239,0.25); border-radius: 8px;'
+		}, [btnBatchApply, btnBatchStop, batchInfoEl]);
+
+		var applyAllPoller = null;
+		function updateBatchUI() {
+			var count = uniqueStrategiesCount || 0;
+			if (count > 0 && batchTargetSupported()) {
+				batchBar.style.display = 'flex';
+				btnBatchApply.style.display = '';
+				btnBatchApply.textContent = '🔁 Перебрать все найденные (' + count + ')';
+			} else {
+				batchBar.style.display = 'none';
+			}
+		}
+
+		function confirmBatchApply() {
+			var count = uniqueStrategiesCount || 0;
+			if (!count) return;
+			bcwShowModal('Перебрать все найденные стратегии?', [
+				E('p', { style: 'font-size: 13px; line-height: 1.5;' },
+					'Для «' + batchTargetLabel() + '» будет по очереди применена и проверена каждая из ' + count +
+					' находок. Перебор остановится на первой подтверждённой стратегии; провалившиеся будут помечены в памяти как неудачные, а прежняя конфигурация сохранена.'),
+				E('p', { style: 'font-size: 12px; color: #e5c07b; line-height: 1.5;' },
+					'Служба будет перезапускаться при каждой попытке — обход на это время прерывается. Обычно 2–4 минуты на кандидата; прогресс виден в панели, перебор можно остановить.')
+			], [
+				E('button', { class: 'cbi-button cbi-button-action', click: function() { ui.hideModal(); beginBatchApply(); } }, 'Начать перебор'),
+				E('button', { class: 'cbi-button cbi-button-neutral', click: function() { ui.hideModal(); } }, 'Отмена')
+			]);
+		}
+
+		function beginBatchApply() {
+			btnBatchApply.disabled = true;
+			btnBatchStop.disabled = false;
+			btnBatchStop.style.display = '';
+			batchInfoEl.textContent = '⏳ Запускаю перебор…';
+			fs.exec(HELPER_BIN, ['apply_all_bg', '--target', currentTarget]).then(function(res) {
+				var out = parseHelperJson(res) || {};
+				if (!out.success) {
+					batchInfoEl.textContent = '✗ ' + (out.error || 'не удалось запустить перебор');
+					btnBatchApply.disabled = false;
+					btnBatchStop.style.display = 'none';
+					return;
+				}
+				pollBatchApply(0);
+			}).catch(function() {
+				batchInfoEl.textContent = '✗ ошибка вызова helper';
+				btnBatchApply.disabled = false;
+			});
+		}
+
+		function pollBatchApply(iter) {
+			if (applyAllPoller) clearTimeout(applyAllPoller);
+			applyAllPoller = setTimeout(function() {
+				fs.exec(HELPER_BIN, ['apply_all_status']).then(function(res) {
+					var st = parseHelperJson(res) || {};
+					if (st.running || st.result === 'running') {
+						var i = st.index || 0, total = st.total || 0;
+						batchInfoEl.textContent = '⏳ Проверяю ' + i + '/' + total +
+							(st.current ? (' · ' + truncArgs(st.current, 90)) : '') +
+							' — перезапуск службы и проверка, обычно 2–4 минуты…';
+						if (iter > 1200) {
+							batchInfoEl.textContent = '⚠ Перебор идёт слишком долго — можно нажать «Остановить».';
+							applyAllPoller = null;
+							return;
+						}
+						pollBatchApply(iter + 1);
+						return;
+					}
+					btnBatchStop.style.display = 'none';
+					btnBatchApply.disabled = false;
+					var done = st.result || '';
+					if (done === 'applied') {
+						batchInfoEl.textContent = '✓ ' + (st.message || 'стратегия применена и проверена');
+						ui.addNotification(null, E('p', {}, '✓ Найдена работающая стратегия: ' + (st.message || '')), 'info');
+					} else if (done === 'stopped') {
+						batchInfoEl.textContent = '⏹ ' + (st.message || 'перебор остановлен');
+					} else if (done === 'interrupted') {
+						batchInfoEl.textContent = '⚠ ' + (st.message || 'перебор прерван');
+					} else if (done === 'failed') {
+						batchInfoEl.textContent = '⚠ ' + (st.message || 'ни одна стратегия не подтвердилась');
+						ui.addNotification(null, E('p', {}, '⚠ Ни одна из найденных стратегий не подтвердилась — прежняя конфигурация сохранена.'), 'warning');
+					} else {
+						batchInfoEl.textContent = '— статус перебора: ' + (done || 'неизвестен');
+					}
+					applyAllPoller = null;
+					setTimeout(function() {
+						getZapretInfo().then(function(info) {
+							if (!info) return;
+							zapretInfo = info;
+							updateSummaryBox();
+							updateActiveStrategyDisplay();
+							loadResultsForTarget(currentTarget);
+						}).catch(function() {});
+					}, 1500);
+				}).catch(function() { pollBatchApply(iter + 1); });
+			}, 2000);
+		}
+
+		function showGoodHistoryModal() {
+			bcwShowModal('История проверенных конфигураций', [E('p', { class: 'spinning' }, 'Загружаю историю…')]);
+			fs.exec(HELPER_BIN, ['good_history']).then(function(res) {
+				var d = parseHelperJson(res) || {};
+				var entries = d.entries || [];
+				var rows = [];
+				if (!entries.length) {
+					rows.push(E('p', { style: 'font-size: 13px; color: #abb2bf; line-height: 1.5;' },
+						'Пока пусто. История пополняется после успешного применения стратегии (когда проверка трафика пройдена).'));
+				}
+				entries.forEach(function(e) {
+					var dt = new Date((e.ts || 0) * 1000);
+					var stamp = ('0' + dt.getDate()).slice(-2) + '.' + ('0' + (dt.getMonth() + 1)).slice(-2) + ' ' +
+						('0' + dt.getHours()).slice(-2) + ':' + ('0' + dt.getMinutes()).slice(-2);
+					var tgt = (PRESET_DEFS[e.target] && PRESET_DEFS[e.target].name) || e.target || '—';
+					rows.push(E('div', { style: 'display: flex; gap: 10px; align-items: center; justify-content: space-between; padding: 8px 10px; border: 1px solid var(--bcw-border-sub); border-radius: 6px; margin-bottom: 6px;' }, [
+						E('div', { style: 'min-width: 0; flex: 1;' }, [
+							E('div', { style: 'font-size: 12px; color: #e5e9f0;' }, tgt + ' · ' + stamp +
+								(e.bytes ? (' · ' + Math.round(e.bytes / 1024) + ' КБ') : '') +
+								(e.http_code ? (' · HTTP ' + e.http_code) : '')),
+							E('div', { style: 'font-family: monospace; font-size: 11px; color: #abb2bf; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;' }, truncArgs(e.script, 120))
+						]),
+						E('button', {
+							class: 'cbi-button cbi-button-action',
+							style: 'height: 27px; padding: 0 10px; font-size: 11.5px; white-space: nowrap;',
+							click: function() {
+								fs.exec(HELPER_BIN, ['good_history_restore', e.id]).then(function(r2) {
+									var ok = parseHelperJson(r2) || {};
+									if (ok.ok) {
+										ui.hideModal();
+										ui.addNotification(null, E('p', {}, '↩ Конфигурация восстановлена из истории. Служба перезапускается.'), 'info');
+										setTimeout(function() { location.reload(); }, 2000);
+									} else {
+										ui.addNotification(null, E('p', {}, 'Не удалось восстановить: ' + (ok.error || 'ошибка')), 'danger');
+									}
+								}).catch(function() { ui.addNotification(null, E('p', {}, 'Ошибка восстановления из истории'), 'danger'); });
+							}
+						}, 'Вернуть')
+					]));
+				});
+				ui.hideModal();
+				bcwShowModal('История проверенных конфигураций', rows, [
+					E('button', { class: 'cbi-button cbi-button-neutral', click: function() { ui.hideModal(); } }, 'Закрыть')
+				]);
+			}).catch(function() { ui.hideModal(); ui.addNotification(null, E('p', {}, 'Не удалось загрузить историю'), 'danger'); });
+		}
+
+		function showCompareModal(args) {
+			bcwShowModal('Сравнение с текущей стратегией', [E('p', { class: 'spinning' }, 'Собираю данные…')]);
+			fs.exec(HELPER_BIN, ['strategy_compare', '--target', currentTarget, '--args', args]).then(function(res) {
+				var d = parseHelperJson(res) || {};
+				if (!d.ok) { ui.hideModal(); ui.addNotification(null, E('p', {}, 'Не удалось собрать сравнение'), 'danger'); return; }
+				var cur = d.current || {}, cand = d.candidate || {};
+				function memRow(mem) {
+					mem = mem || {};
+					var parts = ['✓' + (mem.ok || 0) + ' / ✗' + (mem.fail || 0)];
+					if (mem.ewma) parts.push(mem.ewma + ' мс');
+					if (mem.best) parts.push(Math.round((mem.best || 0) / 1024) + ' КБ');
+					return parts.join(' · ');
+				}
+				var last = cur.last_apply;
+				var rows = [
+					E('div', { style: 'font-weight: bold; color: #61afef; font-size: 13px; margin-bottom: 4px;' }, 'Что применяется сейчас'),
+					E('pre', { style: 'max-height: 80px; overflow: auto; font-size: 11px; background: #0c1016; padding: 8px; border-radius: 6px; white-space: pre-wrap;' }, cur.script || '—'),
+					E('div', { style: 'font-size: 12px; color: #c8ccd4; margin: 6px 0 14px; line-height: 1.5;' },
+						'Память по этой стратегии: ' + memRow(cur.memory) +
+						(last ? (' · последнее применение: ' + (last.all_ok ? '✓ подтверждено' : '✗ не подтверждено') + (last.http_code ? (' (HTTP ' + last.http_code + ')') : '')) : ' · ещё не применялась')),
+					E('div', { style: 'font-weight: bold; color: #98c379; font-size: 13px; margin-bottom: 4px;' }, 'Кандидат из поиска'),
+					E('pre', { style: 'max-height: 80px; overflow: auto; font-size: 11px; background: #0c1016; padding: 8px; border-radius: 6px; white-space: pre-wrap;' }, cand.args || '—'),
+					E('div', { style: 'font-size: 12px; color: #c8ccd4; margin-top: 6px; line-height: 1.5;' },
+						'Память по кандидату: ' + memRow(cand.memory) +
+						((cand.memory && ((cand.memory.ok || 0) + (cand.memory.fail || 0)) > 0) ? '' : ' (ещё не применялся — данных пока нет)')),
+					E('p', { style: 'font-size: 11.5px; color: #abb2bf; margin-top: 10px; line-height: 1.5;' },
+						'Точные метрики кандидата (объём, стабильность) появятся после его применения — они записываются в историю проверенных конфигураций.')
+				];
+				ui.hideModal();
+				bcwShowModal('Сравнение с текущей стратегией', rows, [
+					E('button', { class: 'cbi-button cbi-button-neutral', click: function() { ui.hideModal(); } }, 'Закрыть')
+				]);
+			}).catch(function() { ui.hideModal(); ui.addNotification(null, E('p', {}, 'Ошибка сравнения'), 'danger'); });
+		}
 		var resultsCard = E('div', { id: 'bcw-results-card', class: 'bcw-card', style: 'display: none;' }, [
 			resultsCardHeader,
+			batchBar,
 			strategiesListEl
 		]);
 
@@ -4340,6 +4562,7 @@ return view.extend({
 				badgeEl.textContent = uniqueStrategiesCount + ' шт.';
 			}
 			updateSpoilerUI();
+			updateBatchUI();
 
 			uniqueStrats.forEach(function(strat, idx) {
 				var sText = strat.args;
@@ -4360,6 +4583,12 @@ return view.extend({
 							E('span', { class: 'badge bcw-strat-family', style: 'background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); color: #98c379; font-size: 11px; font-weight: 600;' }, stratFamilyOf(sText)),
 						]),
 						E('div', { style: 'margin-left: auto; display: flex; align-items: center; gap: 8px;' }, [
+							E('button', {
+								class: 'bcw-btn-sm cbi-button cbi-button-neutral',
+								style: 'height: 28px; padding: 0 10px; font-size: 12px;',
+								title: 'Сравнить с текущей стратегией',
+								click: function(ev) { if (ev) ev.stopPropagation(); showCompareModal(sText); }
+							}, '⚖️'),
 							E('button', {
 								class: 'bcw-btn-sm cbi-button cbi-button-action',
 								style: 'height: 28px; padding: 0 12px; font-size: 12px; font-weight: 600; white-space: nowrap;',

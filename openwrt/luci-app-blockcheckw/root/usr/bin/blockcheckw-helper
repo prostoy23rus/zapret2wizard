@@ -3036,6 +3036,211 @@ cmd_apply_status() {
     fi
 }
 
+# ============================================================================
+# issue #12: перебор ВСЕХ найденных стратегий (A) и история конфигураций (B)
+# ============================================================================
+
+# ---------- A) Перебор всех найденных стратегий ----------
+# Применяет по очереди стратегии из сохранённых результатов поиска,
+# останавливается на первой подтверждённой, провалившиеся уходят в бан.
+# Прогресс пишется в /tmp/bcw_apply_all.state для UI.
+cmd_apply_all() {
+    local target="" limit=0
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --target) target="$2"; shift 2 ;;
+            --limit) limit="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+    [ -n "$target" ] || { echo '{"success":false,"error":"missing --target"}'; return 1; }
+    if scan_busy; then echo '{"success":false,"error":"идёт подбор — перебор недоступен"}'; return 1; fi
+    if ! mkdir /var/run/bcw_applyall.lock 2>/dev/null; then
+        echo '{"success":false,"error":"перебор уже идёт"}'; return 1
+    fi
+    # state-файл НЕ удаляем: UI читает финальный результат (applied/failed/stopped).
+    trap 'rm -rf /var/run/bcw_applyall.lock /tmp/bcw_apply_all.current 2>/dev/null' EXIT INT TERM
+    rm -f /tmp/bcw_apply_all.stop
+    local dom=$(target_domain "$target")
+    [ -n "$dom" ] || dom="$target"
+    local args_list
+    args_list=$(cmd_results "$target" | lua -e 'local j=require("luci.jsonc"); local s=io.read("*a"); local ok,d=pcall(j.parse,s); if not ok or not d then return end; for _,x in ipairs(d.strategies or {}) do local a=(type(x)=="table" and x.args) or x; if type(a)=="string" and a:sub(1,2)=="--" then print(a) end end' 2>/dev/null)
+    local total
+    total=$(printf '%s\n' "$args_list" | grep -c '^--')
+    total=${total:-0}
+    [ "$total" -gt 0 ] || { echo '{"success":false,"error":"нет сохранённых результатов поиска — сначала запустите поиск"}'; return 1; }
+    [ "$limit" -gt 0 ] && [ "$limit" -lt "$total" ] && total=$limit
+    printf 'target=%s\nindex=0\ntotal=%s\nresult=running\n' "$target" "$total" > /tmp/bcw_apply_all.state
+    local idx=0 cand res
+    while IFS= read -r cand; do
+        [ -n "$cand" ] || continue
+        idx=$((idx + 1))
+        [ "$limit" -gt 0 ] && [ "$idx" -gt "$limit" ] && break
+        if [ -f /tmp/bcw_apply_all.stop ]; then
+            printf 'target=%s\nindex=%s\ntotal=%s\nresult=stopped\nmessage=остановлено пользователем (проверено %s из %s)\n' "$target" "$idx" "$total" "$((idx - 1))" "$total" > /tmp/bcw_apply_all.state
+            echo "[blockcheckw-helper] apply_all: остановлено пользователем" >> "$LOG_FILE" 2>/dev/null || true
+            return 0
+        fi
+        printf '%s' "$cand" > /tmp/bcw_apply_all.current
+        printf 'target=%s\nindex=%s\ntotal=%s\nresult=running\n' "$target" "$idx" "$total" > /tmp/bcw_apply_all.state
+        echo "[blockcheckw-helper] apply_all: кандидат $idx/$total — $cand" >> "$LOG_FILE" 2>/dev/null || true
+        res=$(cmd_apply --target "$target" --script "$cand" 2>/dev/null)
+        if printf '%s' "$res" | grep -q '"accepted":true'; then
+            local ms
+            ms=$(cmd_test "$target" "" 2>/dev/null | awk -F'"time_sec":"' '{if (NF>1) {split($2,a,"\""); print int(a[1]*1000)}}' | head -1)
+            [ -n "$ms" ] || ms=0
+            mem put "$dom" "$(domain_ip "$dom")" "$cand" 1 "$ms" >/dev/null 2>&1 || true
+            printf 'target=%s\nindex=%s\ntotal=%s\nresult=applied\nmessage=применена и проверена (кандидат %s из %s)\n' "$target" "$idx" "$total" "$idx" "$total" > /tmp/bcw_apply_all.state
+            rm -f /tmp/bcw_apply_all.current
+            echo "[blockcheckw-helper] apply_all: успех на кандидате $idx/$total" >> "$LOG_FILE" 2>/dev/null || true
+            return 0
+        fi
+        mem ban "$dom" "$cand" "перебор всех: не подтвердилась" >/dev/null 2>&1 || true
+    done <<APPLYLIST
+$args_list
+APPLYLIST
+    rm -f /tmp/bcw_apply_all.current
+    printf 'target=%s\nindex=%s\ntotal=%s\nresult=failed\nmessage=ни одна из %s не подтвердилась; прежняя конфигурация сохранена\n' "$target" "$total" "$total" "$total" > /tmp/bcw_apply_all.state
+    echo "[blockcheckw-helper] apply_all: ни одна из $total не подтвердилась" >> "$LOG_FILE" 2>/dev/null || true
+    return 0
+}
+
+cmd_apply_all_bg() {
+    rm -f /tmp/bcw_apply_all.state /tmp/bcw_apply_all.current /tmp/bcw_apply_all.stop /tmp/bcw_apply_all.done 2>/dev/null || true
+    if command -v setsid >/dev/null 2>&1; then
+        setsid sh -c '/usr/bin/blockcheckw-helper apply_all "$@" >/tmp/bcw_apply_all.log 2>&1; echo done >/tmp/bcw_apply_all.done' bcw "$@" </dev/null >/dev/null 2>&1 &
+    else
+        sh -c '/usr/bin/blockcheckw-helper apply_all "$@" >/tmp/bcw_apply_all.log 2>&1; echo done >/tmp/bcw_apply_all.done' bcw "$@" </dev/null >/dev/null 2>&1 &
+    fi
+    sleep 1
+    echo '{"success":true,"started":true}'
+}
+
+cmd_apply_all_status() {
+    local running=0
+    [ -d /var/run/bcw_applyall.lock ] && running=1
+    lua - "$running" /tmp/bcw_apply_all.state /tmp/bcw_apply_all.current <<'LUA'
+local j = require("luci.jsonc")
+local running = arg[1] == "1"
+local st, cur = {}, ""
+local f = io.open(arg[2], "r")
+if f then for line in f:lines() do local k, v = line:match("^(%w+)=(.*)$"); if k then st[k] = v end end f:close() end
+local cf = io.open(arg[3], "r")
+if cf then cur = cf:read("*a") or ""; cf:close() end
+if not running and st.result == "running" then st.result = "interrupted"; st.message = "перебор прерван (служба/процесс остановлены)" end
+print(j.stringify({running = running, target = st.target, index = tonumber(st.index) or 0,
+    total = tonumber(st.total) or 0, result = st.result or "", message = st.message or "", current = cur}))
+LUA
+}
+
+cmd_apply_all_stop() {
+    : > /tmp/bcw_apply_all.stop 2>/dev/null || true
+    echo '{"ok":true,"stopping":true}'
+}
+
+# ---------- B) История проверенных (хороших) конфигураций ----------
+cmd_good_history_add() {
+    local tgt="$1" sec="$2" script="$3" code="$4" bytes="$5"
+    [ -n "$script" ] || return 1
+    local dir="/etc/zapret2wizard/good_history"
+    mkdir -p "$dir" 2>/dev/null || return 1
+    local ts=$(date +%s) id="${ts}_$$"
+    cp -f "/etc/config/$(_strategy_pkg)" "$dir/cfg-$id.uci" 2>/dev/null || true
+    chmod 600 "$dir/cfg-$id.uci" 2>/dev/null || true
+    lua - "$dir" "$id" "$ts" "$tgt" "$sec" "$script" "$code" "$bytes" <<'LUA' >/dev/null 2>&1
+local j = require("luci.jsonc")
+local dir, id, ts, tgt, sec, script, code, bytes = arg[1], arg[2], arg[3], arg[4], arg[5], arg[6], arg[7], arg[8]
+local f = io.open(dir .. "/entry-" .. id .. ".json", "w")
+if not f then return end
+f:write(j.stringify({id = id, ts = tonumber(ts), target = tgt, section = sec, script = script, http_code = code, bytes = tonumber(bytes) or 0}))
+f:close()
+-- пересобрать entries.json: последние 10, без дублей target+script
+local entries = {}
+local p = io.popen("ls -1 " .. dir .. "/entry-*.json 2>/dev/null")
+if p then for path in p:lines() do local h = io.open(path, "r"); if h then local ok, d = pcall(j.parse, h:read("*a")); h:close(); if ok and d and d.id then entries[#entries + 1] = d end end end p:close() end
+table.sort(entries, function(a, b) return (a.ts or 0) > (b.ts or 0) end)
+local seen, kept = {}, {}
+for _, e in ipairs(entries) do local key = (e.target or "") .. "|" .. (e.script or ""); if not seen[key] then seen[key] = true; kept[#kept + 1] = e end end
+local keep = {}
+for i = 1, math.min(#kept, 10) do keep[kept[i].id] = true end
+for _, e in ipairs(entries) do
+    if not keep[e.id] then
+        os.remove(dir .. "/entry-" .. e.id .. ".json")
+        os.remove(dir .. "/cfg-" .. e.id .. ".uci")
+    end
+end
+local out = {}
+for i = 1, math.min(#kept, 10) do out[#out + 1] = kept[i] end
+local w = io.open(dir .. "/entries.json", "w")
+if w then w:write(j.stringify({entries = out})); w:close() end
+LUA
+    return 0
+}
+
+cmd_good_history_list() {
+    local dir="/etc/zapret2wizard/good_history"
+    if [ -s "$dir/entries.json" ]; then
+        cat "$dir/entries.json"
+    else
+        echo '{"entries":[]}'
+    fi
+}
+
+cmd_good_history_restore() {
+    local id="$1"
+    case "$id" in
+        ""|*[!0-9_]*) echo '{"ok":false,"error":"некорректный id"}'; return 1 ;;
+    esac
+    local dir="/etc/zapret2wizard/good_history"
+    [ -s "$dir/cfg-$id.uci" ] || { echo '{"ok":false,"error":"конфигурация не найдена"}'; return 1; }
+    cp -f "$dir/cfg-$id.uci" "/etc/config/$(_strategy_pkg)" || { echo '{"ok":false,"error":"не удалось скопировать"}'; return 1; }
+    uci -q commit "$(_strategy_pkg)" 2>/dev/null || true
+    /usr/share/zapret2wizard/uci2config >/dev/null 2>&1 || true
+    ( /etc/init.d/zapret2wizard restart >/dev/null 2>&1 & )
+    logger -t zapret2wizard "восстановлена конфигурация из истории: $id"
+    echo '{"ok":true,"restored":true,"id":"'"$id"'"}'
+}
+
+# ---------- B) Сравнение текущей стратегии с кандидатом ----------
+cmd_strategy_compare() {
+    local target="" args=""
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --target) target="$2"; shift 2 ;;
+            --args) args="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+    [ -n "$args" ] || { echo '{"ok":false,"error":"no args"}'; return 1; }
+    local sec=$(_strategy_section "$target")
+    local cur=""
+    [ -n "$sec" ] && cur=$(uci -q get "$(_strategy_pkg).$sec.script" 2>/dev/null)
+    local last='{}'
+    [ -s /tmp/blockcheckw_apply_result.json ] && last=$(cat /tmp/blockcheckw_apply_result.json 2>/dev/null)
+    lua - "$args" "$cur" "$last" <<'LUA'
+local j = require("luci.jsonc")
+local args, cur, last = arg[1], arg[2], arg[3]
+local function h(s)
+    local x = 5381
+    for i = 1, #s do x = (x * 31 + s:byte(i)) % 2147483647 end
+    return string.format("%08x", math.floor(x))
+end
+local recipes = {}
+local f = io.open("/etc/zapret2wizard/strategy_memory.json", "r")
+if f then local ok, d = pcall(j.parse, f:read("*a")); f:close(); if ok and d and d.recipes then recipes = d.recipes end end
+local function mem_for(s) local r = recipes[h(s)]; return {ok = (r and r.ok) or 0, fail = (r and r.fail) or 0, ewma = (r and r.ewma) or 0, best = (r and r.best) or 0} end
+local ok, d = pcall(j.parse, last)
+if not ok then d = nil end
+local last_apply = nil
+if d and d.target then
+    last_apply = {target = d.target, all_ok = d.all_ok, http_code = d.http_code, rolled_back = d.rolled_back, message = d.message}
+end
+print(j.stringify({ok = true, current = {script = cur or "", memory = mem_for(cur or ""), last_apply = last_apply},
+    candidate = {args = args, memory = mem_for(args)}}))
+LUA
+}
+
+
 cmd_apply() {
     if ! mkdir /var/run/bcw_apply_runtime.lock 2>/dev/null; then
         engine_reply 0 "Применение стратегии уже выполняется"; return 1
@@ -3384,6 +3589,14 @@ LUA
 }
 EOF
 )
+    if [ "$all_ok_val" = "true" ]; then
+        # История проверенных конфигураций (issue #12): чтобы к рабочей
+        # стратегии можно было вернуться и сравнить её с кандидатом.
+        local _hist_bytes=0
+        _hist_bytes=$(printf '%s' "$res_json" | lua -e 'local s=io.read("*a"); local ok,d=pcall(require("luci.jsonc").parse,s); local b=0; if ok and d then local function t(v) if type(v)=="number" and v>b then b=v end end; local md=d.multi_domain or {}; for _,e in ipairs(md.endpoints or {}) do t(e.size_bytes) end; local cp=d.client_probe or {}; t(cp.bytes); if cp.volume then t(cp.volume.bytes) end; if cp.video then t(cp.video.bytes) end end; print(b)' 2>/dev/null)
+        [ -n "$_hist_bytes" ] || _hist_bytes=0
+        cmd_good_history_add "$target" "${sec_name:-}" "$script_text" "${http_code:-}" "$_hist_bytes" >/dev/null 2>&1 || true
+    fi
     echo "$res_json" > /tmp/blockcheckw_apply_result.json
     echo "$res_json"
     [ "$all_ok_val" = "true" ]
@@ -7947,6 +8160,13 @@ case "$1" in
     apply) shift; cmd_apply "$@" ;;
     apply_bg) shift; cmd_apply_bg "$@" ;;
     apply_status) cmd_apply_status ;;
+    apply_all) shift; cmd_apply_all "$@" ;;
+    apply_all_bg) shift; cmd_apply_all_bg "$@" ;;
+    apply_all_status) cmd_apply_all_status ;;
+    apply_all_stop) cmd_apply_all_stop ;;
+    good_history) shift; cmd_good_history_list "$@" ;;
+    good_history_restore) shift; cmd_good_history_restore "$@" ;;
+    strategy_compare) shift; cmd_strategy_compare "$@" ;;
     activate) shift; cmd_activate "$@" ;;
     delete_strategy) shift; cmd_delete_strategy "$@" ;;
     test) shift; cmd_test "$@" ;;
