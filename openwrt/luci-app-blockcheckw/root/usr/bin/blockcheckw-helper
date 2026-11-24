@@ -2675,7 +2675,7 @@ end
 local e = probe.probe({url=url, endpoint_id=host, role=role, path_mode=mode,
     range={start=0,finish=4194303}, timeout_sec=30, max_bytes=8388608},
     {role=role,min_bytes=math.max(1,min),sample_bytes=host == "www.youtube.com" and 262144 or 131072,sample_seconds=0}, {run=run})
-local sample_required = host == "www.youtube.com" or host == "discord.com" or host:match("googlevideo%.com$") ~= nil
+local sample_required = role ~= "reachability" and (host == "www.youtube.com" or host == "discord.com" or host:match("googlevideo%.com$") ~= nil)
 local ok = e.policy_passed and (role ~= "reachability" or e.http_code < 500) and (not sample_required or e.sample_sufficient)
 print(json.stringify({ok=ok,mode=mode,host=host,ip=ip,url=url,code=tostring(e.http_code or "000"),
     bytes=e.bytes_received or 0,min=min,allow_4xx=allow4 == "1",bytes_known=e.bytes_known,
@@ -2688,58 +2688,30 @@ EOF
 # Извлекает прямой URL видеопотока из HTML страницы просмотра YouTube.
 # Вход: файл с HTML (ytInitialPlayerResponse содержит signatureCipher/url).
 # Выход: полный https://...googlevideo.com/videoplayback?... или пусто.
-yt_extract_videoplayback_url() {
-    lua - "$1" << 'EOF'
-local f = io.open(arg[1], "r")
-local s = f and f:read("*a") or ""
-if f then f:close() end
-if s == "" then os.exit(1) end
--- Снять JSON-экранирование ytInitialPlayerResponse.
-s = s:gsub("\\/", "/")
-s = s:gsub("\\u0026", "&")
-s = s:gsub("\\u0025", "%%")
-s = s:gsub("\\u003d", "=")
-local function pct(t)
-    t = t:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16)) end)
-    return t
-end
--- 1) Прямое url-поле форматов.
-local u = s:match('"url":"(https://[^"]*googlevideo%.com/videoplayback[^"]*)"')
-if u then print(pct(u)) os.exit(0) end
--- 2) signatureCipher (itag 18): url= идёт до первого сырого & — внутри него
---    параметры %-кодированы.
-local ci = s:match('"signatureCipher":"([^"]+)"')
-if ci then
-    local v = ci:match("url=([^&]+)")
-    if v then print(pct(v)) os.exit(0) end
-end
-os.exit(1)
-EOF
-}
-
+# Проверка видео-хоста googlevideo через тот же временный nfqws.
+# Страница может открываться при стратегии, которая не поднимает сам
+# видео-CDN. Полный URL потока curl-ом не проверить: у него не вычислен
+# n-параметр (его считает JS плеера), и Google честно отвечает 403 даже
+# когда канал открыт. Поэтому проверяем сам видео-хост: TLS-канал до него
+# через обход должен отдавать HTTP (у канала нет n-параметра). Это точно
+# отличает «канал режется» (000/RST) от «канал жив» (любой HTTP-ответ).
 probe_youtube_video_host() {
-    local q="$1" pageip="$2" page="/tmp/bcw_yt_video_page.$" vurl vhost vip out
+    local q="$1" pageip="$2" page="/tmp/bcw_yt_video_page.$" vhost vip out
     # Страница тянется через тот же временный nfqws (правила очереди для
     # www.youtube.com уже стоят): если стратегия не поднимает даже базу —
-    # видеопоток проверять нечего. URL потока IP-привязан к публичному IP
-    # роутера, пробуем с него же.
-    # pageip может быть пустым при ошибке резолва — дорезолвим сами.
+    # видео-хост проверять нечего.
     [ -n "$pageip" ] || pageip=$(probe_resolve www.youtube.com) || true
     [ -n "$pageip" ] || { echo '{"ok":false,"video_error":"no youtube A"}'; return 1; }
     curl -4 -sS -m 25 --resolve "www.youtube.com:443:$pageip" "https://www.youtube.com/watch?v=dQw4w9WgXcQ" -o "$page" 2>/dev/null || true
     [ -s "$page" ] || { rm -f "$page"; echo '{"ok":false,"video_error":"empty page"}'; return 1; }
-    vurl=$(yt_extract_videoplayback_url "$page")
+    vhost=$(grep -o 'https://[A-Za-z0-9._-]*googlevideo\.com/' "$page" 2>/dev/null | head -n1 | sed 's#https://##; s#/$##')
     rm -f "$page"
-    if [ -z "$vurl" ]; then
-        echo '{"ok":false,"video_error":"no videoplayback url"}'
-        return 1
-    fi
-    vhost=${vurl#https://}; vhost=${vhost%%/*}
+    [ -n "$vhost" ] || { echo '{"ok":false,"video_error":"no googlevideo host"}'; return 1; }
     vip=$(probe_resolve "$vhost") || true
     [ -n "$vip" ] || { echo '{"ok":false,"video_host":"'"$vhost"'","video_error":"no video A"}'; return 1; }
     nft add rule inet bcwprobe out meta mark and 0x40000000 == 0 ip daddr "$vip" tcp dport 443 queue num "$q" bypass 2>/dev/null || true
     nft add rule inet bcwprobe in meta mark and 0x40000000 == 0 ip saddr "$vip" tcp sport 443 queue num "$q" bypass 2>/dev/null || true
-    out=$(transfer_client_probe output "$vhost" "$vip" "$vurl" 131072 0 "")
+    out=$(transfer_client_probe output "$vhost" "$vip" "https://$vhost/robots.txt" 1 1 "")
     printf '%s\n' "$out"
     echo "$out" | grep -q '"ok":true'
 }
@@ -2943,7 +2915,7 @@ cmd_apply_impl() {
     case "$script_text" in
         *" : nfqws2 "*) script_text="${script_text##* : nfqws2 }" ;;
     esac
-    script_text=$(printf '%s' "$script_text" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+    script_text=$(printf '%s' "$script_text" | tr '\n\r\t' '   ' | tr -s ' ' | sed 's/^ //; s/ $//')
 
     # Неполная стратегия (обрывок вроде "--payload=tls_client_hello") ломает обход.
     if [ -n "$script_text" ] && ! printf '%s' "$script_text" | grep -q -- '--lua-desync\|--new\|--filter'; then
@@ -3679,41 +3651,43 @@ local v = json.parse(arg[2])
 if out and v then
     out.client_probe = v
     local vid = v.video or {}
+    local vurl = "https://" .. tostring(vid.host or "googlevideo.com")
     if v.ok ~= true then
         out.all_ok = false
         out.overall_status = "degraded"
         if type(out.endpoints) == "table" then
             table.insert(out.endpoints, {
-                name = "Видеопоток googlevideo (реальный)",
-                url = vid.url or "https://test.googlevideo.com",
+                name = "Видео-хост googlevideo (через обход)",
+                url = vurl,
                 http_code = vid.code or "000",
                 accessible = false,
                 data_sample = false,
-                role = "bounded_data",
+                role = "reachability",
                 required = true,
                 verification_state = "unverified",
                 playback = "blocked",
                 size_bytes = vid.bytes or 0,
-                stall_reason = vid.video_error or "video_blocked"
+                stall_reason = vid.video_error or "video_host_unreachable"
             })
         end
-        out.message = "Видео-CDN googlevideo не подтверждён через обход: " ..
+        out.message = "Видео-хост googlevideo не отвечает через обход: " ..
             tostring(vid.video_error or ("код " .. (vid.code or "000"))) ..
-            ". Видео может не воспроизводиться."
+            ". Видео не заработает, пока канал до видео-CDN режется."
     else
         if type(out.endpoints) == "table" then
             table.insert(out.endpoints, {
-                name = "Видеопоток googlevideo (реальный)",
-                url = vid.url or "https://test.googlevideo.com",
+                name = "Видео-хост googlevideo (через обход)",
+                url = vurl,
                 http_code = vid.code or "200",
                 accessible = true,
-                data_sample = vid.data_sample == true,
-                role = "bounded_data",
+                data_sample = false,
+                role = "reachability",
                 required = true,
-                verification_state = (vid.data_sample == true) and "data_sample" or "unverified",
+                verification_state = "reachable",
+                verification_kind = "reachability",
                 playback = "unknown",
                 size_bytes = vid.bytes or 0,
-                stall_reason = vid.stall_reason or "transfer_complete"
+                stall_reason = "transfer_complete"
             })
         end
     end
@@ -5457,7 +5431,9 @@ _info_json_shell() {
                 cnt=${cnt:-0}
                 ;;
         esac
-        local esc=$(printf '%s' "$script" | sed 's/\\/\\\\/g; s/"/\\"/g')
+        # tr: переносы/табы внутри значения — валидный JSON не позволяет;
+        # для аргументов nfqws это пробелы, поэтому нормализуем до sed.
+        local esc=$(printf '%s' "$script" | tr '\n\r\t' '   ' | sed 's/\\/\\\\/g; s/"/\\"/g')
         local obj="\"$key\":{\"section\":\"$sec\",\"enabled\":$en,\"script\":\"$esc\",\"port\":\"$port\",\"protocol\":\"$proto\",\"filter_l7\":\"$l7\",\"hostlist\":\"$hl\",\"domain_count\":$cnt}"
         local aobj="{\"section\":\"$sec\",\"service_key\":\"$key\",\"enabled\":$en,\"script\":\"$esc\",\"port\":\"$port\",\"protocol\":\"$proto\",\"hostlist\":\"$hl\",\"domain_count\":$cnt}"
         if [ "$first_s" = "1" ]; then svc="$obj"; first_s=0; else svc="$svc,$obj"; fi
@@ -5844,6 +5820,9 @@ cmd_strategy_set() {
     local target="$1"
     shift
     local text="$*"
+    # Переносы строк из форумных «простыней» — это просто пробелы между
+    # аргументами: без нормализации они попадают в uci и ломают JSON панели.
+    text=$(printf '%s' "$text" | tr '\n\r\t' '   ' | tr -s ' ' | sed 's/^ //; s/ $//')
     local sec=$(_strategy_section "$target")
     [ -n "$sec" ] || { echo '{"ok":false,"error":"неизвестный сервис"}'; return 1; }
     if ! printf '%s' "$text" | grep -q -- '--lua-desync\|--new'; then
