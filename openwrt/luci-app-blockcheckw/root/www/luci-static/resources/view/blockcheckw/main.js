@@ -2712,6 +2712,27 @@ return view.extend({
 			var exportBtn = E('button', { class: 'bcw-btn-secondary', style: 'height: 34px;' }, '⬇ Экспорт геномов');
 			var importBtn = E('button', { class: 'bcw-btn-secondary', style: 'height: 34px;' }, '⬆ Импорт');
 			var catalogBtn = E('button', { class: 'bcw-btn-secondary', style: 'height: 34px;' }, '🌐 Каталог по ASN');
+			var ytapiBtn = E('button', { class: 'bcw-btn-secondary', style: 'height: 34px;' }, '🩺 Починить API YouTube');
+			ytapiBtn.addEventListener('click', function() {
+				ytapiBtn.disabled = true;
+				var prev = summary.textContent;
+				summary.textContent = '⏳ Проверяю API YouTube (youtubei)… это может занять 2–3 минуты';
+				fs.exec(HELPER_BIN, ['fix_ytapi', '--deep']).then(function(res) {
+					var out = null;
+					try { out = JSON.parse(String((res && res.stdout) || '').trim()); } catch (e) {}
+					if (out && out.success) {
+						ui.addNotification(null, E('p', {}, '✓ API YouTube (youtubei) открывается'), 'info');
+					} else {
+						ui.addNotification(null, E('p', {}, 'API YouTube открыть не удалось: видео может работать, приложение YouTube — нет'), 'warning');
+					}
+					summary.textContent = prev;
+					ytapiBtn.disabled = false;
+					refreshEvolution();
+				}).catch(function() {
+					ui.addNotification(null, E('p', {}, 'Не удалось вызвать helper для ремонта API'), 'danger');
+					ytapiBtn.disabled = false;
+				});
+			});
 
 			catalogBtn.addEventListener('click', function() {
 				catalogBtn.disabled = true;
@@ -2858,13 +2879,17 @@ return view.extend({
 					E('div', { style: 'font-weight: bold; font-size: 15px; color: var(--bcw-text-title);' }, '🧬 Эволюция стратегий'),
 					summary
 				]),
-				E('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;' }, [targetSel, startBtn, histBtn, catalogBtn, exportBtn, importBtn])
+				E('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;' }, [targetSel, startBtn, histBtn, catalogBtn, exportBtn, importBtn, ytapiBtn])
 			]));
 			root.appendChild(E('div', { style: 'font-size:12px;color:var(--bcw-text-muted);line-height:1.5;margin-top:8px;' },
 				'Перебирает новые комбинации уже проверенных техник и запоминает, что держится у вашего провайдера. ' +
 				'Запускайте после обычного «Запустить поиск»: эволюция подсевает найденные стратегии и добавляет кроссоверы с мутациями. ' +
 				'Подбор останавливает обход на 1–3 минуты, затем служба поднимается сама и применяется лучший стабильный кандидат. ' +
 				'Ночное обучение — 06:10, один прогон в сутки; «Каталог по ASN» подтягивает геномы других пользователей.'));
+			root.appendChild(E('div', { style: 'font-size:11.5px;color:#e5c07b;line-height:1.5;margin-top:6px;' },
+				'⏱ Прогон идёт в фоне: в журнале ниже видны этапы, счётчик «кандидат N/M» и heartbeat каждые ~20 с — ' +
+				'если строки обновляются, процесс жив. Обычно 1–2 мин на кандидата; если кандидат «висит» дольше 5 мин, ' +
+				'прогон пропустит его и восстановит рабочий конфиг. Страницу закрывать не нужно.'));
 			root.appendChild(top);
 			root.appendChild(hist);
 			root.appendChild(logWrap);
@@ -2950,11 +2975,16 @@ return view.extend({
 
 				var summary = document.getElementById('bcw-evo-summary');
 				if (summary) {
+					var runState = '';
+					if (st.running) {
+						runState = ' · ⏳ ' + (st.phase || 'выполняется');
+						if (st.progress_total) runState += ' (' + (st.progress_done || 0) + '/' + st.progress_total + ')';
+					}
 					summary.textContent = 'Провайдер: ' + (st.provider || '—') +
 						' · геномов: ' + (st.total_genomes || 0) +
 						' · последний прогон: ' + fmtStamp(st.last_run) +
 						' · ночной: ' + fmtStamp(st.next_run) +
-						(st.running ? ' · ⏳ выполняется' : '');
+						runState;
 				}
 
 				var top = document.getElementById('bcw-evo-top');
@@ -3010,7 +3040,7 @@ return view.extend({
 					var body = (txt || '').trim();
 					if (body) {
 						var lines = body.split('\n');
-						pre.textContent = lines.slice(-40).join('\n');
+						pre.textContent = lines.slice(-60).join('\n');
 						wrap.style.display = '';
 					} else {
 						wrap.style.display = 'none';

@@ -560,6 +560,19 @@ local function mode_status()
 
     local running, pid = is_running()
 
+    -- прогресс текущего прогона (пишет helper в /tmp/bcw_evolve.progress)
+    local phase, prog_done, prog_total = nil, nil, nil
+    local pf = io.open("/tmp/bcw_evolve.progress", "r")
+    if pf then
+        for line in pf:lines() do
+            local k, v = line:match("^(%w+)=(.*)$")
+            if k == "phase" and v ~= "" then phase = v end
+            if k == "done" and v ~= "" then prog_done = tonumber(v) end
+            if k == "total" and v ~= "" then prog_total = tonumber(v) end
+        end
+        pf:close()
+    end
+
     local top = {}
     for id, g in pairs(merged) do
         if g.args then
@@ -598,6 +611,9 @@ local function mode_status()
         provider = provider,
         running = running,
         pid = pid,
+        phase = running and phase or nil,
+        progress_done = running and prog_done or nil,
+        progress_total = running and prog_total or nil,
         last_run = last_run,
         next_run = next_run,
         total_genomes = #top,

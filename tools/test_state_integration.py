@@ -53,7 +53,7 @@ class StateIntegration(unittest.TestCase):
         self.shim.write_text("package.preload['luci.jsonc']=function() local j=require('dkjson'); return {parse=j.decode,stringify=function(v) return j.encode(v) end} end\n")
         # BCW_CANDIDATE_SEED=0 — детерминированный порядок равных кандидатов
         # (в проде они перемешиваются, issue #9c); тест проверяет сам поток.
-        self.env=dict(os.environ, LUA_INIT='@'+str(self.shim), STATE=str(self.work/'state.json'), BCW_CANDIDATE_SEED='0')
+        self.env=dict(os.environ, LUA_INIT='@'+str(self.shim), STATE=str(self.work/'state.json'), BCW_CANDIDATE_SEED='0', BCW_EVOLVE_NO_TIMEOUT='1')
         self.state={'attempts':[], 'active':'prior'}; self.save()
         self.fixture=self.work/'apply'; self.fixture.write_text(APPLY_STUB); self.fixture.chmod(0o755)
 
@@ -120,6 +120,11 @@ wait_dpi_ready() { :; }
     def evolution(self, fail=False):
         self.env['FAIL_REAPPLY']='1' if fail else '0'
         definitions=function('bcw_apply_accepted')+r'''
+_strategy_pkg() { echo zapret2wizard; }
+_evo_cfg_snapshot() { :; }
+_evo_ts() { :; }
+_evo_track() { :; }
+_evo_phase() { :; }
 cmd_apply() { "$fixture" "$@"; }
 cmd_test() { echo test >> "$testlog"; echo '{"size_bytes":42,"all_ok":true}'; }
 _svc_start_bg() { :; }

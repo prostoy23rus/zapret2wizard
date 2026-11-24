@@ -69,6 +69,13 @@
           "name": "Видеопотоки CDN (manifest.googlevideo.com)",
           "url": "https://manifest.googlevideo.com",
           "range": "0-4096"
+        },
+        {
+          "name": "API YouTube (youtubei.googleapis.com)",
+          "url": "https://youtubei.googleapis.com/",
+          "range": "0-4095",
+          "allow_4xx": true,
+          "optional": true
         }
       ],
       "hostlist": "list_hosts_youtube",

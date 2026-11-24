@@ -2844,9 +2844,24 @@ client_probe_output() {
     [ -n "$pid" ] || { echo '{"ok":false,"error":"nfqws2 qnum=300 not found"}'; return 1; }
     cmd=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | sed "s/--qnum=300/--qnum=$q/")
     [ -n "$cmd" ] || { echo '{"ok":false,"error":"empty nfqws cmdline"}'; return 1; }
+    local _probe_nfq_pid=""
+    _probe_qnum_pids() {
+        local p
+        for p in $(pgrep nfqws2 2>/dev/null); do
+            tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null | grep -q -- "--qnum=$q" && echo "$p"
+        done
+    }
     _probe_cleanup() {
         nft delete table inet bcwprobe 2>/dev/null || true
         [ -n "$tpid" ] && kill "$tpid" 2>/dev/null || true
+        [ -n "$_probe_nfq_pid" ] && kill -9 "$_probe_nfq_pid" 2>/dev/null || true
+        # setsid-обёртка убивала только себя, а nfqws2 оставался жить и держал
+        # очередь: следующая проба не могла привязаться, правила bypass
+        # пропускали трафик мимо стратегии, и проверки висели на таймаутах.
+        local _p
+        for _p in $(pgrep nfqws2 2>/dev/null); do
+            tr '\0' ' ' < "/proc/$_p/cmdline" 2>/dev/null | grep -q -- "--qnum=$q" && kill -9 "$_p" 2>/dev/null
+        done
         rm -rf /tmp/bcw_probe.lock 2>/dev/null || true
     }
     if [ -d /tmp/bcw_probe.lock ]; then
@@ -2859,7 +2874,7 @@ client_probe_output() {
         # снимаем. Раньше очистка звала `rm -f` на каталог, лок оставался
         # навсегда и каждая следующая проверка падала с `probe busy` —
         # из-за этого эволюция давала 0 рабочих стратегий (#11).
-        if [ -n "$_pp" ] && [ "$_pp" != "$" ] && kill -0 "$_pp" 2>/dev/null && [ "${_age:-999}" -lt 180 ]; then
+        if [ -n "$_pp" ] && [ "$_pp" != "$$" ] && kill -0 "$_pp" 2>/dev/null && [ "${_age:-999}" -lt 180 ]; then
             echo '{"ok":false,"error":"probe busy"}'; return 1
         fi
         rm -rf /tmp/bcw_probe.lock
@@ -2870,9 +2885,18 @@ client_probe_output() {
     echo $$ > /tmp/bcw_probe.lock/pid 2>/dev/null || true
     trap '_probe_cleanup' EXIT INT TERM
     nft delete table inet bcwprobe 2>/dev/null || true
+    # Страховка от утёкшего nfqws от предыдущей пробы: иначе bind на ту же
+    # очередь падает, правила уходят в bypass, и все проверки висят.
+    for _p in $(_probe_qnum_pids); do kill -9 "$_p" 2>/dev/null; done
     setsid /bin/sh -c "exec $cmd" </dev/null >/tmp/bcw_probe.nfq.log 2>&1 &
     tpid=$!
     sleep 1
+    _probe_nfq_pid=$(_probe_qnum_pids | head -n 1)
+    if [ -z "$_probe_nfq_pid" ]; then
+        _probe_cleanup
+        echo '{"ok":false,"error":"temp nfqws failed to bind"}'
+        return 1
+    fi
     nft add table inet bcwprobe 2>/dev/null || { _probe_cleanup; echo '{"ok":false,"error":"nft table"}'; return 1; }
     nft add chain inet bcwprobe out '{ type filter hook output priority -150; policy accept; }' 2>/dev/null || true
     nft add chain inet bcwprobe in '{ type filter hook input priority -150; policy accept; }' 2>/dev/null || true
@@ -3493,7 +3517,8 @@ if preset_obj and preset_obj.validation_endpoints and #preset_obj.validation_end
             type = ep.type or "http",
             host = ep.host,
             port = ep.port,
-            allow_4xx = (ep.allow_4xx == true)
+            allow_4xx = (ep.allow_4xx == true),
+            optional = (ep.optional == true)
         })
     end
 else
@@ -3507,10 +3532,16 @@ end
 
 local results = {}
 local total_ok = 0
+local req_total, req_ok = 0, 0
 local main_ok = false
 local total_speed_kbs = 0
 
 for idx, ep in ipairs(endpoints) do
+    -- Необязательные проверки (например, API youtubei) видны в списке,
+    -- но не валят общий статус: иначе стратегия YouTube не могла бы
+    -- примениться, пока не починен отдельный профиль YTApi.
+    local required = (ep.optional ~= true)
+    if required then req_total = req_total + 1 end
     if ep.type == "stun" then
         local nixio = require("nixio")
         local t0 = nixio.nanotime and nixio.nanotime() or 0
@@ -3552,6 +3583,7 @@ for idx, ep in ipairs(endpoints) do
 
         if s_ok then
             total_ok = total_ok + 1
+            if required then req_ok = req_ok + 1 end
             if idx == 1 then main_ok = true end
         end
 
@@ -3563,7 +3595,8 @@ for idx, ep in ipairs(endpoints) do
             data_flow = s_ok,
             size_bytes = s_ok and 32 or 0,
             speed_kbs = 0,
-            time_sec = string.format("%.3f", dt_ms / 1000)
+            time_sec = string.format("%.3f", dt_ms / 1000),
+            required = required
         })
     else
         -- Main page_sample: YouTube >=1.2 MiB (past reported 1 MiB cap), Discord >=128 KiB; not playback.
@@ -3591,6 +3624,7 @@ for idx, ep in ipairs(endpoints) do
         total_speed_kbs = total_speed_kbs + speed_kbs
         if is_ok then
             total_ok = total_ok + 1
+            if required then req_ok = req_ok + 1 end
             if idx == 1 then main_ok = true end
         end
         table.insert(results, {
@@ -3600,7 +3634,7 @@ for idx, ep in ipairs(endpoints) do
             stall_reason=(main_sample and evidence.transfer_verified and not data_sample) and "insufficient_sample" or evidence.reason,
             size_bytes=evidence.bytes_received or 0, bytes_known=evidence.bytes_known,
             speed_kbs=speed_kbs, time_sec=string.format("%.2f", evidence.elapsed_sec or 0),
-            role=role, required=true, data_sample=data_sample, data_sample_min_bytes=sample_min,
+            role=role, required=required, data_sample=data_sample, data_sample_min_bytes=sample_min,
             verification_kind=main_sample and "page_sample" or role,
             verification_state=is_ok and (reach_only and "reachable" or "data_sample") or "unverified",
             playback="unknown", budgetcap=evidence.max_bytes, evidence=evidence
@@ -3610,15 +3644,15 @@ end
 
 local has_truncated = false
 for _, r in ipairs(results) do
-    if r.truncated then has_truncated = true end
+    if r.truncated and r.required ~= false then has_truncated = true end
 end
 
-local all_ok = (total_ok == #endpoints and #endpoints > 0)
+local all_ok = (req_ok == req_total and req_total > 0)
 local overall_status = "unknown"
 local status_msg = "Проверка не подтвердила требуемую передачу данных; причина сети и воспроизведение неизвестны."
 if all_ok then
     overall_status = "optimal"
-    status_msg = "Проверенные HTTP/данные и отдельные протокольные требования выполнены (" .. #endpoints .. "/" .. #endpoints .. "). Воспроизведение не проверялось."
+    status_msg = "Проверенные HTTP/данные и отдельные протокольные требования выполнены (" .. req_ok .. "/" .. req_total .. "). Воспроизведение не проверялось."
 elseif has_truncated or main_ok then
     overall_status = "degraded"
     status_msg = "Часть требований не подтверждена: полученные байты и завершение указаны ниже. Это не диагноз DPI."
@@ -4798,23 +4832,37 @@ cmd_quic_mode_locked() {
 # Приложение YouTube ходит в youtubei.googleapis.com, который МТС блокирует
 # отдельным SNI. Если этот хост не открывается, добавляем отдельную секцию
 # YTApi со своим desync и исключаем хост из основной секции.
+# Подбор/починка отдельного профиля YTApi (youtubei.googleapis.com) — API,
+# которым пользуется приложение YouTube. На живых сетях (РТК/AS12389) этот SNI
+# режется TLS-фильтром: TCP открывается, handshake — нет. hostfakesplit такой
+# фильтр НЕ пробивает (проверено: api=000), а fake ClientHello с белым SNI +
+# multidisorder — пробивает (405 за доли секунды). Поэтому:
+#   1) если текущий YTApi уже работает — не трогаем (лишние рестарты и риск);
+#   2) иначе перебираем стратегии, начиная с fake-SNI-приёма;
+#   3) если ни одна не подошла — возвращаем прежний YTApi, а не оставляем
+#      заведомо сломанный профиль (именно из-за этого «на ПК работает,
+#      на телефоне нет» после эволюции).
 cmd_fix_ytapi() {
+    local deep="${1:-}"
     local hl_dir=/etc/zapret2wizard/ipset
     local hl="$hl_dir/zapret_hosts_ytapi.txt"
     local main_sec="BlockcheckW_YouTube"
-    printf 'youtubei.googleapis.com\n' > "$hl" 2>/dev/null || return 1
-    uci -q set zapret2wizard.ytapi_hostlist=hostlist
-    uci -q set zapret2wizard.ytapi_hostlist.path="$hl"
-    uci -q delete zapret2wizard.$main_sec.hostlist_exclude
-    uci -q add_list zapret2wizard.$main_sec.hostlist_exclude=list_hosts_user_exclude
-    _uci_add_list_unique "zapret2wizard.$main_sec.hostlist_exclude" ytapi_hostlist
-    local cand y w
-    # gosuslugi первым: на живом тесте Shorts с ним открывались за ~2.2 c,
-    # а с host=www.google.com — за ~4.3 c (fake-пакет дольше держит API).
-    for cand in \
-        'hostfakesplit:host=gosuslugi.ru:tcp_ts=-600000' \
-        'hostfakesplit:host=www.google.com:tcp_ts=-600000' \
-        'multisplit:pos=1,sniext+1:seqovl=1'; do
+    local prev_script prev_enabled
+    prev_script=$(uci -q get zapret2wizard.YTApi.script 2>/dev/null)
+    prev_enabled=$(uci -q get zapret2wizard.YTApi.enabled 2>/dev/null)
+
+    _ytapi_probe() {
+        # Годность проверяем тем же путём, что и пользовательская проверка:
+        # одна проба может соврать на волне DPI, поэтому две попытки.
+        local r i
+        for i in 1 2; do
+            r=$(cmd_test preset_youtubei 2>/dev/null | tail -n 1)
+            case "$r" in *'"all_ok":true'*) return 0 ;; esac
+            sleep 2
+        done
+        return 1
+    }
+    _ytapi_write() {
         uci -q set zapret2wizard.YTApi=strategy
         uci -q set zapret2wizard.YTApi.enabled=1
         uci -q set zapret2wizard.YTApi.port=443
@@ -4825,49 +4873,89 @@ cmd_fix_ytapi() {
         uci -q add_list zapret2wizard.YTApi.filter_l3=ipv4
         uci -q add_list zapret2wizard.YTApi.filter_l7=tls
         _uci_add_list_unique "zapret2wizard.YTApi.hostlist" ytapi_hostlist
-        _uci_add_list_unique zapret2wizard.YTApi.hostlist_exclude list_hosts_user_exclude
-        uci -q set zapret2wizard.YTApi.script="--lua-desync=$cand"
+        _uci_add_list_unique "zapret2wizard.YTApi.hostlist_exclude" list_hosts_user_exclude
+        uci -q set zapret2wizard.YTApi.script="$1"
         uci -q commit zapret2wizard
         /usr/share/zapret2wizard/uci2config >/dev/null 2>&1 || true
         /etc/init.d/zapret2wizard restart >/dev/null 2>&1 || true
         wait_dpi_ready 15
-        # Проверять API с роутера нельзя: локальный curl не проходит через
-        # postrouting/NFQUEUE и всегда даёт 000. Проверяем клиентский путь
-        # через временный netns, как реальный телефон.
-        local _api="" _www="" y=000 w=000
-        for _try in 1 2 3; do
-            _api=$(client_probe_netns youtubei.googleapis.com --allow-4xx 2>/dev/null | tail -1)
-            _www=$(client_probe_netns www.youtube.com 2>/dev/null | tail -1)
-            case "$_api" in *'"ok":true'*) break ;; esac
-            sleep 2
-        done
-        case "$_api" in
-            *'"ok":true'*) ;;
-            *) _api=$(client_probe_output youtubei.googleapis.com 2>/dev/null | tail -1) ;;
-        esac
-        case "$_www" in
-            *'"ok":true'*) ;;
-            *) _www=$(client_probe_output www.youtube.com 2>/dev/null | tail -1) ;;
-        esac
-        y=$(printf '%s' "$_api" | sed -n 's/.*"code":"\([0-9]*\)".*/\1/p')
-        w=$(printf '%s' "$_www" | sed -n 's/.*"code":"\([0-9]*\)".*/\1/p')
-        [ -n "$y" ] || y=000
-        [ -n "$w" ] || w=000
-        logger -t zapret2wizard "YTApi $cand: api=$y www=$w (netns)"
-        case "$_api" in
-            *'"ok":true'*)
-                echo "{\"success\":true,\"api\":\"$y\",\"www\":\"$w\",\"mode\":\"netns\",\"strategy\":\"$cand\"}"
-                return 0 ;;
-        esac
+    }
+    _ytapi_json() {
+        lua - "$1" "$2" <<'YTJSON' 2>/dev/null
+local j = require("luci.jsonc")
+local ok = arg[1] == "1"
+local o = { success = ok }
+if arg[2] and arg[2] ~= "" then o.strategy = arg[2] end
+if not ok then o.error = "youtubei остался закрыт" end
+print(j.stringify(o))
+YTJSON
+    }
+
+    printf 'youtubei.googleapis.com\n' > "$hl" 2>/dev/null || return 1
+    uci -q set zapret2wizard.ytapi_hostlist=hostlist
+    uci -q set zapret2wizard.ytapi_hostlist.path="$hl"
+    uci -q delete zapret2wizard.$main_sec.hostlist_exclude
+    uci -q add_list zapret2wizard.$main_sec.hostlist_exclude=list_hosts_user_exclude
+    _uci_add_list_unique "zapret2wizard.$main_sec.hostlist_exclude" ytapi_hostlist
+
+    # Уже работает — не трогаем (важно: не переписывать рабочую YTApi).
+    if [ "$prev_enabled" = "1" ] && [ -n "$prev_script" ] && _ytapi_probe; then
+        _ytapi_json 1 "$prev_script"
+        return 0
+    fi
+
+    local forum="--out-range=-s34228 --payload=tls_client_hello --lua-desync=multidisorder:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1 --lua-desync=fake:blob=blob_tls_clienthello_www_google_com:optional:tcp_seq=-10000:tcp_ack=-66000:badsum:tls_mod=rnd,dupsid,sni=rzd.ru:repeat=4"
+    local main_script cand tried=0
+    main_script=$(uci -q get zapret2wizard.$main_sec.script 2>/dev/null)
+    for cand in "$forum" "$main_script" \
+        '--payload=tls_client_hello --lua-desync=hostfakesplit:host=gosuslugi.ru:tcp_ts=-600000' \
+        '--payload=tls_client_hello --lua-desync=hostfakesplit:host=www.google.com:tcp_ts=-600000' \
+        '--payload=tls_client_hello --lua-desync=multisplit:pos=1,sniext+1:seqovl=1'; do
+        [ -n "$cand" ] || continue
+        tried=$((tried + 1))
+        echo "[blockcheckw-helper] YTApi: пробую кандидата $tried" >> "$LOG_FILE" 2>/dev/null || true
+        _ytapi_write "$cand"
+        if _ytapi_probe; then
+            logger -t zapret2wizard "YTApi: подобрана стратегия $cand"
+            _ytapi_json 1 "$cand"
+            return 0
+        fi
     done
-    # Не смогли подобрать — снимаем исключение, чтобы youtubei снова
-    # обрабатывался основной стратегией, а не оставался без обхода.
-    uci -q del_list zapret2wizard.$main_sec.hostlist_exclude=ytapi_hostlist 2>/dev/null || true
-    uci -q set zapret2wizard.YTApi.enabled=0
-    uci -q commit zapret2wizard
-    /usr/share/zapret2wizard/uci2config >/dev/null 2>&1 || true
-    /etc/init.d/zapret2wizard restart >/dev/null 2>&1 || true
-    echo '{"success":false,"error":"youtubei остался закрыт"}'
+
+    # Если быстрые кандидаты не подошли — при --deep запускаем точечный
+    # подбор (scan) для youtubei: волны DPI меняют рабочий приём, а скан
+    # перебирает весь корпус техник и сам применяет победителя.
+    if [ "$deep" = "--deep" ]; then
+        local deep_stamp=/tmp/bcw_ytapi_deep.stamp
+        local _now=$(date +%s 2>/dev/null || echo 0)
+        local _prev=$(cat "$deep_stamp" 2>/dev/null || echo 0)
+        if [ $(( _now - _prev )) -gt 600 ]; then
+            echo "[blockcheckw-helper] YTApi: быстрые кандидаты не подошли — точечный подбор (scan)" >> "$LOG_FILE" 2>/dev/null || true
+            echo "$_now" > "$deep_stamp" 2>/dev/null || true
+            timeout 420 /usr/bin/blockcheckw-helper start --target preset_youtubei --auto-apply 1 --workers 2 >>"$LOG_FILE" 2>&1 || true
+            if _ytapi_probe; then
+                local found
+                found=$(uci -q get zapret2wizard.YTApi.script 2>/dev/null)
+                logger -t zapret2wizard "YTApi: подобрана стратегия сканом: $found"
+                _ytapi_json 1 "$found"
+                return 0
+            fi
+        fi
+    fi
+
+    # Ничего не подошло: восстанавливаем прежний профиль (если был) —
+    # не оставляем заведомо сломанную конфигурацию.
+    if [ -n "$prev_script" ]; then
+        _ytapi_write "$prev_script"
+    else
+        uci -q del_list zapret2wizard.$main_sec.hostlist_exclude=ytapi_hostlist 2>/dev/null || true
+        uci -q set zapret2wizard.YTApi.enabled=0
+        uci -q commit zapret2wizard
+        /usr/share/zapret2wizard/uci2config >/dev/null 2>&1 || true
+        /etc/init.d/zapret2wizard restart >/dev/null 2>&1 || true
+        wait_dpi_ready 15
+    fi
+    _ytapi_json 0 ""
     return 1
 }
 
@@ -6237,15 +6325,28 @@ cmd_evolve() (
     corpus="$report_run/corpus.txt"
     scan="$report_run/scan.json"
     verified="$report_run/verified.txt"
-    echo $$ > /var/run/bcw_scan.lock/pid 2>/dev/null || true
-    echo $$ > /tmp/bcw_evolve.running 2>/dev/null || true
-    trap 'rm -f /tmp/bcw_evolve.running; rm -rf "$report_run" /var/run/bcw_scan.lock; _svc_running || _svc_start_bg' EXIT
+    echo $ > /var/run/bcw_scan.lock/pid 2>/dev/null || true
+    echo $ > /tmp/bcw_evolve.running 2>/dev/null || true
+    trap 'rm -f /tmp/bcw_evolve.running /tmp/bcw_evolve.progress /tmp/bcw_evolve.hb.* /tmp/bcw_evolve_cfg.* 2>/dev/null; rm -rf "$report_run" /var/run/bcw_scan.lock; _svc_running || _svc_start_bg' EXIT
     trap 'exit 1' INT TERM
 
-    echo "=== Эволюционный подбор ==="
+    # Прогресс для UI и читаемый журнал: [HH:MM:SS] этапы, счётчик кандидатов,
+    # ETA и heartbeat, чтобы было видно, что прогон не завис.
+    local evo_t0=$(date +%s 2>/dev/null || echo 0)
+    local evo_prog="/tmp/bcw_evolve.progress"
+    local evo_tag=$(date +%s 2>/dev/null || echo 0)
+    local evo_cfg_snap="/tmp/bcw_evolve_cfg.$evo_tag"
+    _evo_ts() { date '+%H:%M:%S' 2>/dev/null || echo '--:--:--'; }
+    _evo_phase() { echo "[$(_evo_ts)] == $* =="; printf 'phase=%s\ndone=\ntotal=\n' "$*" > "$evo_prog" 2>/dev/null || true; }
+    _evo_track() { printf 'phase=%s\ndone=%s\ntotal=%s\n' "${1:-}" "${2:-}" "${3:-}" > "$evo_prog" 2>/dev/null || true; }
+
+    echo "=== Эволюционный подбор · $(date '+%d.%m %H:%M:%S') ==="
     echo "  провайдер:  $provider"
     echo "  домен:      $domain"
     echo "  кандидатов: $count, проверка до $verify_n, тестов на стабильность: $tests"
+    echo "  Фоновый прогон: страницу закрывать не нужно, журнал обновляется каждые 4 с."
+    echo "  Длительность: генерация и TLS-проба ~1–3 мин, затем проверка ~1–2 мин на кандидата."
+    _evo_phase "генерация кандидатов (память + подсев последнего поиска)"
 
     if _svc_running; then
         _svc_stop
@@ -6334,7 +6435,8 @@ EVOSEED
     local evo_qnum=$(pick_scan_qnum)
     local evo_home="$report_run/home"
     mkdir "$evo_home" || return 1
-    echo "  проба (scan), очередь $evo_qnum..."
+    echo "  кандидатов в корпусе: $(wc -l < "$corpus" 2>/dev/null || echo "?")"
+    _evo_phase "TLS-проба кандидатов (scan, очередь $evo_qnum) — обычно 1–2 мин"
     BCW_REPORT_DIR="$report_run/evolve" HOME="$evo_home" /usr/bin/blockcheckw --qnum "$evo_qnum" -w 2 scan -d "$domain" -p tls12,tls13 --dns "$(scan_dns_mode "$domain")" \
         --from-file "$corpus" -o "$scan" --auto --timeout 600 >"$report_run/scan.log" 2>&1
     local scan_rc=$?
@@ -6342,7 +6444,7 @@ EVOSEED
     # scan пишет либо JSON, либо текстовый список "--payload=..." — считаем оба
     local scan_found=$(grep -c '^--' "$scan" 2>/dev/null)
     [ "${scan_found:-0}" -eq 0 ] && scan_found=$(grep -o '"args"' "$scan" 2>/dev/null | wc -l)
-    echo "  стратегий прошло пробу: $scan_found"
+    echo "[$(_evo_ts)] проба готова: стратегий прошло $scan_found"
     if [ "$scan_found" -eq 0 ]; then
         echo "  ВНИМАНИЕ: проба не нашла рабочих кандидатов — память не пополнится"
     fi
@@ -6357,23 +6459,70 @@ EVOSEED
         [ "$verify_n_eff" -gt 12 ] && verify_n_eff=12
         [ "$verify_n_eff" -lt 1 ] && verify_n_eff=1
     fi
-    echo "  проверка кандидатов: $verify_n_eff"
+    echo "[$(_evo_ts)] проверка кандидатов: $verify_n_eff (применение + тест + объёмный гейт по очереди)"
+    _evo_phase "проверка кандидатов 0/$verify_n_eff"
 
     local shortlist
     shortlist=$(lua "$evo" shortlist "$corpus.candidates" "$scan" "$verify_n_eff" 2>/dev/null)
 
     local verified_lines="" applied=0 stable_count=0 best_args="" best_bytes=0
+    local tried_total=0 tried_done=0
+    [ -n "$shortlist" ] && tried_total=$(printf '%s\n' "$shortlist" | grep -c '|')
+    [ "${tried_total:-0}" -gt 0 ] || tried_total=$verify_n_eff
+    # Утилиты прогона вынесены в функции: так их можно подменить в офлайн-тестах.
+    _timed_apply() {
+        local _to="$1"; shift
+        if [ "${BCW_EVOLVE_NO_TIMEOUT:-}" = "1" ]; then cmd_apply "$@"; return $?; fi
+        timeout "$_to" /usr/bin/blockcheckw-helper apply "$@" 2>/dev/null
+    }
+    _timed_test() {
+        local _to="$1"; shift
+        if [ "${BCW_EVOLVE_NO_TIMEOUT:-}" = "1" ]; then cmd_test "$@"; return $?; fi
+        timeout "$_to" /usr/bin/blockcheckw-helper test "$@" 2>/dev/null
+    }
+    # снимок рабочего конфига: кандидат с зависшей проверкой не должен
+    # оставлять систему с недоприменённой стратегией
+    _evo_cfg_snapshot() { cp -f "/etc/config/$(_strategy_pkg)" "$evo_cfg_snap" 2>/dev/null || true; }
+    _evo_cfg_snapshot
+    local apply_timeout=300
     while IFS='|' read -r id args; do
         [ -n "$id" ] || continue
         [ -n "$args" ] || continue
         printf '%s\n' "$args" > "$report_run/try.txt"
+        tried_done=$((tried_done + 1))
+        local cand_t0=$(date +%s 2>/dev/null || echo 0)
+        if [ "$tried_done" -le "$tried_total" ]; then
+            _evo_track "проверка кандидата $tried_done/$tried_total" "$tried_done" "$tried_total"
+        fi
+        echo "[$(_evo_ts)] [$tried_done/$tried_total] проверяю: $(printf '%s' "$args" | cut -c1-110)"
+        : > /tmp/bcw_evolve.hb.$evo_tag.$tried_done
+        ( while [ -f /tmp/bcw_evolve.hb.$evo_tag.$tried_done ]; do sleep 20; [ -f /tmp/bcw_evolve.hb.$evo_tag.$tried_done ] && echo "[$(_evo_ts)] … кандидат $tried_done/$tried_total ещё проверяется ($(( $(date +%s) - cand_t0 ))с)"; done ) &
+        local hb_pid=$!
         local res okruns=0 minbytes=0 t=0 apply_rc
-        res=$(cmd_apply --target "$target" --file "$report_run/try.txt" 2>/dev/null)
+        res=$(_timed_apply "$apply_timeout" --target "$target" --file "$report_run/try.txt")
         apply_rc=$?
+        rm -f /tmp/bcw_evolve.hb.$evo_tag.$tried_done
+        kill "$hb_pid" 2>/dev/null
+        wait "$hb_pid" 2>/dev/null
+        if [ "$apply_rc" = "124" ] || [ "$apply_rc" = "143" ]; then
+            # Проверка кандидата не уложилась в лимит: не вешаем весь прогон.
+            # Возвращаем снимок рабочего конфига и идём дальше.
+            echo "[$(_evo_ts)] ⏱ кандидат $tried_done/$tried_total не уложился в $apply_timeout с — пропускаю, восстанавливаю конфиг"
+            if [ -s "$evo_cfg_snap" ]; then
+                cp -f "$evo_cfg_snap" "/etc/config/$(_strategy_pkg)" 2>/dev/null || true
+                uci -q commit "$(_strategy_pkg)" 2>/dev/null || true
+                /usr/share/zapret2wizard/uci2config >/dev/null 2>&1 || true
+            fi
+            ( /etc/init.d/zapret2wizard restart >/dev/null 2>&1 & )
+            wait_dpi_ready 20
+            verified_lines="${verified_lines}${id}|0|0|0|0
+"
+            continue
+        fi
         if [ "$apply_rc" != 0 ] || ! bcw_apply_accepted "$res" "$target" "$args"; then
             verified_lines="${verified_lines}${id}|0|0|0|0
 "
-            echo "  --   применение не подтверждено · $args"
+            echo "[$(_evo_ts)] --   применение не подтверждено за $(( $(date +%s) - cand_t0 ))с · $args"
             continue
         fi
         local b
@@ -6384,7 +6533,7 @@ EVOSEED
         while [ "$t" -lt "$tests" ]; do
             t=$((t + 1))
             local r s
-            r=$(cmd_test "$target" "" 2>/dev/null | tail -n 1)
+            r=$(_timed_test 240 "$target" "" | tail -n 1)
             s=$(printf '%s' "$r" | grep -o '"size_bytes":[0-9]*' | head -n 1 | cut -d: -f2)
             if printf '%s' "$r" | grep -q '"all_ok":true'; then
                 okruns=$((okruns + 1))
@@ -6401,7 +6550,7 @@ EVOSEED
         verified_lines="${verified_lines}${id}|${stable}|${minbytes}|${tests}|${okruns}
 "
         if [ "$stable" = "1" ]; then
-            echo "  OK   ${okruns}/${tests} · ${minbytes} Б · $args"
+            echo "[$(_evo_ts)] OK   ${okruns}/${tests} · ${minbytes} Б за $(( $(date +%s) - cand_t0 ))с · $args"
             # запоминаем лучший стабильный, но продолжаем собирать данные
             if [ "$applied" = "0" ] || [ "$minbytes" -gt "${best_bytes:-0}" ]; then
                 applied=1
@@ -6409,7 +6558,7 @@ EVOSEED
                 best_args="$args"
             fi
         else
-            echo "  --   ${okruns}/${tests} · ${minbytes} Б · $args"
+            echo "[$(_evo_ts)] --   ${okruns}/${tests} · ${minbytes} Б за $(( $(date +%s) - cand_t0 ))с · $args"
         fi
     done <<EVOLIST
 $shortlist
@@ -6421,7 +6570,7 @@ EVOLIST
     if [ "$applied" = "1" ] && [ -n "$best_args" ]; then
         printf '%s\n' "$best_args" > "$report_run/best.txt"
         local best_res best_rc
-        best_res=$(cmd_apply --target "$target" --file "$report_run/best.txt" 2>/dev/null)
+        best_res=$(_timed_apply "$apply_timeout" --target "$target" --file "$report_run/best.txt")
         best_rc=$?
         rm -f "$report_run/best.txt"
         if [ "$best_rc" != 0 ] || ! bcw_apply_accepted "$best_res" "$target" "$best_args"; then
@@ -6452,7 +6601,22 @@ EVOLIST
     _svc_start_bg
     rm -f /tmp/bcw_scan_paused
 
+    # API приложения YouTube (youtubei) — отдельный SNI и отдельный профиль:
+    # после прогона один раз проверяем/чиним, чтобы «на ПК работает,
+    # на телефоне нет» не осталось незамеченным.
+    if [ "$target" = "preset_youtube" ]; then
+        local _ytapi_fix
+        _ytapi_fix=$(cmd_fix_ytapi --deep 2>/dev/null | tail -n 1)
+        case "$_ytapi_fix" in
+            *'"success":true'*) echo "[$(_evo_ts)] API YouTube (youtubei): в порядке" ;;
+            *'"success":false'*) echo "[$(_evo_ts)] API YouTube (youtubei): открыть не удалось — видео может идти, приложение YouTube — нет" ;;
+        esac
+    fi
+
+    local _evo_sec=$(( $(date +%s) - evo_t0 ))
+    _evo_phase "готово"
     echo "---"
+    echo "Итог: прошло $(( _evo_sec / 60 ))м $(( _evo_sec % 60 ))с; проверено кандидатов $tried_done/$tried_total; стабильных $stable_count."
     if [ "$applied" = "1" ]; then
         echo "Применена новая стратегия. Память: $genomes"
     else
@@ -7795,7 +7959,7 @@ kmods_modprobe) cmd_kmods_modprobe ;;
 kmods_install_bg) cmd_kmods_install_bg ;;
 kmods_status) cmd_kmods_status ;;
 kmods_resolve) shift; _kmods_fetch_official "$@" dry ;;
-fix_ytapi) cmd_fix_ytapi ;;
+fix_ytapi) shift; cmd_fix_ytapi "$@" ;;
 ensure_ytapi) cmd_ensure_ytapi ;;
 ensure_lua) cmd_ensure_lua ;;
 hostlists_merge) cmd_hostlists_merge ;;
