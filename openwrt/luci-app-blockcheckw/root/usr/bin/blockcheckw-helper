@@ -5951,10 +5951,10 @@ cmd_catalog_fetch() {
 
     if [ ! -s "$tmp" ]; then
         local asns=""
-        local idx="/tmp/bcw_catalog_index.$$.json"
+        local idx="/tmp/bcw_catalog_index.json"
         curl -fsSL -k -m 20 "https://raw.githubusercontent.com/prostoy23rus/zapret2wizard/main/genomes/index.json" -o "$idx" 2>/dev/null || true
         if [ -s "$idx" ]; then
-            asns=$(lua -e 'local j=require("luci.jsonc"); local f=io.open(arg[1],"r"); if not f then return end; local ok,d=pcall(j.parse,f:read("*a")); f:close(); if not ok or not d or not d.providers then return end; local t={}; for k in pairs(d.providers) do t[#t+1]=k end; table.sort(t); print(table.concat(t, ","))' "$idx" 2>/dev/null)
+            asns=$(lua -e 'local j=require("luci.jsonc"); local f=io.open("/tmp/bcw_catalog_index.json","r"); if not f then return end; local ok,d=pcall(j.parse,f:read("*a")); f:close(); if not ok or not d or not d.providers then return end; local t={}; for k in pairs(d.providers) do t[#t+1]=k end; table.sort(t); print(table.concat(t, ","))' 2>/dev/null)
         fi
         rm -f "$idx"
         echo "{\"ok\":false,\"error\":\"в каталоге пока нет геномов для ${asn}\",\"asn\":\"${asn}\",\"available\":\"${asns}\"}"
