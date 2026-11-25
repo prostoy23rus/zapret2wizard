@@ -1,12 +1,18 @@
 {
   "schema": 1,
-  "updated_at": 1794184179,
+  "updated_at": 1795639313,
   "providers": {
     "AS25490": {
       "file": "AS25490.json",
       "provider": "auto_sni_blocked",
       "count": 3,
       "exported_at": 1794184178
+    },
+    "AS12389": {
+      "file": "AS12389.json",
+      "provider": "ASN_AS12389_sni_blocked",
+      "count": 13,
+      "exported_at": 1795639313
     }
   }
 }

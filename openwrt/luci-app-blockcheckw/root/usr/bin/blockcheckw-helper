@@ -5950,7 +5950,14 @@ cmd_catalog_fetch() {
     curl -fsSL -k -m 30 "$url" -o "$tmp" 2>/dev/null || wget -q -O "$tmp" "$url" 2>/dev/null || true
 
     if [ ! -s "$tmp" ]; then
-        echo "{\"ok\":false,\"error\":\"в каталоге пока нет геномов для ${asn}\",\"asn\":\"${asn}\"}"
+        local asns=""
+        local idx="/tmp/bcw_catalog_index.$$.json"
+        curl -fsSL -k -m 20 "https://raw.githubusercontent.com/prostoy23rus/zapret2wizard/main/genomes/index.json" -o "$idx" 2>/dev/null || true
+        if [ -s "$idx" ]; then
+            asns=$(lua -e 'local j=require("luci.jsonc"); local f=io.open(arg[1],"r"); if not f then return end; local ok,d=pcall(j.parse,f:read("*a")); f:close(); if not ok or not d or not d.providers then return end; local t={}; for k in pairs(d.providers) do t[#t+1]=k end; table.sort(t); print(table.concat(t, ","))' "$idx" 2>/dev/null)
+        fi
+        rm -f "$idx"
+        echo "{\"ok\":false,\"error\":\"в каталоге пока нет геномов для ${asn}\",\"asn\":\"${asn}\",\"available\":\"${asns}\"}"
         rm -f "$tmp"
         return 1
     fi
@@ -5976,6 +5983,41 @@ cmd_catalog_export() {
     lua "$evo" export "$genomes" "$provider" 1 "$asn" > "$out" 2>/dev/null
     local count=$(grep -o '"count":[0-9]*' "$out" | head -n 1 | cut -d: -f2)
     echo "{\"ok\":true,\"asn\":\"$asn\",\"count\":${count:-0},\"file\":\"$out\",\"target\":\"genomes/${asn}.json\"}"
+}
+
+# issue #12: публикация геномов в общий каталог. Готовит файл формата
+# genomes/AS<ASN>.json + запись для index.json, отдаёт содержимое в UI.
+cmd_catalog_publish() {
+    local asn=$(cmd_asn)
+    [ -n "$asn" ] || asn="AS0"
+    local genomes="/etc/zapret2wizard/genomes.json"
+    local evo="/usr/share/zapret2wizard/evolve.lua"
+    local provider=$(evolve_provider)
+    [ -n "$provider" ] || provider="default"
+    local out="/tmp/bcw_catalog_publish.json"
+    lua "$evo" export "$genomes" "$provider" 1 "$asn" > "$out" 2>/dev/null
+    if [ ! -s "$out" ]; then
+        echo '{"ok":false,"error":"не удалось подготовить файл (нет геномов?)"}'
+        return 1
+    fi
+    local sha=""
+    command -v sha256sum >/dev/null 2>&1 && sha=$(sha256sum "$out" 2>/dev/null | cut -d' ' -f1)
+    lua - "$out" "$asn" "$provider" "$sha" <<'LUA'
+local j = require("luci.jsonc")
+local f = io.open(arg[1], "r")
+if not f then print(j.stringify({ok = false, error = "нет файла"})); return end
+local content = f:read("*a") or ""
+f:close()
+local ok, d = pcall(j.parse, content)
+if not ok or not d then print(j.stringify({ok = false, error = "файл не разобрался как JSON"})); return end
+local asn = arg[2]
+local provider = arg[3]
+local sha = arg[4]
+local target = "genomes/" .. asn .. ".json"
+local idx = { file = target, provider = provider, count = d.count or 0, exported_at = d.exported_at or os.time() }
+print(j.stringify({ ok = true, asn = asn, count = d.count or 0, target = target,
+    sha256 = sha, index_entry = idx, content = content, provider = provider }))
+LUA
 }
 
 # Дневной триггер: если сервис деградировал два замера подряд — эволюция.
@@ -6310,6 +6352,9 @@ cmd_evolve_status() {
 # Запуск эволюции в фоне (для кнопки в LuCI).
 cmd_evolve_start() {
     local target="${1:-preset_youtube}"
+    local confirm="${2:-0}"
+    case "$confirm" in 1) ;; *) confirm=0 ;; esac
+    rm -f /tmp/bcw_evolve_suggestion.json 2>/dev/null || true
     if [ -f /tmp/bcw_evolve.running ]; then
         local pid=$(cat /tmp/bcw_evolve.running 2>/dev/null)
         if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
@@ -6318,9 +6363,36 @@ cmd_evolve_start() {
         fi
         rm -f /tmp/bcw_evolve.running
     fi
-    ( /usr/bin/blockcheckw-helper evolve --target "$target" --count 12 --verify 0 --tests 3 --sleep 2 >/tmp/bcw_evolve.log 2>&1 & ) || true
+    ( /usr/bin/blockcheckw-helper evolve --target "$target" --count 12 --verify 0 --tests 3 --sleep 2 --confirm "$confirm" >/tmp/bcw_evolve.log 2>&1 & ) || true
     sleep 1
-    echo '{"success":true,"target":"'"$target"'"}'
+    echo '{"success":true,"target":"'"$target"'","confirm":'"$confirm"'}'
+}
+
+# issue #12: предложение из эволюции (режим «спросить перед применением»).
+cmd_evolve_suggestion() {
+    if [ -s /tmp/bcw_evolve_suggestion.json ]; then
+        cat /tmp/bcw_evolve_suggestion.json
+    else
+        echo '{"exists":false}'
+    fi
+}
+
+cmd_evolve_suggestion_clear() {
+    rm -f /tmp/bcw_evolve_suggestion.json 2>/dev/null || true
+    echo '{"ok":true,"cleared":true}'
+}
+
+cmd_evolve_suggestion_apply() {
+    local f="/tmp/bcw_evolve_suggestion.json"
+    [ -s "$f" ] || { echo '{"success":false,"error":"нет предложения"} '; return 1; }
+    local target args
+    target=$(lua -e 'local j=require("luci.jsonc"); local f=io.open("/tmp/bcw_evolve_suggestion.json","r"); if not f then return end; local ok,d=pcall(j.parse,f:read("*a")); f:close(); if ok and d then print(d.target or "") end' 2>/dev/null)
+    args=$(lua -e 'local j=require("luci.jsonc"); local f=io.open("/tmp/bcw_evolve_suggestion.json","r"); if not f then return end; local ok,d=pcall(j.parse,f:read("*a")); f:close(); if ok and d then print(d.args or "") end' 2>/dev/null)
+    if [ -z "$target" ] || [ -z "$args" ]; then
+        echo '{"success":false,"error":"предложение повреждено"}'; return 1
+    fi
+    rm -f "$f" 2>/dev/null || true
+    cmd_apply_bg --target "$target" --script "$args"
 }
 
 # Ночное самообучение: один прогон в сутки, цель выбирается по дню.
@@ -6511,7 +6583,7 @@ evolve_provider() {
 }
 
 cmd_evolve() (
-    local target="preset_youtube" count=16 verify_n=0 tests=3 pause=2
+    local target="preset_youtube" count=16 verify_n=0 tests=3 pause=2 confirm=0
     while [ "$#" -gt 0 ]; do
         case "$1" in
             --target) target="$2"; shift 2 ;;
@@ -6519,9 +6591,11 @@ cmd_evolve() (
             --verify) verify_n="$2"; shift 2 ;;
             --tests) tests="$2"; shift 2 ;;
             --sleep) pause="$2"; shift 2 ;;
+            --confirm) confirm="$2"; shift 2 ;;
             *) shift ;;
         esac
     done
+    case "$confirm" in 1) ;; *) confirm=0 ;; esac
 
     local domain="www.youtube.com"
     case "$target" in
@@ -6570,6 +6644,7 @@ cmd_evolve() (
     local evo_tag=$(date +%s 2>/dev/null || echo 0)
     local evo_cfg_snap="/tmp/bcw_evolve_cfg.$evo_tag"
     _evo_ts() { date '+%H:%M:%S' 2>/dev/null || echo '--:--:--'; }
+    rm -f /tmp/bcw_evolve_suggestion.json 2>/dev/null || true
     _evo_phase() { echo "[$(_evo_ts)] == $* =="; printf 'phase=%s\ndone=\ntotal=\n' "$*" > "$evo_prog" 2>/dev/null || true; }
     _evo_track() { printf 'phase=%s\ndone=%s\ntotal=%s\n' "${1:-}" "${2:-}" "${3:-}" > "$evo_prog" 2>/dev/null || true; }
 
@@ -6802,18 +6877,38 @@ EVOLIST
 
     # применяем лучший стабильный кандидат (если он не последний применённый)
     if [ "$applied" = "1" ] && [ -n "$best_args" ]; then
-        printf '%s\n' "$best_args" > "$report_run/best.txt"
-        local best_res best_rc
-        best_res=$(_timed_apply "$apply_timeout" --target "$target" --file "$report_run/best.txt")
-        best_rc=$?
-        rm -f "$report_run/best.txt"
-        if [ "$best_rc" != 0 ] || ! bcw_apply_accepted "$best_res" "$target" "$best_args"; then
-            applied=0
-            best_args=""
-            echo "  ОШИБКА: повторное применение победителя не подтверждено — память не обновлена"
-            _svc_start_bg
-            rm -f /tmp/bcw_scan_paused
-            return 1
+        if [ "$confirm" = "1" ]; then
+            # issue #12: режим «спросить перед применением». Кандидаты
+            # временно применялись при проверке — возвращаем рабочую
+            # конфигурацию прогона и сохраняем предложение для UI.
+            if [ -s "$evo_cfg_snap" ]; then
+                cp -f "$evo_cfg_snap" "/etc/config/$(_strategy_pkg)" 2>/dev/null || true
+                uci -q commit "$(_strategy_pkg)" 2>/dev/null || true
+                /usr/share/zapret2wizard/uci2config >/dev/null 2>&1 || true
+            fi
+            ( /etc/init.d/zapret2wizard restart >/dev/null 2>&1 & )
+            wait_dpi_ready 20
+            lua - "$target" "$best_args" "$best_bytes" "$stable_count" "$tried_total" <<'LUA' > /tmp/bcw_evolve_suggestion.json 2>/dev/null
+local j = require("luci.jsonc")
+local function h(s) local x = 5381; for i = 1, #s do x = (x * 31 + s:byte(i)) % 2147483647 end; return string.format("%08x", math.floor(x)) end
+print(j.stringify({exists = true, target = arg[1], args = arg[2], bytes = tonumber(arg[3]) or 0,
+    stable = tonumber(arg[4]) or 0, checked = tonumber(arg[5]) or 0, ts = os.time(), id = h(arg[2] or "")}))
+LUA
+            echo "[$(_evo_ts)] найдена стратегия — ожидает подтверждения (применение отложено)"
+        else
+            printf '%s\n' "$best_args" > "$report_run/best.txt"
+            local best_res best_rc
+            best_res=$(_timed_apply "$apply_timeout" --target "$target" --file "$report_run/best.txt")
+            best_rc=$?
+            rm -f "$report_run/best.txt"
+            if [ "$best_rc" != 0 ] || ! bcw_apply_accepted "$best_res" "$target" "$best_args"; then
+                applied=0
+                best_args=""
+                echo "  ОШИБКА: повторное применение победителя не подтверждено — память не обновлена"
+                _svc_start_bg
+                rm -f /tmp/bcw_scan_paused
+                return 1
+            fi
         fi
     fi
 
@@ -6851,7 +6946,10 @@ EVOLIST
     _evo_phase "готово"
     echo "---"
     echo "Итог: прошло $(( _evo_sec / 60 ))м $(( _evo_sec % 60 ))с; проверено кандидатов $tried_done/$tried_total; стабильных $stable_count."
-    if [ "$applied" = "1" ]; then
+    if [ "$applied" = "1" ] && [ "$confirm" = "1" ] && [ -s /tmp/bcw_evolve_suggestion.json ]; then
+        _evo_phase "ожидает подтверждения"
+        echo "Найдена стратегия — ждёт подтверждения в панели (применить или оставить текущую). Память: $genomes"
+    elif [ "$applied" = "1" ]; then
         echo "Применена новая стратегия. Память: $genomes"
     else
         echo "Рабочих кандидатов не найдено. Память обновлена."
@@ -8233,10 +8331,14 @@ optimize_dns) cmd_optimize_dns ;;
     evolve) shift; cmd_evolve "$@" ;;
     evolve_status) cmd_evolve_status ;;
     evolve_start) shift; cmd_evolve_start "$@" ;;
+    evolve_suggestion) cmd_evolve_suggestion ;;
+    evolve_suggestion_apply) cmd_evolve_suggestion_apply ;;
+    evolve_suggestion_clear) cmd_evolve_suggestion_clear ;;
     evolve_nightly) cmd_evolve_nightly ;;
     evolve_export) shift; cmd_evolve_export "$@" ;;
     evolve_import) shift; cmd_evolve_import "$@" ;;
     catalog_fetch) shift; cmd_catalog_fetch "$@" ;;
+    catalog_publish) cmd_catalog_publish ;;
     catalog_export) cmd_catalog_export ;;
     health_tick) cmd_health_tick ;;
     clear_logs) cmd_clear_logs ;;

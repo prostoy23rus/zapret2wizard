@@ -9,7 +9,7 @@ var pollInterval = null;
 var logPollInterval = null;
 var currentTarget = 'preset_youtube';
 var currentMode = 'smart';
-var doCircular = true;
+var doCircular = 'auto';
 var autoApply = false;
 var activeScanInProgress = false;
 var activeLogTab = 'scanner';
@@ -1748,31 +1748,44 @@ return view.extend({
 		]);
 		mainLayout.appendChild(targetSectionCard);
 
-		// Circular Checkbox Setting
-		var CIRC_HINT_ON = '🔄 Разрешено: служба сама проверит стабильность (3 прогона). Связку соберёт только если одиночная стратегия сбоит.';
-		var CIRC_HINT_OFF = '⚡ Выключено: применяется одна лучшая стратегия, без резервной ротации.';
+		// Circular: режим связки (issue #12) — авто / принудительно / выкл.
+		var CIRC_HINTS = {
+			auto: '🔄 Авто: служба проверит стабильность (3 прогона) и соберёт связку, только если одиночная стратегия сбоит.',
+			force: '⛓ Принудительно: Circular-связка будет собрана и проверена даже для стабильной одиночной стратегии.',
+			off: '⚡ Выкл: применяется только одна лучшая стратегия, без резервной ротации.'
+		};
+		function circArg() {
+			if (doCircular === 'force') return 'force';
+			if (doCircular === 'off') return '0';
+			return '1';
+		}
+		try {
+			var savedCirc = localStorage.getItem('bcw_circ_mode');
+			if (savedCirc === 'force' || savedCirc === 'off' || savedCirc === 'auto') doCircular = savedCirc;
+		} catch (x) {}
 		var paramCircularHintEl = E('div', {
 			class: 'bcw-param-hint',
 			style: 'margin-top: 4px; font-size: 12px; color: #abb2bf;'
-		}, doCircular ? CIRC_HINT_ON : CIRC_HINT_OFF);
-
-		var chkCircular = makeToggleSwitch(doCircular, function(v) {
-			doCircular = v;
-			if (paramCircularHintEl) {
-				paramCircularHintEl.textContent = v ? CIRC_HINT_ON : CIRC_HINT_OFF;
-			}
-		}, 'Разрешить Circular-связку');
-
-		var circularToggleBox = E('div', {
-			style: 'display: flex; flex-direction: column; gap: 4px; padding: 12px 16px; background: var(--bcw-bg-card-inner); border: 1px solid var(--bcw-border-sub); border-radius: 8px;'
+		}, CIRC_HINTS[doCircular] || CIRC_HINTS.auto);
+		var circModeSel = E('select', {
+			class: 'cbi-input-select',
+			style: 'height: 32px; max-width: 460px;'
 		}, [
-			E('div', {
-				class: 'bcw-chk-wrap',
-				style: 'margin: 0;'
-			}, [
-				chkCircular,
-				E('span', { style: 'font-weight: 600; font-size: 13.5px; color: var(--bcw-text-title);' }, 'Разрешить Circular-связку (служба решит, нужна ли)')
-			]),
+			E('option', { value: 'auto' }, 'Авто — служба решит, нужна ли связка'),
+			E('option', { value: 'force' }, 'Всегда — принудительно Circular'),
+			E('option', { value: 'off' }, 'Выкл — только одиночная стратегия')
+		]);
+		circModeSel.value = doCircular;
+		circModeSel.addEventListener('change', function() {
+			doCircular = this.value;
+			try { localStorage.setItem('bcw_circ_mode', doCircular); } catch (x) {}
+			if (paramCircularHintEl) paramCircularHintEl.textContent = CIRC_HINTS[doCircular] || CIRC_HINTS.auto;
+		});
+		var circularToggleBox = E('div', {
+			style: 'display: flex; flex-direction: column; gap: 6px; padding: 12px 16px; background: var(--bcw-bg-card-inner); border: 1px solid var(--bcw-border-sub); border-radius: 8px;'
+		}, [
+			E('div', { style: 'font-weight: 600; font-size: 13.5px; color: var(--bcw-text-title);' }, 'Circular-связка'),
+			circModeSel,
 			paramCircularHintEl
 		]);
 
@@ -2677,6 +2690,8 @@ return view.extend({
 		// обновлялась при переключении вкладки и после эволюции.
 		var memoryPanelRefresh = null;
 		var lastEvoRunning = false;
+		var evoConfirm = false;
+		var evoSuggestionShown = false;
 
 		var mainTabDefs = [
 			{ id: 'scan', label: '🔍 Сканер', nodes: [targetSectionCard, unifiedScanCard] },
@@ -2934,6 +2949,7 @@ return view.extend({
 			var exportBtn = E('button', { class: 'bcw-btn-secondary', style: 'height: 34px;' }, '⬇ Экспорт геномов');
 			var importBtn = E('button', { class: 'bcw-btn-secondary', style: 'height: 34px;' }, '⬆ Импорт');
 			var catalogBtn = E('button', { class: 'bcw-btn-secondary', style: 'height: 34px;' }, '🌐 Каталог по ASN');
+			var publishBtn = E('button', { class: 'bcw-btn-secondary', style: 'height: 34px;' }, '📤 Опубликовать в каталог');
 			var ytapiBtn = E('button', { class: 'bcw-btn-secondary', style: 'height: 34px;' }, '🩺 Починить API YouTube');
 			ytapiBtn.addEventListener('click', function() {
 				ytapiBtn.disabled = true;
@@ -2994,6 +3010,51 @@ return view.extend({
 				}).catch(function() { catalogBtn.disabled = false; });
 			});
 
+
+			publishBtn.addEventListener('click', function() {
+				publishBtn.disabled = true;
+				fs.exec(HELPER_BIN, ['catalog_publish']).then(function(res) {
+					publishBtn.disabled = false;
+					var out = null;
+					try { out = JSON.parse(String((res && res.stdout) || '{}')); } catch (e) {}
+					if (!out || !out.ok) {
+						ui.addNotification(null, E('p', {}, 'Не удалось подготовить файл каталога: ' + ((out && out.error) || 'ошибка')), 'warning');
+						return;
+					}
+					var ta = E('textarea', {
+						readonly: 'readonly',
+						style: 'width:100%;height:190px;font-family:monospace;font-size:11px;background:#14161a;color:#abb2bf;border:1px solid #383e4a;border-radius:6px;padding:8px;box-sizing:border-box;resize:vertical;'
+					}, out.content || '');
+					var idxObj = {};
+					idxObj[out.asn] = out.index_entry;
+					var idxTa = E('textarea', {
+						readonly: 'readonly',
+						style: 'width:100%;height:90px;font-family:monospace;font-size:11px;background:#14161a;color:#abb2bf;border:1px solid #383e4a;border-radius:6px;padding:8px;box-sizing:border-box;resize:vertical;margin-top:6px;'
+					}, JSON.stringify(idxObj, null, 2));
+					var info = E('div', { style: 'font-size:12px;color:#abb2bf;margin-bottom:8px;line-height:1.5;' },
+						'Файл: ' + out.target + ' · геномов: ' + out.count + (out.sha256 ? (' · sha256: ' + String(out.sha256).slice(0, 16) + '…') : '') +
+						'. Положите его в репозиторий и обновите genomes/index.json:');
+					bcwShowModal('📤 Публикация в каталог (' + out.asn + ')', [
+						info, ta, idxTa,
+						E('div', { style: 'font-size:11.5px;color:#e5c07b;margin-top:8px;line-height:1.5;' },
+							'Автоотправки нет: вы контролируете, что публикуется. Добавьте файл ' + out.target + ' и запись в genomes/index.json в репозиторий (PR) или пришлите файл мейнтейнеру.')
+					], [
+						E('button', { class: 'cbi-button cbi-button-action', click: function() {
+							var blob = new Blob([out.content || ''], { type: 'application/json' });
+							var a = document.createElement('a');
+							a.href = URL.createObjectURL(blob);
+							a.download = out.target.split('/').pop();
+							document.body.appendChild(a);
+							a.click();
+							setTimeout(function() { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+						} }, '⬇ Скачать файл'),
+						E('button', { class: 'cbi-button cbi-button-neutral', click: function() {
+							try { ta.focus(); ta.select(); document.execCommand('copy'); ui.addNotification(null, E('p', {}, 'Скопировано'), 'info'); } catch (e) {}
+						} }, 'Копировать'),
+						E('button', { class: 'cbi-button cbi-button-neutral', click: function() { ui.hideModal(); } }, 'Закрыть')
+					]);
+				}).catch(function() { publishBtn.disabled = false; ui.addNotification(null, E('p', {}, 'Ошибка вызова helper'), 'danger'); });
+			});
 
 			exportBtn.addEventListener('click', function() {
 				fs.exec(HELPER_BIN, ['evolve_export', '1']).then(function(res) {
@@ -3062,8 +3123,11 @@ return view.extend({
 
 			startBtn.addEventListener('click', function() {
 				startBtn.disabled = true;
-				summary.textContent = '⏳ Запускаю эволюцию...';
-				fs.exec(HELPER_BIN, ['evolve_start', targetSel.value]).then(function(res) {
+				evoSuggestionShown = false;
+				summary.textContent = evoConfirm
+					? '⏳ Запускаю эволюцию (спрошу перед применением)...'
+					: '⏳ Запускаю эволюцию...';
+				fs.exec(HELPER_BIN, ['evolve_start', targetSel.value, evoConfirm ? '1' : '0']).then(function(res) {
 					var out = null;
 					try { out = JSON.parse(res.stdout); } catch (e) {}
 					if (out && out.success) {
@@ -3101,7 +3165,7 @@ return view.extend({
 					E('div', { style: 'font-weight: bold; font-size: 15px; color: var(--bcw-text-title);' }, '🧬 Эволюция стратегий'),
 					summary
 				]),
-				E('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;' }, [targetSel, startBtn, histBtn, catalogBtn, exportBtn, importBtn, ytapiBtn])
+				E('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;' }, [targetSel, startBtn, histBtn, catalogBtn, publishBtn, exportBtn, importBtn, ytapiBtn])
 			]));
 			root.appendChild(E('div', { style: 'font-size:12px;color:var(--bcw-text-muted);line-height:1.5;margin-top:8px;' },
 				'Перебирает новые комбинации уже проверенных техник и запоминает, что держится у вашего провайдера. ' +
@@ -3112,6 +3176,24 @@ return view.extend({
 				'⏱ Прогон идёт в фоне: в журнале ниже видны этапы, счётчик «кандидат N/M» и heartbeat каждые ~20 с — ' +
 				'если строки обновляются, процесс жив. Обычно 2–4 мин на кандидата (зависит от числа тестов); если кандидат «висит» дольше 5 мин, ' +
 				'прогон пропустит его и восстановит рабочий конфиг. Страницу закрывать не нужно.'));
+			// issue #12: «спросить перед применением» — после прогона
+			// показываем найденную стратегию и спрашиваем, применять ли её.
+			try { var savedEvoConfirm = localStorage.getItem('bcw_evo_confirm'); evoConfirm = (savedEvoConfirm === '1'); } catch (x) {}
+			var evoConfirmHint = E('div', { class: 'bcw-param-hint', style: 'margin-top: 4px; font-size: 12px; color: #abb2bf;' },
+				evoConfirm ? 'Включено: после прогона покажем найденную стратегию и спросим, применять ли её.' : 'Выключено: лучшая стабильная стратегия применяется автоматически.');
+			var chkEvoConfirm = makeToggleSwitch(evoConfirm, function(v) {
+				evoConfirm = v;
+				try { localStorage.setItem('bcw_evo_confirm', v ? '1' : '0'); } catch (x) {}
+				evoConfirmHint.textContent = v ? 'Включено: после прогона покажем найденную стратегию и спросим, применять ли её.' : 'Выключено: лучшая стабильная стратегия применяется автоматически.';
+			}, 'Спросить перед применением');
+			var evoConfirmBox = E('div', { style: 'display: flex; flex-direction: column; gap: 4px; padding: 10px 14px; background: var(--bcw-bg-card-inner); border: 1px solid var(--bcw-border-sub); border-radius: 8px; margin-top: 10px;' }, [
+				E('div', { class: 'bcw-chk-wrap', style: 'margin: 0;' }, [
+					chkEvoConfirm,
+					E('span', { style: 'font-weight: 600; font-size: 13px; color: var(--bcw-text-title);' }, 'Спросить перед применением (эволюция)')
+				]),
+				evoConfirmHint
+			]);
+			root.appendChild(evoConfirmBox);
 			root.appendChild(top);
 			root.appendChild(hist);
 			root.appendChild(logWrap);
@@ -3186,6 +3268,38 @@ return view.extend({
 		function shortArgs(a) {
 			if (!a) return '—';
 			return a.length > 92 ? a.slice(0, 92) + '…' : a;
+		}
+
+		// issue #12: модалка «найдена стратегия — применить?».
+		function showSuggestionModal(sug) {
+			var label = (PRESET_DEFS[sug.target] && PRESET_DEFS[sug.target].name) || sug.target || '—';
+			var body = [
+				E('p', { style: 'font-size:13px;line-height:1.5;' }, 'Эволюция нашла стабильную стратегию для «' + label + '» и (по настройке «Спросить перед применением») не стала применять её автоматически.'),
+				E('div', { style: 'font-size:12px;color:#abb2bf;margin:4px 0 10px;' }, 'Объём: ' + Math.round((sug.bytes || 0) / 1024) + ' КБ · стабильных: ' + (sug.stable || 0) + ' · проверено: ' + (sug.checked || 0)),
+				E('pre', { style: 'max-height:140px;overflow:auto;font-size:11px;background:#0c1016;padding:8px;border-radius:6px;white-space:pre-wrap;' }, sug.args || ''),
+				E('p', { style: 'font-size:11.5px;color:#e5c07b;margin-top:10px;line-height:1.5;' }, 'Применение займёт 2–4 минуты и перезапустит службу. Текущая конфигурация сохранена и останется, если вы откажетесь.')
+			];
+			bcwShowModal('Найдена стратегия — применить?', body, [
+				E('button', { class: 'cbi-button cbi-button-action', click: function() {
+					ui.hideModal();
+					startApplyCore(sug.target, sug.args).then(function(out) {
+						fs.exec(HELPER_BIN, ['evolve_suggestion_clear']).catch(function() {});
+						if (!out) { ui.addNotification(null, E('p', {}, '✗ Не удалось запустить применение'), 'danger'); return null; }
+						if (out.success && out.all_ok) ui.addNotification(null, E('p', {}, '✓ Найденная стратегия применена и проверена: ' + label), 'info');
+						else if (out.rolled_back) ui.addNotification(null, E('p', {}, '⚠ Стратегия не подтвердилась — прежняя конфигурация сохранена'), 'warning');
+						else ui.addNotification(null, E('p', {}, '⚠ Стратегия записана, но проверка не пройдена'), 'warning');
+						return getZapretInfo().catch(function() { return null; });
+					}).then(function(info) {
+						if (info) { zapretInfo = info; updateSummaryBox(); updateActiveStrategyDisplay(); }
+						refreshEvolution();
+					}).catch(function() { ui.addNotification(null, E('p', {}, '⚠ Применение/опрос прерваны'), 'warning'); });
+				} }, 'Применить сейчас'),
+				E('button', { class: 'cbi-button cbi-button-neutral', click: function() {
+					ui.hideModal();
+					fs.exec(HELPER_BIN, ['evolve_suggestion_clear']).catch(function() {});
+					ui.addNotification(null, E('p', {}, 'Стратегия не применена — оставлена текущая конфигурация'), 'info');
+				} }, 'Оставить текущую')
+			]);
 		}
 
 		var evoPollTimer = null;
@@ -3281,6 +3395,14 @@ return view.extend({
 				// панель сразу, как только прогон завершился.
 				if (!st.running && lastEvoRunning && typeof memoryPanelRefresh === 'function') memoryPanelRefresh();
 				lastEvoRunning = !!st.running;
+				// issue #12: эволюция в режиме «спросить» оставляет предложение.
+				if (!live && !evoSuggestionShown) {
+					fs.exec(HELPER_BIN, ['evolve_suggestion']).then(function(r2) {
+						var sug = null;
+						try { sug = JSON.parse(String((r2 && r2.stdout) || '{}')); } catch (e) {}
+						if (sug && sug.exists) { evoSuggestionShown = true; showSuggestionModal(sug); }
+					}).catch(function() {});
+				}
 				if (live) {
 					if (evoPollTimer) clearTimeout(evoPollTimer);
 					evoPollTimer = setTimeout(refreshEvolution, 4000);
@@ -3878,13 +4000,11 @@ return view.extend({
 		}
 
 		function switchCircularMode(isCirc) {
-			doCircular = isCirc;
-			if (chkCircular && chkCircular.setChecked) chkCircular.setChecked(isCirc);
-			if (paramCircularHintEl) {
-				paramCircularHintEl.textContent = isCirc
-					? '🔄 Circular: объединяет 2-3 независимые техники (Fake, Multisplit, Multidisorder) в ротацию. При сбое роутер на лету переключится на резервную.'
-					: '⚡ Одиночная: применяется только одна лучшая техника обхода без резервной ротации.';
-			}
+			// Совместимость: boolean из статуса → режим; 'force' сохраняем.
+			if (typeof isCirc === 'boolean') doCircular = isCirc ? 'auto' : 'off';
+			else doCircular = (isCirc === 'force' || isCirc === 'off') ? isCirc : 'auto';
+			if (typeof circModeSel !== 'undefined' && circModeSel) circModeSel.value = doCircular;
+			if (paramCircularHintEl) paramCircularHintEl.textContent = CIRC_HINTS[doCircular] || CIRC_HINTS.auto;
 		}
 
 		function switchLogTab(tabId) {
@@ -4133,7 +4253,7 @@ return view.extend({
 				'start_bg',
 				'--target', currentTarget,
 				'--mode', currentMode,
-				'--circular', doCircular ? '1' : '0',
+				'--circular', circArg(),
 				'--auto-apply', autoApply ? '1' : '0',
 				'--workers', '2'
 			];
@@ -4424,17 +4544,12 @@ return view.extend({
 
 		// Применение через фоновую задачу: сама операция с проверкой видео
 		// может идти дольше таймаута LuCI RPC, поэтому UI опрашивает статус.
-		function applyStrategyFromCard(args, btn) {
-			var label = (PRESET_DEFS[currentTarget] && PRESET_DEFS[currentTarget].name) || currentTarget;
-			var oldText = btn.textContent;
-			btn.disabled = true;
-			btn.textContent = '⏳ Применяю и проверяю видео...';
-			fs.exec(HELPER_BIN, ['apply_bg', '--target', currentTarget, '--script', args]).then(function(res) {
+		// Применение в фоне + опрос статуса. Отдельная функция, чтобы её
+		// могли использовать и карточки стратегий, и модалка «найдена стратегия».
+		function startApplyCore(target, args) {
+			return fs.exec(HELPER_BIN, ['apply_bg', '--target', target, '--script', args]).then(function(res) {
 				var started = parseHelperJson(res) || {};
-				if (!started.success) {
-					ui.addNotification(null, E('p', {}, '✗ Не удалось запустить применение: ' + (started.error || 'ошибка')), 'danger');
-					return null;
-				}
+				if (!started.success) return null;
 				return started;
 			}, function() {
 				// rpcd может оборвать вызов по таймауту, хотя фоновый apply уже
@@ -4456,7 +4571,6 @@ return view.extend({
 							}
 						}).catch(function() {
 							// rpcd может быть кратковременно занят перезапуском службы.
-							// Не показываем XHR timeout сразу — повторяем опрос.
 							tries++;
 							if (tries > 150) { reject(new Error('статус применения недоступен')); return; }
 							setTimeout(poll, 2000);
@@ -4464,16 +4578,25 @@ return view.extend({
 					}
 					poll();
 				});
-			}).then(function(out) {
-				if (!out) return null;
+			});
+		}
+
+		function applyStrategyFromCard(args, btn) {
+			var label = (PRESET_DEFS[currentTarget] && PRESET_DEFS[currentTarget].name) || currentTarget;
+			var oldText = btn.textContent;
+			btn.disabled = true;
+			btn.textContent = '⏳ Применяю и проверяю видео...';
+			startApplyCore(currentTarget, args).then(function(out) {
+				if (!out) {
+					ui.addNotification(null, E('p', {}, '✗ Не удалось запустить применение'), 'danger');
+					return null;
+				}
 				if (out.success) {
 					if (out.all_ok) {
 						ui.addNotification(null, E('p', {}, '✓ Стратегия применена и проверена, видео-хост доступен: ' + label), 'info');
 					} else if (out.rolled_back) {
 						var vinfo = (out.client_probe && out.client_probe.video) || {};
 						var vreason = vinfo && vinfo.video_code ? ' (googlevideo: ' + vinfo.video_code + ')' : '';
-						// «Видео» говорим только для YouTube: для встроенных хостов/Discord
-						// проверка другая, и текст про видео только путал (issue #5).
 						var rbmsg = (currentTarget === 'preset_youtube' || currentTarget === 'youtube')
 							? ('⚠ Стратегия не подняла видео' + vreason + ' — прежняя конфигурация восстановлена. Выберите другую стратегию.')
 							: '⚠ Стратегия не подтвердила трафик — прежняя конфигурация восстановлена. Выберите другую стратегию.';
@@ -4484,8 +4607,6 @@ return view.extend({
 				} else {
 					ui.addNotification(null, E('p', {}, '✗ Не удалось применить: ' + (out.error || 'ошибка')), 'danger');
 				}
-				// Обновление LuCI после restart может кратковременно упасть по XHR,
-				// но это не ошибка применения: результат уже получен.
 				return getZapretInfo().catch(function() { return null; });
 			}).then(function(info) {
 				if (!info) {
@@ -4496,13 +4617,12 @@ return view.extend({
 				updateSummaryBox();
 				updateActiveStrategyDisplay();
 			}).catch(function(err) {
-				ui.addNotification(null, E('p', {}, '⚠ Применение/опрос статуса прервано: ' + err), 'warning');
+				ui.addNotification(null, E('p', {}, '⚠ Применение/опрос статуса прерван: ' + err), 'warning');
 			}).then(function() {
 				btn.disabled = false;
 				btn.textContent = oldText;
 			});
 		}
-
 		function renderStrategyCards(strategies) {
 			resultsCard.style.display = 'block';
 			strategiesListEl.innerHTML = '';
