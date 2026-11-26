@@ -4662,6 +4662,74 @@ return view.extend({
 			});
 		}
 
+		// issue #3: понятная причина, почему стратегия не оставлена в конфигурации.
+		function applyFailureSummary(out) {
+			out = out || {};
+			var lines = [];
+			var rolled = out.rolled_back === true;
+			var title = (out.success === false)
+				? 'Стратегия не применена'
+				: (rolled ? 'Стратегия не подтвердилась — возвращена прежняя конфигурация'
+				          : 'Стратегия записана, но трафик не подтверждён');
+			if (out.success === false) {
+				lines.push({ label: 'Ошибка helper', value: out.error || 'неизвестная ошибка' });
+			}
+			var cp = out.client_probe || {};
+			var video = cp.video || {};
+			var vcode = video.video_code || video.code || '';
+			var vstate = video.verification_state || '';
+			if (vcode || vstate || video.transfer_verified != null) {
+				var vtext = vcode ? ('код ' + vcode) : 'код —';
+				if (vstate) vtext += ', ' + vstate;
+				if (video.transfer_verified === true) vtext += ', передача подтверждена';
+				if (video.transfer_verified === false) vtext += ', передача не подтверждена';
+				lines.push({ label: 'Видео-хост googlevideo', value: vtext });
+				if (String(vcode) === '000') {
+					lines.push({ label: 'Вероятная причина', value: 'ТСПУ рвёт видеопоток; стратегия не прошла проверку объёма. Нужна другая техника (fakeddisorder / fake+multisplit и т.п.).' });
+				}
+			}
+			var api = cp.api || out.api || {};
+			var acode = api.code || api.status || '';
+			if (acode) lines.push({ label: 'API YouTube (youtubei)', value: String(acode) });
+			var md = out.multi_domain || {};
+			if (md.overall_status) lines.push({ label: 'Проверка доменов', value: String(md.overall_status) + (md.http_code ? ' (HTTP ' + md.http_code + ')' : '') });
+			var st = out.stall_reason || video.stall_reason || '';
+			if (st) lines.push({ label: 'Причина остановки', value: String(st) });
+			if (rolled) lines.push({ label: 'Что сделано', value: 'Прежняя рабочая конфигурация восстановлена, служба перезапущена.' });
+			if (!lines.length) lines.push({ label: 'Результат', value: 'Подробности: /tmp/bcw_apply_result.json и раздел «Диагностика».' });
+			return { title: title, rolledBack: rolled, lines: lines };
+		}
+
+		function showApplyFailureModal(opts) {
+			opts = opts || {};
+			var out = opts.applyResult || {};
+			var sum = applyFailureSummary(out);
+			var label = opts.label || (PRESET_DEFS[currentTarget] && PRESET_DEFS[currentTarget].name) || currentTarget;
+			var body = [
+				E('div', { style: 'background: rgba(229,96,92,0.12); border: 1.5px solid #e5605c; border-radius: 8px; padding: 12px 14px; margin-bottom: 12px;' }, [
+					E('div', { style: 'font-weight: bold; color: #e5605c; font-size: 14px;' }, '✗ ' + sum.title),
+					E('p', { style: 'margin: 6px 0 0 0; font-size: 12.5px; color: #e5e9f0; line-height: 1.5;' },
+						'Направление: ' + label + '. ' + (sum.rolledBack ? 'Чтобы не оставить вас без обхода, служба вернулась к предыдущей рабочей стратегии.' : 'Стратегия сохранена в конфигурации, но подтвердить трафик не удалось.'))
+				]),
+				E('div', { style: 'background: #1c2027; border: 1px solid #282c34; border-radius: 6px; padding: 10px 12px; margin-bottom: 12px; font-size: 12.5px; display: flex; flex-direction: column; gap: 6px;' },
+					sum.lines.map(function(row) {
+						return E('div', { style: 'display: flex; justify-content: space-between; gap: 12px; align-items: flex-start;' }, [
+							E('span', { style: 'color: #abb2bf; flex: 0 0 auto;' }, row.label + ':'),
+							E('span', { style: 'color: #e5e9f0; text-align: right; word-break: break-word;' }, row.value)
+						]);
+					})),
+				E('div', { style: 'font-size: 12.5px; line-height: 1.5; color: #abb2bf;' }, 'Что попробовать: выбрать другую стратегию из списка найденных (другое семейство приёмов), проверить доступность или открыть «Диагностику». Если ничего не помогает — «Откат» вернёт последнюю рабочую конфигурацию из истории.')
+			];
+			var actions = [
+				(opts.retry ? E('button', { class: 'cbi-button cbi-button-action', style: 'background:#3273dc;color:#fff;font-weight:bold;', click: function() { ui.hideModal(); try { opts.retry(); } catch (e) {} } }, '🔁 Повторить попытку') : null),
+				E('button', { class: 'cbi-button cbi-button-neutral', click: function() { ui.hideModal(); testActiveConnection(); } }, '🌐 Проверить доступность'),
+				E('button', { class: 'cbi-button cbi-button-neutral', click: function() { ui.hideModal(); showDiagnosticsModal(); } }, '📋 Диагностика'),
+				E('button', { class: 'cbi-button cbi-button-neutral', click: function() { ui.hideModal(); rollbackConfig(); } }, '↩ Откат'),
+				E('button', { class: 'cbi-button cbi-button-neutral', click: function() { ui.hideModal(); } }, 'Закрыть')
+			].filter(Boolean);
+			bcwShowModal('✗ Стратегия не применена — ' + label, body, actions);
+		}
+
 		function applyStrategyFromCard(args, btn) {
 			var label = (PRESET_DEFS[currentTarget] && PRESET_DEFS[currentTarget].name) || currentTarget;
 			var oldText = btn.textContent;
@@ -4672,21 +4740,15 @@ return view.extend({
 					ui.addNotification(null, E('p', {}, '✗ Не удалось запустить применение'), 'danger');
 					return null;
 				}
-				if (out.success) {
-					if (out.all_ok) {
-						ui.addNotification(null, E('p', {}, '✓ Стратегия применена и проверена, видео-хост доступен: ' + label), 'info');
-					} else if (out.rolled_back) {
-						var vinfo = (out.client_probe && out.client_probe.video) || {};
-						var vreason = vinfo && vinfo.video_code ? ' (googlevideo: ' + vinfo.video_code + ')' : '';
-						var rbmsg = (currentTarget === 'preset_youtube' || currentTarget === 'youtube')
-							? ('⚠ Стратегия не подняла видео' + vreason + ' — прежняя конфигурация восстановлена. Выберите другую стратегию.')
-							: '⚠ Стратегия не подтвердила трафик — прежняя конфигурация восстановлена. Выберите другую стратегию.';
-						ui.addNotification(null, E('p', {}, rbmsg), 'warning');
-					} else {
-						ui.addNotification(null, E('p', {}, '⚠ Стратегия записана, но трафик не подтвердился — проверьте сервис'), 'warning');
-					}
+				if (out.success && out.all_ok) {
+					ui.addNotification(null, E('p', {}, '✓ Стратегия применена и проверена, видео-хост доступен: ' + label), 'info');
 				} else {
-					ui.addNotification(null, E('p', {}, '✗ Не удалось применить: ' + (out.error || 'ошибка')), 'danger');
+					var shortMsg = !out.success
+						? ('✗ Не удалось применить: ' + (out.error || 'ошибка'))
+						: (out.rolled_back ? '⚠ Стратегия не прошла проверку — прежняя конфигурация восстановлена. Открыл подробности.'
+						                    : '⚠ Стратегия записана, но трафик не подтвердился. Открыл подробности.');
+					ui.addNotification(null, E('p', {}, shortMsg), out.success ? 'warning' : 'danger');
+					showApplyFailureModal({ applyResult: out, label: label, retry: function() { applyStrategyFromCard(args, btn); } });
 				}
 				return getZapretInfo().catch(function() { return null; });
 			}).then(function(info) {
@@ -5507,8 +5569,17 @@ return view.extend({
 						E('div', { style: 'display: flex; justify-content: flex-end;' }, [ btnEdit ])
 					]),
 					warning,
+					(hl.key === 'user' ? E('div', { role: 'note', style: 'margin-top: 8px; padding: 8px 10px; background: rgba(229,192,123,0.10); border: 1px solid rgba(229,192,123,0.35); border-radius: 6px; font-size: 12px; color: #e5c07b; line-height: 1.5;' }, [
+						E('div', {}, 'Этот список применяется только стратегией «Встроенные хосты» (BlockcheckW_General). Добавить домены и перезапустить службу недостаточно.'),
+						E('button', { class: 'bcw-btn-launch', style: 'height: 30px; font-size: 12px; margin-top: 8px;', click: function() {
+							ui.hideModal();
+							selectTarget('builtin');
+							ui.addNotification(null, E('p', {}, 'Цель «Встроенные хосты» выбрана. Нажмите «Запустить поиск», чтобы подобрать и применить для неё стратегию — домены из «Общих сайтов» начнут обрабатываться.'), 'info');
+							window.scrollTo(0, 0);
+						} }, '🎯 Подобрать стратегию для этих сайтов')
+					]) : null),
 					editor
-				]);
+				].filter(Boolean));
 			}
 
 			function renderAll() {
@@ -5556,7 +5627,7 @@ return view.extend({
 					'Списки лежат в ',
 					E('code', { style: 'color: #98c379;' }, '/etc/zapret2wizard/ipset/'),
 					'. Кнопка «Изменить» открывает редактор: правки сохраняются в файл и применяются перезапуском службы. ',
-					'Список «Исключения» запрещает обход в привязанных стратегиях; фактическая обработка трафика здесь не проверяется.'
+					'Список «Общие сайты (User)» применяется только стратегией «Встроенные хосты» (BlockcheckW_General): без неё домены из User не участвуют в обходе. «Исключения» отключают обход для указанных доменов в привязанных стратегиях. Фактическая обработка конкретного домена здесь не проверяется.'
 				]),
 				listContainer
 			], [ refreshBtn, closeBtn ]);

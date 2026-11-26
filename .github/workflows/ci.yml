@@ -77,6 +77,7 @@ jobs:
           busybox ash tools/test_engine_init.sh
           node tools/test_engine_update_ui.js
           node tools/test_engine_repair_ui.js
+          node tools/test_apply_feedback_ui.js
           sh tools/test_timeout_dependency.sh
           busybox ash tools/test_timeout_dependency.sh
 
