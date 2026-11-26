@@ -18,5 +18,5 @@ need(tpl.includes('id: report') && tpl.includes('type: textarea'), 'issue templa
 need(doc.includes('evidence --markdown') && doc.includes('Не включается'), 'provider evidence docs');
 const evBlock = helper.slice(helper.indexOf('cmd_evidence()'), helper.indexOf('cmd_evidence()') + 20000);
 need(evBlock.includes('hostlists[#hostlists + 1] = { key = hl.key, count = hl.domains_count, attached = hl.attached, enabled = hl.enabled }'), 'hostlist counts only');
-need(!evBlock.includes('hl.file') && !evBlock.includes('hl.domains'), 'no hostlist contents/files in evidence');
+need(!/hl\.domains(?!_count)/.test(evBlock) && !evBlock.includes('hl.file'), 'no hostlist contents/files in evidence');
 console.log('OK: evidence report wiring (helper/UI/issue template/docs)');
