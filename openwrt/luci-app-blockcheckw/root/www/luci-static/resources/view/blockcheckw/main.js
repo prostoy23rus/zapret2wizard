@@ -3,6 +3,36 @@
 'require fs';
 'require ui';
 
+// footstrap (и некоторые другие темы) гасят .alert-message CSS-анимацией,
+// а LuCI удаляет уведомление только по transitionend. Из-за этого кнопка
+// «Закрыть» у уведомлений не работает: fade-out добавляется, но событие
+// не приходит и баннер остаётся висеть. Страховка: снимаем уведомление по
+// animationend/transitionend, по появлению fade-out (MutationObserver) и
+// таймером — что сработает раньше.
+if (!window._bcwNotifyFix && typeof ui !== 'undefined' && ui && typeof ui.addNotification === 'function') {
+	window._bcwNotifyFix = true;
+	var _bcwOrigAddNotification = ui.addNotification;
+	ui.addNotification = function() {
+		var msg = _bcwOrigAddNotification.apply(ui, arguments);
+		if (!msg || !msg.classList || !msg.addEventListener) return msg;
+		var drop = function(ev) {
+			if (ev && ev.target !== msg) return;
+			if (!msg.classList.contains('fade-out')) return;
+			if (msg.parentNode) msg.parentNode.removeChild(msg);
+		};
+		msg.addEventListener('animationend', drop);
+		msg.addEventListener('transitionend', drop);
+		try {
+			if (typeof MutationObserver === 'function') {
+				new MutationObserver(function() {
+					if (msg.classList.contains('fade-out')) window.setTimeout(drop, 700);
+				}).observe(msg, { attributes: true, attributeFilter: ['class'] });
+			}
+		} catch (e) {}
+		return msg;
+	};
+}
+
 var HELPER_BIN = '/usr/bin/blockcheckw-helper';
 var isRunning = false;
 var pollInterval = null;

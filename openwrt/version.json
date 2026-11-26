@@ -1,10 +1,10 @@
 {
-  "version": "0.37.23",
+  "version": "0.37.24",
   "release_date": "2026-11-24",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "catalog_fetch: при отсутствии ASN в каталоге показывает список доступных ASN (genomes/index.json)",
-    "Каталог: добавлены геномы AS12389 (13 проверенных стратегий)"
+    "Исправлено: уведомления LuCI («Закрыть») не закрывались в темах, которые гасят баннер CSS-анимацией (footstrap и др.) — добавлена страховка по animationend/transitionend/MutationObserver",
+    "После «🩺 Починить API YouTube» баннер с результатом теперь закрывается как обычно"
   ]
 }
