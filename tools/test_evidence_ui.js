@@ -1,0 +1,22 @@
+'use strict';
+const fs = require('fs');
+const path = require('path');
+const root = path.resolve(__dirname, '..');
+const read = (p) => fs.readFileSync(path.join(root, p), 'utf8');
+const helper = read('openwrt/luci-app-blockcheckw/root/usr/bin/blockcheckw-helper');
+const main = read('openwrt/luci-app-blockcheckw/root/www/luci-static/resources/view/blockcheckw/main.js');
+const tpl = read('.github/ISSUE_TEMPLATE/provider-report.yml');
+const doc = read('docs/PROVIDER-EVIDENCE.md');
+function need(cond, label) { if (!cond) { console.log('FAIL: ' + label); process.exit(1); } }
+need(helper.includes('cmd_evidence()'), 'helper evidence command');
+need(helper.includes('evidence) shift; cmd_evidence'), 'evidence dispatcher');
+need(helper.includes('hostlist_contents_included = false'), 'privacy flag');
+need(helper.includes('Приватность'), 'privacy note');
+need(main.includes("['evidence', '--markdown']"), 'UI evidence call');
+need(main.includes('Отчёт для матрицы'), 'UI matrix button');
+need(tpl.includes('id: report') && tpl.includes('type: textarea'), 'issue template report field');
+need(doc.includes('evidence --markdown') && doc.includes('Не включается'), 'provider evidence docs');
+const evBlock = helper.slice(helper.indexOf('cmd_evidence()'), helper.indexOf('cmd_evidence()') + 20000);
+need(evBlock.includes('hostlists[#hostlists + 1] = { key = hl.key, count = hl.domains_count, attached = hl.attached, enabled = hl.enabled }'), 'hostlist counts only');
+need(!evBlock.includes('hl.file') && !evBlock.includes('hl.domains'), 'no hostlist contents/files in evidence');
+console.log('OK: evidence report wiring (helper/UI/issue template/docs)');

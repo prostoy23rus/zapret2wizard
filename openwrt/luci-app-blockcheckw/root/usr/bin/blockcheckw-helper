@@ -7603,6 +7603,145 @@ cmd_uninstall() {
     bcw_lifecycle_remove_begin
 }
 
+# Privacy-safe evidence report for the public provider matrix (audit P0).
+# Only aggregates and selected strategies; never hostlist contents, IPs or domains
+# from user lists. JSON by default; --markdown renders a ready-to-paste report.
+cmd_evidence() {
+    local mode="json" info
+    [ "$1" = "--markdown" ] && mode="markdown"
+    info=$(mktemp /tmp/bcw-evidence-info.XXXXXX) || return 1
+    cmd_info > "$info" 2>/dev/null
+    EVIDENCE_INFO="$info" EVIDENCE_MODE="$mode" lua - <<'EVIDENCE_LUA'
+local json = require "luci.jsonc"
+local function read(path)
+    local f = io.open(path, "r"); if not f then return nil end
+    local s = f:read("*a"); f:close(); return s
+end
+local function parse(s)
+    if not s or s == "" then return nil end
+    local ok, d = pcall(json.parse, s)
+    if ok and type(d) == "table" then return d end
+    return nil
+end
+local function sh(cmd)
+    local p = io.popen(cmd .. " 2>/dev/null"); if not p then return "" end
+    local s = p:read("*a") or ""; p:close(); return s
+end
+local function trim(s)
+    s = tostring(s or ""); return (s:gsub("^%s+", ""):gsub("%s+$", ""))
+end
+local info = parse(read(os.getenv("EVIDENCE_INFO"))) or {}
+local status = parse(read("/tmp/blockcheckw_status.json")) or {}
+local tests = parse(read("/etc/zapret2wizard/tests.json")) or {}
+local provider_file = trim(read("/etc/zapret2wizard/provider") or "")
+local provider = trim(status.isp or "")
+if provider_file ~= "" then provider = provider_file end
+local asn = provider:match("AS%d+") or ""
+local block_type = trim(status.block_type or "")
+if block_type == "" then block_type = "unknown" end
+local rel = read("/etc/openwrt_release") or ""
+local function relval(k)
+    return trim((rel:match("DISTRIB_" .. k .. "='([^']*)'") or ""))
+end
+local release = relval("RELEASE")
+local target = relval("TARGET")
+local arch = relval("ARCH")
+if release == "" then release = trim(sh("cat /etc/openwrt_version")) end
+local model = trim(read("/tmp/sysinfo/model") or "")
+if model == "" then model = trim(read("/proc/device-tree/model") or "") end
+local kernel = trim(sh("uname -r"))
+local scanner = trim(sh("/usr/bin/blockcheckw --version"))
+local pkg_manager, pkg_version = "", ""
+local apk_out = sh("apk list -I 2>/dev/null | grep '^zapret2wizard'")
+if apk_out ~= "" then pkg_manager = "apk"; pkg_version = trim(apk_out) else
+    local opkg_out = sh("opkg list-installed 2>/dev/null | grep '^luci-app-blockcheckw '")
+    if opkg_out ~= "" then pkg_manager = "opkg"; pkg_version = trim(opkg_out) end
+end
+local services = {}
+for k, v in pairs(info.services or {}) do
+    local script = trim(v.script or "")
+    local technique = script:match("--lua%-desync=([%w_]+)") or ""
+    services[#services + 1] = {
+        target = k, section = v.section or "", enabled = v.enabled and true or false,
+        technique = technique, script = script:sub(1, 400)
+    }
+end
+table.sort(services, function(x, y) return x.target < y.target end)
+local last_tests = {}
+for k, v in pairs(tests) do
+    last_tests[#last_tests + 1] = {
+        target = k, status = v.status or "unknown", code = v.code or "", size = v.size or 0,
+        speed = v.speed or 0, time = v.time or 0
+    }
+end
+table.sort(last_tests, function(x, y) return x.target < y.target end)
+local hostlists = {}
+for _, hl in ipairs(info.hostlists or {}) do
+    hostlists[#hostlists + 1] = { key = hl.key, count = hl.domains_count, attached = hl.attached, enabled = hl.enabled }
+end
+table.sort(hostlists, function(x, y) return tostring(x.key) < tostring(y.key) end)
+local genomes = parse(read("/etc/zapret2wizard/genomes.json"))
+local function count_args(x)
+    local n = 0
+    local function walk(v)
+        if type(v) ~= "table" then return end
+        if v.args then n = n + 1 end
+        for _, item in pairs(v) do walk(item) end
+    end
+    walk(x); return n
+end
+local good = parse(read("/etc/zapret2wizard/good_history/entries.json"))
+local good_count = (type(good) == "table" and type(good.entries) == "table") and #good.entries or 0
+local evidence = {
+    schema = 1,
+    generated_at = os.date("%Y-%m-%d %H:%M:%S %z"),
+    app_version = tostring(info.version or ""),
+    scanner_version = scanner,
+    zapret2_running = tostring(info.zapret2_running or ""),
+    platform = { model = model, openwrt = release, target = target, arch = arch, kernel = kernel },
+    package = { manager = pkg_manager, version = pkg_version },
+    provider = { raw = provider, isp = trim(status.isp or ""), asn = asn },
+    block_type = block_type,
+    services = services,
+    last_tests = last_tests,
+    counts = { hostlists = hostlists, genomes = count_args(genomes), good_history = good_count },
+    privacy = { hostlist_contents_included = false, telemetry = false }
+}
+if os.getenv("EVIDENCE_MODE") ~= "markdown" then
+    print(json.stringify(evidence))
+    os.exit(0)
+end
+local function esc(s) s = tostring(s or ""); return (s:gsub("|", "\\|"):gsub("\n", " ")) end
+print("# Zapret2Wizard: отчёт для матрицы провайдеров")
+print("")
+print("- Дата: " .. evidence.generated_at)
+print("- Версия: " .. evidence.app_version .. "; сканер: " .. (scanner ~= "" and scanner or "n/a"))
+print("- Роутер: " .. (model ~= "" and model or "n/a") .. "; OpenWrt " .. release .. " (" .. target .. ", " .. arch .. "); ядро " .. kernel)
+print("- Пакет: " .. (pkg_manager ~= "" and (pkg_manager .. " " .. pkg_version) or "bundle/manual"))
+print("- Провайдер: " .. (provider ~= "" and provider or "не определён") .. "; ASN: " .. (asn ~= "" and asn or "n/a") .. "; тип блокировки: " .. block_type)
+print("- Служба: " .. (info.zapret2_running or "unknown") .. "; nft: " .. (info.nft_table and "есть" or "нет"))
+print("")
+print("| Сервис | Включён | Техника | Стратегия |")
+print("|---|---|---|---|")
+for _, s in ipairs(services) do
+    print("| " .. esc(s.target) .. " | " .. (s.enabled and "да" or "нет") .. " | " .. esc(s.technique) .. " | " .. esc(s.script) .. " |")
+end
+print("")
+print("| Последняя проверка | Статус | HTTP | Байт | КБ/с |")
+print("|---|---|---|---|---|")
+for _, t in ipairs(last_tests) do
+    print("| " .. esc(t.target) .. " | " .. esc(t.status) .. " | " .. esc(t.code) .. " | " .. tostring(t.size) .. " | " .. tostring(t.speed) .. " |")
+end
+print("")
+local hparts = {}
+for _, hl in ipairs(hostlists) do hparts[#hparts + 1] = hl.key .. "=" .. tostring(hl.count) end
+print("Списки (количество): " .. table.concat(hparts, ", ") .. "; геномов: " .. count_args(genomes) .. "; хороших конфигураций: " .. good_count)
+print("")
+print("_Приватность: в отчёте нет доменов из пользовательских списков, IP и иных персональных данных; только агрегаты и выбранные стратегии. Отправка — только вручную._")
+EVIDENCE_LUA
+    rm -f "$info"
+}
+
 cmd_diag() {
     local as_json=false
     [ "$1" = "--json" ] && as_json=true
@@ -8314,6 +8453,7 @@ case "$1" in
     update) cmd_update ;;
     uninstall) shift; cmd_uninstall "$@" ;;
     diag) shift; cmd_diag "$@" ;;
+    evidence) shift; cmd_evidence "$@" ;;
     ensure_hostlists) shift; cmd_ensure_hostlists "$@" ;;
     memory_stats) mem stats ;;
     memory_dump) mem dump ;;

@@ -1,0 +1,43 @@
+name: Отчёт провайдера для матрицы
+description: Результаты проверки Zapret2Wizard на вашем провайдере (помогает другим и ускоряет фиксы)
+title: "[PROVIDER] <провайдер>, <ASN>, <модель роутера>, OpenWrt <версия>"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Спасибо за отчёт! Он готовится в панели: **Диагностика → 📤 Отчёт для матрицы**
+        (или по SSH: `blockcheckw-helper evidence --markdown`).
+        В отчёте **нет** доменов из ваших списков, IP и других персональных данных —
+        только модель, версии, ASN, количество доменов и выбранные стратегии.
+        Никакой телеметрии: отчёт отправляете только вы.
+  - type: textarea
+    id: report
+    attributes:
+      label: Отчёт
+      description: Вставьте отчёт целиком (Markdown)
+      render: markdown
+    validations:
+      required: true
+  - type: dropdown
+    id: services
+    attributes:
+      label: Что проверено и работает
+      multiple: true
+      options:
+        - YouTube
+        - YouTube API (youtubei)
+        - Discord
+        - Instagram
+        - Twitch
+        - X (Twitter)
+        - «Встроенные хосты» / User
+        - Всё работает
+        - Частично
+        - Ничего не работает
+  - type: textarea
+    id: notes
+    attributes:
+      label: Дополнительно (необязательно)
+      description: Что ещё проверить/что не сработало; можно приложить скриншоты
+    validations:
+      required: false

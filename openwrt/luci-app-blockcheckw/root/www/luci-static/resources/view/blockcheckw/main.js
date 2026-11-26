@@ -5428,7 +5428,21 @@ return view.extend({
 				}
 			}, '📋 Скопировать');
 			var closeBtn = E('button', { class: 'btn cbi-button cbi-button-neutral', click: function() { ui.hideModal(); } }, 'Закрыть');
-			bcwShowModal('🩺 Диагностика службы', [pre], [copyBtn, closeBtn]);
+			var matrixBtn = E('button', {
+				class: 'btn cbi-button cbi-button-neutral',
+				click: function() {
+					var self = this; self.disabled = true;
+					fs.exec(HELPER_BIN, ['evidence', '--markdown']).then(function(res) {
+						var text = (res && res.stdout) ? res.stdout.trim() : '';
+						if (!text) { ui.addNotification(null, E('p', {}, 'Не удалось подготовить отчёт для матрицы'), 'danger'); return; }
+						ui.hideModal();
+						showDiagnosticModal(text);
+					}).catch(function(err) {
+						ui.addNotification(null, E('p', {}, 'Ошибка подготовки отчёта: ' + err), 'danger');
+					}).then(function() { self.disabled = false; });
+				}
+			}, '📤 Отчёт для матрицы');
+			bcwShowModal('🩺 Диагностика службы', [pre], [copyBtn, matrixBtn, closeBtn]);
 			fs.exec(HELPER_BIN, ['selftest']).then(function(res) {
 				pre.textContent = (res && res.stdout) ? res.stdout.trim() : 'Нет ответа от helper';
 			}).catch(function() { pre.textContent = 'Ошибка вызова helper'; });
