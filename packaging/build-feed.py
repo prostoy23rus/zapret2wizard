@@ -207,7 +207,7 @@ def main():
             print("apk %s: %d package(s), APKINDEX skipped" % (arch, len(copied)), file=sys.stderr)
         else:
             index_path = os.path.join(repo_dir, "APKINDEX.tar.gz")
-            cmd = [args.apk_tools, "index", "-o", index_path, "--rewrite-arch", arch, "--no-warnings"] + copied
+            cmd = [args.apk_tools, "--allow-untrusted", "index", "-o", index_path, "--rewrite-arch", arch, "--no-warnings"] + copied
             proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             if proc.returncode != 0:
                 sys.stderr.write(proc.stdout or "")

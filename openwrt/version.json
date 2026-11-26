@@ -1,12 +1,11 @@
 {
-  "version": "0.37.29",
+  "version": "0.37.30",
   "release_date": "2026-11-24",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "P0-аудит: репозиторий пакетов (ветка feed) — индексы opkg Packages и apk APKINDEX для aarch64/armv7/x86_64, обновление штатными opkg/apk",
-    "CI: job feed на тег собирает индексы из релизных артефактов через packaging/build-feed.py и публикует ветку feed",
-    "Документация docs/UPDATES-FEED.md и раздел в README; пакеты пока без подписи (--allow-untrusted), подпись — следующий шаг",
-    "Регрессия tools/test_feed.py в CI"
+    "feed: apk-индекс собирается с --allow-untrusted (пакеты пока без подписи); публикация — только на тег",
+    "CI: генерацию feed можно проверить через workflow_dispatch без публикации ветки",
+    "0.37.30: исправление сборки feed после 0.37.29"
   ]
 }
