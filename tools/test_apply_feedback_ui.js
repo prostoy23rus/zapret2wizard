@@ -1,6 +1,7 @@
 'use strict';
 const fs = require('fs');
-const MAIN = "E:/AI/zapret2wizard/openwrt/luci-app-blockcheckw/root/www/luci-static/resources/view/blockcheckw/main.js";
+const path = require('path');
+const MAIN = path.resolve(__dirname, '..', 'openwrt/luci-app-blockcheckw/root/www/luci-static/resources/view/blockcheckw/main.js');
 const mainText = fs.readFileSync(MAIN, 'utf8');
 for (const marker of ['Подобрать стратегию для этих сайтов', 'Общие сайты (User)» применяется только', 'showApplyFailureModal({ applyResult: out']) {
   if (!mainText.includes(marker)) { console.log('FAIL: missing marker', marker); process.exit(1); }
