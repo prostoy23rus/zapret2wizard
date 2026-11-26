@@ -137,3 +137,16 @@ Zapret2Wizard не должен и не может применять desync к 
 | Reinstall `.apk` 0.37.24-r3 (sha256 сверен) | служба running (300/65300/65301), стратегия из конфига применилась, `test preset_youtube` = optimal |
 
 Причина исходного бага (0.37.9): удаление было `rm -f`-скриптом без disable и удаления пакета. Начиная с 0.37.10 — проверяемый lifecycle (`lifecycle.sh`).
+
+## issue #6: самовосстановление несовместимого движка (0.37.26, live)
+
+Проверено 2026-11-27 на Routerich AX3000, OpenWrt 25.12.6, aarch64 (apk), пакет `zapret2wizard` 0.37.26-r3.
+
+| Шаг | Результат |
+|---|---|
+| `/usr/bin/nfqws2` заменён на несовместимый бинарник без `--filter-mark` | `start_bg` → `{"repairing":true}`, панель показывает восстановление |
+| `engine_repair_status` | `running` → `done`; движок восстановлен (sha256 совпал), `/opt/zapret2/nfq2/nfqws2` — корректный симлинк |
+| Служба после восстановления | `running` (300/65300/65301) |
+| Повторный `start_bg` | `started:true`, подбор пошёл; `stop` → служба `running`, `test preset_youtube` = optimal |
+
+Причина, найденная live: `nfqws2` сбрасывает uid и не мог читать Lua из staged-каталога `mktemp` (0700) — скачанный движок отклонялся. Исправлено в 0.37.26 (staged `755`/`644` + освобождение flock).
