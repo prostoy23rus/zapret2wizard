@@ -123,3 +123,17 @@ Zapret2Wizard не должен и не может применять desync к 
   `api=000` и YTApi отключается. Это баг проекта.
 - AWG-интерфейсы `rrws_192_26/95` открывают и YouTube (200), и API (405):
   маршрутизация клиента через AWG является рабочим обходом.
+
+## Жизненный цикл: удаление → reboot → переустановка (0.37.24, закрытие #10)
+
+Проверено 2026-11-26 на Routerich AX3000, OpenWrt 25.12.6, aarch64 (apk), пакет `zapret2wizard` 0.37.24-r3.
+
+| Шаг | Результат |
+|---|---|
+| `helper uninstall` (путь кнопки LuCI) | `status=done, success=true` |
+| После удаления | пакета нет; init.d/rc.d/меню/ACL/helper/сканер/UI удалены; nfqws2 нет; nft `zapret2wizard`/`bcw_quic` удалены; cron `# bcw-*` удалён |
+| Пользовательские данные | `/etc/config/zapret2wizard` и `/etc/zapret2wizard` (genomes, memory, good_history) сохранены |
+| **Reboot** | автозапуска нет: пакет отсутствует, nfqws2 не стартовал, cron/nft чистые (#10 не воспроизводится) |
+| Reinstall `.apk` 0.37.24-r3 (sha256 сверен) | служба running (300/65300/65301), стратегия из конфига применилась, `test preset_youtube` = optimal |
+
+Причина исходного бага (0.37.9): удаление было `rm -f`-скриптом без disable и удаления пакета. Начиная с 0.37.10 — проверяемый lifecycle (`lifecycle.sh`).
