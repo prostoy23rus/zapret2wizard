@@ -1,11 +1,11 @@
 {
-  "version": "0.37.30",
+  "version": "0.37.31",
   "release_date": "2026-11-24",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "feed: apk-индекс собирается с --allow-untrusted (пакеты пока без подписи); публикация — только на тег",
-    "CI: генерацию feed можно проверить через workflow_dispatch без публикации ветки",
-    "0.37.30: исправление сборки feed после 0.37.29"
+    "feed: apk-пакеты публикуются под каноническим именем <name>-<version>.apk (apk иначе строит 404-URL); база apk-репозитория — .../feed/apk, arch apk добавляет сам",
+    "docs/README: исправлены команды apk update/upgrade для feed",
+    "0.37.31: исправление после 0.37.30"
   ]
 }

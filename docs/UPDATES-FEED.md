@@ -5,6 +5,9 @@ CI автоматически публикует индексы пакетов �
 
 База: `https://raw.githubusercontent.com/prostoy23rus/zapret2wizard/feed`
 
+Для apk указывается база `.../feed/apk` — apk сам добавляет каталог архитектуры;
+для opkg путь включает архитектуру явно (`.../feed/opkg/<arch>`).
+
 Архитектуры: `aarch64_cortex-a53`, `arm_cortex-a7`, `x86_64` (те же, что в релизах).
 
 ## OpenWrt 24.10 и старше (opkg)
@@ -21,10 +24,9 @@ opkg upgrade luci-app-blockcheckw     # обновление
 ## OpenWrt 25.x / apk
 
 ```sh
-ARCH=$(apk --print-arch)
-echo "https://raw.githubusercontent.com/prostoy23rus/zapret2wizard/feed/apk/$ARCH" \
+echo "https://raw.githubusercontent.com/prostoy23rus/zapret2wizard/feed/apk" \
   >> /etc/apk/repositories
-apk update
+apk update --allow-untrusted
 apk add --allow-untrusted --upgrade zapret2wizard   # первая установка/обновление
 # или: apk upgrade --allow-untrusted zapret2wizard
 ```

@@ -200,7 +200,12 @@ def main():
         os.makedirs(repo_dir, exist_ok=True)
         copied = []
         for path in files:
-            dst = os.path.join(repo_dir, os.path.basename(path))
+            m = APK_RE.match(os.path.basename(path))
+            if not m:
+                continue
+            # apk derives the download name as <name>-<version>.apk (repository
+            # artifacts are not named with underscores/arch like release assets).
+            dst = os.path.join(repo_dir, m.group("name") + "-" + m.group("version") + ".apk")
             shutil.copy2(path, dst)
             copied.append(dst)
         if args.no_apk_index:
