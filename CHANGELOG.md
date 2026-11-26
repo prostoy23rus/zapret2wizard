@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.37.29] (2026-11-27)
+
+### P0-аудит: репозиторий пакетов (feed)
+
+- При каждом теге `v*` CI публикует ветку **`feed`** с индексами:
+  `opkg/<arch>/Packages` (OpenWrt <= 24.10) и `apk/<arch>/APKINDEX.tar.gz`
+  (OpenWrt 25.x) для `aarch64_cortex-a53`, `arm_cortex-a7`, `x86_64`, плюс
+  сами пакеты и `SHA256SUMS`.
+- Индексы генерирует `packaging/build-feed.py`; apk-индекс — штатным `apk index`
+  (apk-tools 3.0.5 в CI).
+- Обновление теперь можно делать штатным `opkg upgrade` / `apk upgrade`
+  (инструкции: `docs/UPDATES-FEED.md`, раздел в README).
+- Пакеты пока **не подписаны** — для apk нужен `--allow-untrusted`;
+  подпись и ключи — следующий шаг.
+- Регрессия `tools/test_feed.py` в CI (сборка синтетического `.ipk` формата
+  OpenWrt 24.10, проверка Packages/SHA256SUMS/index.json).
+
+
 ## [0.37.28] (2026-11-27)
 
 ### P0-аудит: отчёт для публичной матрицы провайдеров

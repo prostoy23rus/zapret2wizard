@@ -2,7 +2,7 @@
 
 **Контроль обхода DPI/ТСПУ на OpenWrt:** движок `zapret2 (nfqws2)`, Rust-сканер стратегий и веб-интерфейс LuCI в одном комплекте. Подбирайте кандидатов под свою сеть, управляйте доменами и проверяйте результат — без установки приложений на каждом устройстве. Системные зависимости устанавливаются отдельно пакетным менеджером; после установки обычная обработка трафика не требует доступа к GitHub.
 
-[![Version](https://img.shields.io/badge/version-0.37.28-00d1b2?style=flat-square)](https://github.com/prostoy23rus/zapret2wizard/releases)
+[![Version](https://img.shields.io/badge/version-0.37.29-00d1b2?style=flat-square)](https://github.com/prostoy23rus/zapret2wizard/releases)
 [![OpenWrt](https://img.shields.io/badge/OpenWrt-23.05%20|%2024.10%20|%2025.x-blue?style=flat-square)](https://openwrt.org)
 [![Пакеты](https://img.shields.io/badge/packages-aarch64%20|%20armv7%20|%20x86__64-success?style=flat-square)](#поддерживаемые-архитектуры)
 [![License](https://img.shields.io/badge/license-MIT-yellow?style=flat-square)](<./LICENSE>)
@@ -54,6 +54,24 @@ sh -c "$(curl -sSL https://cdn.jsdelivr.net/gh/prostoy23rus/zapret2wizard@main/i
 
 Бандл и `.apk` содержат LuCI-приложение, helper, сканер `blockcheckw`, движок `nfqws2`, списки доменов и пресеты. **Это не установка без зависимостей:** нужны системные пакеты OpenWrt, включая nftables/nfqueue, Lua и curl; возможность установки зависит от прошивки и её репозиториев.
 
+
+### Репозиторий пакетов (feed)
+
+CI публикует индексы в ветку `feed`: обновление штатным `opkg`/`apk`, без ручного скачивания.
+
+```sh
+# opkg (OpenWrt <= 24.10)
+ARCH=$(opkg print-architecture | awk '{print $2}' | grep -v -E "all|noarch" | head -1)
+echo "src/gz zapret2wizard https://raw.githubusercontent.com/prostoy23rus/zapret2wizard/feed/opkg/$ARCH" >> /etc/opkg/customfeeds.conf
+opkg update && opkg install luci-app-blockcheckw
+
+# apk (OpenWrt 25.x)
+ARCH=$(apk --print-arch)
+echo "https://raw.githubusercontent.com/prostoy23rus/zapret2wizard/feed/apk/$ARCH" >> /etc/apk/repositories
+apk update && apk add --allow-untrusted --upgrade zapret2wizard
+```
+
+Подробности и ограничения (пока без подписи пакетов): [docs/UPDATES-FEED.md](docs/UPDATES-FEED.md).
 Перед установкой бандл запускает **preflight**: проверяет платформу, nftables/nfqueue, procd, память, свободное место и средства загрузки; предупреждает о чужих движках DPI. Это предварительная проверка, а не гарантия совместимости.
 
 При первичной настройке установщик может запустить фоновый подбор для YouTube и Discord (`autosetup`). Прогресс виден в LuCI → Службы → Zapret2Wizard; длительность зависит от сети. Отключить автоподбор в установщике: `AUTOSETUP=0 sh install.sh`.

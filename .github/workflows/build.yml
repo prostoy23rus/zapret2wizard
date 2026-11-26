@@ -119,6 +119,22 @@ jobs:
           make -j"$(nproc)" LUA=lua5.4 LUAAPK=no
           ls -l src/apk
 
+      - name: Pack apk-tools for feed index
+        if: matrix.openwrt_arch == 'aarch64_cortex-a53'
+        run: |
+          cd /tmp/apk-tools/src
+          files="apk"
+          for f in libapk.so*; do [ -e "$f" ] && files="$files $f"; done
+          tar -czf /tmp/apk-tools-bin.tar.gz $files
+
+      - name: Upload apk-tools for feed
+        if: matrix.openwrt_arch == 'aarch64_cortex-a53'
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-tools-bin
+          path: /tmp/apk-tools-bin.tar.gz
+          retention-days: 14
+
       - name: Build bundle and apk
         env:
           LD_LIBRARY_PATH: /tmp/apk-tools/src
@@ -156,6 +172,54 @@ jobs:
             dist/*-bundle.tar.gz
           if-no-files-found: error
           retention-days: 14
+
+  feed:
+    name: publish repo feed
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: packages-*
+          merge-multiple: true
+          path: dist
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: apk-tools-bin
+          path: apk-bin
+
+      - name: Generate feed (opkg Packages + apk APKINDEX)
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/apk-bin
+        run: |
+          tar -xzf apk-bin/apk-tools-bin.tar.gz -C apk-bin
+          chmod +x apk-bin/apk
+          ./apk-bin/apk --version
+          python3 packaging/build-feed.py \
+            --dist dist --out feed \
+            --base-url "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/feed" \
+            --tag "${GITHUB_REF_NAME}" \
+            --apk-tools "$PWD/apk-bin/apk"
+
+      - name: Publish feed branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd feed
+          git init -q
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -qm "feed: ${GITHUB_REF_NAME}"
+          git branch -M feed
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push -f origin feed
 
   release:
     name: publish release

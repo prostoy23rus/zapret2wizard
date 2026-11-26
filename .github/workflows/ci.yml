@@ -96,6 +96,7 @@ jobs:
           python3 tools/test_helper_transfer.py
           lua5.4 tools/test_transfer_probe.lua
           python3 tools/test_transfer_probe.py
+          python3 tools/test_feed.py
           node tools/test_lifecycle_ui.js
           node tools/test_transfer_ui.js
           node tools/test_hostlist_integration.js
