@@ -211,6 +211,10 @@ MODULE
     python3 -c 'import json,sys; json.loads(sys.argv[1])' "$BCW_PREFLIGHT_JSON" || exit 1
     # start_bg must advertise repair instead of a dead end.
     grep -q 'cmd_engine_repair_bg >/dev/null 2>&1' "$HELPER" || exit 1
+    # issue #6 root cause: staged Lua must be readable by the dropped nfqws2 uid.
+    grep -q 'chmod 755 "$work"' "$HELPER" || exit 1
+    grep -q 'chmod 755 "$work/new-lua"' "$HELPER" || exit 1
+    grep -q 'exec 9>&-; cmd_engine_repair_bg' "$HELPER" || exit 1
     grep -q '"repairing":true' "$HELPER" || exit 1
 ) && ok 'preflight classifies incompatible engine and start_bg offers repair' \
   || fail 'preflight engine classification / start_bg repair advert'

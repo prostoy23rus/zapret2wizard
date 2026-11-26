@@ -2590,7 +2590,7 @@ cmd_start_bg() {
                 if [ -d /var/run/bcw_engine_repair.lock ]; then
                     echo '{"ok":false,"repairing":true,"error":"Движок nfqws2 уже восстанавливается — дождитесь завершения и повторите подбор"}'
                 else
-                    cmd_engine_repair_bg >/dev/null 2>&1 || true
+                    ( exec 9>&-; cmd_engine_repair_bg >/dev/null 2>&1 ) || true
                     echo '{"ok":false,"repairing":true,"error":"Движок nfqws2 несовместим с прошивкой или обновлением — автоматически восстанавливаю совместимую версию. Это занимает 1–2 минуты; затем подбор запустится снова."}'
                 fi
                 ;;
@@ -5498,6 +5498,9 @@ cmd_engine_repair() {
     (
         local work was_running=0 changed=0 committed=0 rollback_ok=1 f
         work=$(mktemp -d /tmp/bcw-engine-repair.XXXXXX) || exit 1
+        # nfqws2 drops privileges to nobody: staged Lua must be traversable/readable,
+        # otherwise a downloaded compatible engine is always rejected (issue #6).
+        chmod 755 "$work" || exit 1
         trap 'rm -rf "$work"' EXIT
         _svc_running && was_running=1
         # Бэкап включает оба пути и Lua; конфиг пользователя не трогаем.
@@ -5602,6 +5605,8 @@ LUA
                     engine_repair_state error "Не удалось загрузить совместимый набор Lua ($f); прежний движок сохранён"; exit 1;
                 }
             done
+            # Same dropped-uid requirement as production Lua directories.
+            chmod 755 "$work/new-lua" && chmod 644 "$work/new-lua/"*.lua || exit 1
             changed=1
             BCW_ENGINE_LUA_DIR="$work/new-lua"
             bcw_engine_ensure || { engine_repair_state error "$BCW_ENGINE_ERROR"; exit 1; }
