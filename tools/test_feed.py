@@ -82,8 +82,12 @@ def main():
                                            "luci-app-blockcheckw_9.9.9-1_aarch64_cortex-a53.ipk")):
             print("FAIL: ipk not copied")
             return 1
-        if not os.path.exists(os.path.join(out, "apk", "aarch64_cortex-a53", "zapret2wizard_9.9.9-r9_aarch64_cortex-a53.apk")):
-            print("FAIL: apk not copied")
+        apk_canonical = os.path.join(out, "apk", "aarch64_cortex-a53", "zapret2wizard-9.9.9-r9.apk")
+        if not os.path.exists(apk_canonical):
+            print("FAIL: apk not copied under canonical name")
+            return 1
+        if os.path.exists(os.path.join(out, "apk", "aarch64_cortex-a53", "zapret2wizard_9.9.9-r9_aarch64_cortex-a53.apk")):
+            print("FAIL: apk copied under non-canonical name")
             return 1
         sums = open(os.path.join(out, "SHA256SUMS"), encoding="utf-8").read()
         if "Packages" not in sums or "SHA256SUMS" in sums:
