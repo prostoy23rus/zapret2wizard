@@ -1,11 +1,11 @@
 {
-  "version": "0.37.31",
+  "version": "0.37.32",
   "release_date": "2026-11-24",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "feed: apk-пакеты публикуются под каноническим именем <name>-<version>.apk (apk иначе строит 404-URL); база apk-репозитория — .../feed/apk, arch apk добавляет сам",
-    "docs/README: исправлены команды apk update/upgrade для feed",
-    "0.37.31: исправление после 0.37.30"
+    "feed: packages.adb подписывается EC-ключом (секрет APK_SIGN_KEY), публичный ключ release-keys/zapret2wizard-apk.pem; apk обновляется без --allow-untrusted после установки ключа",
+    "CI: host-apk из OpenWrt ImageBuilder для mkndx --sign; проверка подписи adbdump в job; fallback без секрета — unsigned",
+    "docs/README: установка ключа и прямая ссылка на packages.adb"
   ]
 }

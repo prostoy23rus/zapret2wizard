@@ -199,18 +199,42 @@ jobs:
           name: apk-tools-bin
           path: apk-bin
 
-      - name: Generate feed (opkg Packages + apk APKINDEX)
+      - name: Install OpenWrt host apk (for signed packages.adb)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq zstd
+          curl -LfsS -m 300 -o /tmp/ib.tar.zst "https://downloads.openwrt.org/releases/25.12.6/targets/x86/64/openwrt-imagebuilder-25.12.6-x86-64.Linux-x86_64.tar.zst"
+          echo "a792e29bd2233cda67a0823030bfb53c0b61fbb3836b2063e88adf89730d563b  /tmp/ib.tar.zst" | sha256sum -c -
+          mkdir -p /tmp/ib host-apk
+          zstd -dc /tmp/ib.tar.zst | tar -xf - -C /tmp/ib --wildcards "*/staging_dir/host/bin/*" "*/staging_dir/host/lib/*"
+          ROOT=$(find /tmp/ib -maxdepth 1 -type d | tail -1)
+          cp -a "$ROOT/staging_dir/host" host-apk/
+          host-apk/staging_dir/host/bin/apk --version
+
+      - name: Generate feed (opkg Packages + apk APKINDEX/packages.adb)
         env:
           LD_LIBRARY_PATH: ${{ github.workspace }}/apk-bin
+          APK_SIGN_KEY: ${{ secrets.APK_SIGN_KEY }}
         run: |
           tar -xzf apk-bin/apk-tools-bin.tar.gz -C apk-bin
           chmod +x apk-bin/apk
           ./apk-bin/apk --version
+          SIGN_ARGS=""
+          if [ -n "$APK_SIGN_KEY" ]; then
+            echo "Signing key present: packages.adb will be signed"
+            printf '%s' "$APK_SIGN_KEY" > "$RUNNER_TEMP/apk-sign.key"
+            chmod 600 "$RUNNER_TEMP/apk-sign.key"
+            SIGN_ARGS="--apk-host $PWD/host-apk/staging_dir/host/bin/apk --apk-sign-key $RUNNER_TEMP/apk-sign.key --apk-sign-pub release-keys/zapret2wizard-apk.pem"
+          else
+            echo "::warning::APK_SIGN_KEY is not set; feed will be unsigned (--allow-untrusted required)"
+          fi
           python3 packaging/build-feed.py \
             --dist dist --out feed \
             --base-url "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/feed" \
             --tag "${GITHUB_REF_NAME}" \
-            --apk-tools "$PWD/apk-bin/apk"
+            --apk-tools "$PWD/apk-bin/apk" \
+            $SIGN_ARGS
+
 
       - name: Publish feed branch
         if: startsWith(github.ref, 'refs/tags/v')

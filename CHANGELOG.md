@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.37.32] (2026-11-27)
+
+### feed: подписанный packages.adb (OpenWrt 25 apk)
+
+- CI подписывает v3-индекс `packages.adb` EC-ключом (`apk mkndx --sign` из
+  host-apk OpenWrt ImageBuilder) при наличии секрета `APK_SIGN_KEY`;
+  публичный ключ — `release-keys/zapret2wizard-apk.pem`.
+- После установки ключа в `/etc/apk/keys/` и прямой ссылки на `packages.adb`
+  обновление идёт через `apk update && apk add --upgrade zapret2wizard`
+  **без** `--allow-untrusted`.
+- Подпись индекса проверяется в CI (`apk adbdump --keys-dir ...`) и на живом
+  роутере; при отсутствии секрета feed собирается без подписи (fallback).
+- `docs/UPDATES-FEED.md` и README обновлены.
+
+
 ## [0.37.31] (2026-11-27)
 
 ### feed: канонические имена apk-пакетов

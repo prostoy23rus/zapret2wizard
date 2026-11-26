@@ -21,19 +21,30 @@ opkg install luci-app-blockcheckw     # первая установка
 opkg upgrade luci-app-blockcheckw     # обновление
 ```
 
-## OpenWrt 25.x / apk
+## OpenWrt 25.x / apk (подписанный индекс)
 
+Сначала установите публичный ключ (один раз):
 ```sh
-echo "https://raw.githubusercontent.com/prostoy23rus/zapret2wizard/feed/apk" \
-  >> /etc/apk/repositories
-apk update --allow-untrusted
-apk add --allow-untrusted --upgrade zapret2wizard   # первая установка/обновление
-# или: apk upgrade --allow-untrusted zapret2wizard
+mkdir -p /etc/apk/keys
+wget -O /etc/apk/keys/zapret2wizard-apk.pem \
+  "https://raw.githubusercontent.com/prostoy23rus/zapret2wizard/main/release-keys/zapret2wizard-apk.pem"
 ```
 
-Почему `--allow-untrusted`: индекс и пакеты пока **не подписаны**. Это следующий шаг;
-пока целостность проверяется по `SHA256SUMS` в ветке `feed` и релизным артефактам.
-Ставьте feed только если понимаете разницу между «скачал с GitHub» и «доверяю ключу».
+Затем добавьте **прямую ссылку на подписанный `packages.adb`** (архитектура — из `DISTRIB_ARCH`):
+```sh
+ARCH=$(grep DISTRIB_ARCH /etc/openwrt_release | cut -d\' -f2)
+echo "https://raw.githubusercontent.com/prostoy23rus/zapret2wizard/feed/apk/$ARCH/packages.adb" \
+  >> /etc/apk/repositories
+apk update
+apk add --upgrade zapret2wizard
+```
+
+Почему не `--allow-untrusted`: индекс `packages.adb` подписан EC-ключом
+(SHA256 публичного ключа: `3983f89f80d9168ec822c0721b72d48dd7d60b97103bd8eedb0e649431f5dbe1`), apk проверяет подпись индекса;
+пакеты проверяются по хешам из индекса. Если ключ не установлен или feed
+собран без секрета, apk потребует `--allow-untrusted`.
+
+`.apk`-файлы в feed лежат под каноническими именами `<name>-<version>.apk`.
 
 ## Проверка и откат
 
@@ -56,7 +67,7 @@ blockcheckw-helper test preset_youtube
 
 ## Ограничения
 
-- пакеты не подписаны (см. выше);
+- APKINDEX/packages.adb подписывается при наличии секрета `APK_SIGN_KEY`; публичный ключ — `release-keys/zapret2wizard-apk.pem`;
 - feed собирается только на теги, промежуточные push в `main` туда не попадают;
 - одна версия на архитектуру: обновление идёт «вперёд», откат — вручную из релиза;
 - перед обновлением службы с активным подбором дождитесь завершения (или остановите поиск).
