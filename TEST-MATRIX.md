@@ -150,3 +150,16 @@ Zapret2Wizard не должен и не может применять desync к 
 | Повторный `start_bg` | `started:true`, подбор пошёл; `stop` → служба `running`, `test preset_youtube` = optimal |
 
 Причина, найденная live: `nfqws2` сбрасывает uid и не мог читать Lua из staged-каталога `mktemp` (0700) — скачанный движок отклонялся. Исправлено в 0.37.26 (staged `755`/`644` + освобождение flock).
+
+## Списки доменов и цель «Встроенные хосты» (0.37.27, live)
+
+Проверено 2026-11-27 на Routerich AX3000, OpenWrt 25.12.6, aarch64 (apk), 0.37.27.
+
+| Проверка | Результат |
+|---|---|
+| `read_hostlist user` | `count:33`, `revision:<sha256 64 hex>`, домены возвращаются |
+| `write_hostlist user --revision <sha256> …` | `saved:true`, `restart:"verified"`, `restart_verified:true` |
+| Откат записи (исходный список) | hash совпал с исходным, 33 домена |
+| `start_bg --target builtin` | подбор пошёл: «Фаза 1: Экспресс-тест векторов DPI (rutracker.org), target=builtin» |
+| `stop` после подбора | служба running (300/65300/65301), `test preset_youtube` = optimal |
+| 0.37.27 UI | у «Общих сайтов (User)» есть пояснение и кнопка «🎯 Подобрать стратегию для этих сайтов»; при отказе применения — модалка с причиной |
