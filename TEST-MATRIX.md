@@ -179,3 +179,16 @@ Zapret2Wizard не должен и не может применять desync к 
 | МТС Москва | AS25513 | RouteRich 25.12.6 aarch64 | 0.36.9 | exact probes пройдены (YouTube/Discord/Instagram, netns ok) |
 
 После любых изменений стратегий присылайте новый отчёт с датой и версией: у провайдеров бывают «волны».
+
+## Репозиторий (feed): обновление пакетом (0.37.31, live)
+
+Проверено 2026-11-27 на Routerich AX3000, OpenWrt 25.12.6, aarch64 (apk).
+
+| Шаг | Результат |
+|---|---|
+| Добавлен `https://raw.githubusercontent.com/prostoy23rus/zapret2wizard/feed/apk` в `/etc/apk/repositories` | `apk update --allow-untrusted` → 11183 пакета, наш индекс найден |
+| `apk add --allow-untrusted --upgrade zapret2wizard` | 0.37.28-r3 → **0.37.31-r3** из feed, без ручных файлов |
+| После обновления | служба running (300/65300/65301), `test preset_youtube` = optimal, `evidence` показывает app 0.37.31 / pkg 0.37.31-r3 |
+| Восстановление | строка feed удалена, `apk update` чистый; пакет 0.37.31-r3 остался |
+
+opkg-индекс (`feed/opkg/<arch>/Packages`) и apk-индекс (`feed/apk/<arch>/APKINDEX.tar.gz`) генерируются CI на каждый тег; база feed: `https://raw.githubusercontent.com/prostoy23rus/zapret2wizard/feed`. Пакеты пока без подписи (`--allow-untrusted`), подпись — следующий шаг.
