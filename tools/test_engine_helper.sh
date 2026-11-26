@@ -71,6 +71,7 @@ preflight = source[source.index('scan_preflight() {'):source.index('\ncmd_start(
 start = preflight.index('    if ! engine_load')
 end = preflight.index('\n    fi', start) + len('\n    fi')
 (out / 'preflight-engine.sh').write_text(preflight[start:end] + '\n')
+(out / 'preflight-full.sh').write_text(source[source.index('scan_preflight() {'):source.index('\ncmd_start() {')] + '\n')
 # Extract just the real worker, not the dispatcher or any background launcher.
 start = source.index('\ncmd_engine_repair() {') + 1
 end = source.index('\n}\n', start) + 3
@@ -184,6 +185,35 @@ MODULE
     [ -n "$BCW_ENGINE_ERROR" ]
 ) && ok 'engine_load and preflight delegate to fixture check/link' \
   || fail 'engine_load/preflight fixture delegation'
+
+# issue #6: an incompatible/foreign nfqws2 must be classified as "engine" with a
+# JSON error_code and the repair hint; --no-reply must stay silent so start_bg
+# can emit the single repairing reply itself.
+(
+    . "$TMP/preflight-full.sh"
+    ensure_lua_layout() { :; }
+    engine_load() { BCW_ENGINE_ERROR='Движок не поддерживает обязательный --filter-mark: /usr/bin/nfqws2'; return 1; }
+    bcw_engine_link() { return 1; }
+    write_status() { :; }
+    engine_reply() { :; }
+    modprobe() { :; }
+    LOG_FILE="$TMP/preflight.log"
+    BCW_PREFLIGHT_CODE="" BCW_PREFLIGHT_JSON=""
+    scan_preflight --no-reply >"$TMP/pf.out" && exit 1
+    [ -s "$TMP/pf.out" ] && exit 1
+    [ "$BCW_PREFLIGHT_CODE" = engine ] || exit 1
+    case "$BCW_PREFLIGHT_JSON" in *'"error_code":"engine"'*) ;; *) exit 1 ;; esac
+    case "$BCW_PREFLIGHT_JSON" in *engine_repair*) ;; *) exit 1 ;; esac
+    python3 -c 'import json,sys; json.loads(sys.argv[1])' "$BCW_PREFLIGHT_JSON" || exit 1
+    # Quotes from engine output must not break JSON.
+    engine_load() { BCW_ENGINE_ERROR='unsupported "--filter-mark"'; return 1; }
+    scan_preflight --no-reply >/dev/null || true
+    python3 -c 'import json,sys; json.loads(sys.argv[1])' "$BCW_PREFLIGHT_JSON" || exit 1
+    # start_bg must advertise repair instead of a dead end.
+    grep -q 'cmd_engine_repair_bg >/dev/null 2>&1' "$HELPER" || exit 1
+    grep -q '"repairing":true' "$HELPER" || exit 1
+) && ok 'preflight classifies incompatible engine and start_bg offers repair' \
+  || fail 'preflight engine classification / start_bg repair advert'
 
 # Full synchronous worker with production engine module, fake executable and
 # fake downloads. Worker/layout hardcoded paths are relocated; services and

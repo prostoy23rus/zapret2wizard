@@ -1202,26 +1202,35 @@ scan_tunnel_service() {
 # вернёт общее «предполётная проверка не прошла», по которому непонятно,
 # что именно чинить.
 scan_preflight() {
-    local miss="" hint=""
+    local miss="" hint="" code="" reply=1
+    [ "${1:-}" = "--no-reply" ] && reply=0
+    BCW_PREFLIGHT_CODE="" BCW_PREFLIGHT_JSON=""
     if [ -d /var/run/bcw_engine_repair.lock ]; then
-        engine_reply 0 "Дождитесь завершения проверки движка после обновления"
+        BCW_PREFLIGHT_CODE="repairing"
+        BCW_PREFLIGHT_JSON='{"error":"Дождитесь завершения проверки движка после обновления","error_code":"repairing"}'
+        [ "$reply" = "1" ] && printf '%s\n' "$BCW_PREFLIGHT_JSON"
         return 1
     fi
     ensure_lua_layout
     command -v nft >/dev/null 2>&1 || { miss="$miss nftables"; hint="$hint; установите пакет nftables"; }
     [ -r /opt/zapret2/lua/zapret-lib.lua ] || { miss="$miss lua(zapret-lib.lua)"; hint="$hint; перезапустите службу или install.sh"; }
     if ! engine_load || ! bcw_engine_link; then
+        code="engine"
         miss="$miss nfqws2: ${BCW_ENGINE_ERROR:-не удалось проверить движок}"
-        hint="$hint; обновите службу — совместимый движок восстанавливается автоматически"
+        hint="$hint; выполните: blockcheckw-helper engine_repair (в панели — «Починить движок») — совместимый движок будет восстановлен автоматически"
     fi
     modprobe nfnetlink_queue 2>/dev/null || true
     modprobe nft_queue 2>/dev/null || true
-    [ -d /sys/module/nfnetlink_queue ] || { miss="$miss модуль nfnetlink_queue"; hint="$hint; opkg install kmod-nfnetlink-queue"; }
-    [ -d /sys/module/nft_queue ] || { miss="$miss модуль nft_queue"; hint="$hint; opkg install kmod-nft-queue"; }
+    [ -d /sys/module/nfnetlink_queue ] || { miss="$miss модуль nfnetlink_queue"; hint="$hint; opkg install kmod-nfnetlink-queue"; [ -n "$code" ] || code="modules"; }
+    [ -d /sys/module/nft_queue ] || { miss="$miss модуль nft_queue"; hint="$hint; opkg install kmod-nft-queue"; [ -n "$code" ] || code="modules"; }
     if [ -n "$miss" ]; then
         echo "[blockcheckw-helper] scan preflight failed:$miss" >> "$LOG_FILE" 2>/dev/null || true
+        # JSON must stay parseable: strip quotes from engine diagnostic text.
+        local jmiss=$(printf '%s' "$miss$hint" | tr '"' "'")
+        BCW_PREFLIGHT_CODE="$code"
+        BCW_PREFLIGHT_JSON=$(printf '{"error":"Проверка перед подбором не прошла:%s","error_code":"%s"}' "$jmiss" "$code")
         write_status "error" 0 "Проверка перед подбором не прошла:$miss$hint" ",\"strategies\":[]"
-        printf '{"error":"Проверка перед подбором не прошла:%s%s"}\n' "$miss" "$hint"
+        [ "$reply" = "1" ] && printf '%s\n' "$BCW_PREFLIGHT_JSON"
         return 1
     fi
     return 0
@@ -2573,7 +2582,28 @@ cmd_start_bg() {
         return 0
     fi
     # Быстрая синхронная проверка: UI сразу получает понятную причину.
-    scan_preflight || return 1
+    # Несовместимый/чужой nfqws2 (issue #6) — не тупик: запускаем штатное
+    # восстановление движка и просим UI дождаться его и повторить подбор.
+    if ! scan_preflight --no-reply; then
+        case "$BCW_PREFLIGHT_CODE" in
+            engine)
+                if [ -d /var/run/bcw_engine_repair.lock ]; then
+                    echo '{"ok":false,"repairing":true,"error":"Движок nfqws2 уже восстанавливается — дождитесь завершения и повторите подбор"}'
+                else
+                    cmd_engine_repair_bg >/dev/null 2>&1 || true
+                    echo '{"ok":false,"repairing":true,"error":"Движок nfqws2 несовместим с прошивкой или обновлением — автоматически восстанавливаю совместимую версию. Это занимает 1–2 минуты; затем подбор запустится снова."}'
+                fi
+                ;;
+            repairing)
+                echo '{"ok":false,"repairing":true,"error":"Движок nfqws2 восстанавливается — дождитесь завершения и повторите подбор"}'
+                ;;
+            *)
+                printf '%s\n' "$BCW_PREFLIGHT_JSON"
+                return 1
+                ;;
+        esac
+        return 0
+    fi
 
     local quoted=""
     local a
@@ -5356,11 +5386,15 @@ DOCTORJSON
     fi
 
     # Проверяем именно тот ABI/опции/Lua, которые нужны сканеру, а не chmod +x.
+    # Жёсткий бюджет: чужой/старый движок не должен задерживать doctor до RPC-таймаута.
+    local _eng_tmo_prev="${BCW_ENGINE_TIMEOUT:-}"
+    BCW_ENGINE_TIMEOUT=3
     if engine_load && bcw_engine_check && bcw_engine_check "${BCW_ENGINE_ROOT:-}/opt/zapret2/nfq2/nfqws2" "${BCW_ENGINE_ROOT:-}/opt/zapret2/lua"; then
         add_check "движок nfqws2" 1 "/usr/bin и /opt: filter-mark и Lua совместимы" ""
     else
-        add_check "движок nfqws2" 0 "${BCW_ENGINE_ERROR:-модуль проверки недоступен}" "Обновите службу: движок и Lua будут проверены и восстановлены автоматически"
+        add_check "движок nfqws2" 0 "${BCW_ENGINE_ERROR:-модуль проверки недоступен}" "Нажмите «Починить движок» или выполните: blockcheckw-helper engine_repair"
     fi
+    if [ -n "$_eng_tmo_prev" ]; then BCW_ENGINE_TIMEOUT="$_eng_tmo_prev"; else unset BCW_ENGINE_TIMEOUT; fi
 
     # nfqws2 из /opt/zapret2/nfq2 ищет zapret-lib.lua в /opt/zapret2/lua.
     # Без этого сканер падает на предполётной проверке (exit code 6).

@@ -326,7 +326,7 @@ function withTimeout(promise, ms, fallback) {
 }
 
 function getDoctor() {
-	return withTimeout(fs.exec(HELPER_BIN, ['doctor', '--json']), 8000, null).then(function(res) {
+	return withTimeout(fs.exec(HELPER_BIN, ['doctor', '--json']), 20000, null).then(function(res) {
 		if (!res) return null;
 		var out = (res && res.stdout) ? res.stdout : '';
 		var line = out.split('\n').filter(function(l) { return l.trim().charAt(0) === '{'; }).pop();
@@ -3569,8 +3569,13 @@ return view.extend({
 			var btns = document.querySelectorAll('.bcw-btn-diag-copy, .bcw-btn-diag-copy-header');
 			btns.forEach(function(b) { b.textContent = '⏳ Сбор данных...'; });
 
-			fs.exec(HELPER_BIN, ['diag', '--json']).then(function(res) {
+			withTimeout(fs.exec(HELPER_BIN, ['diag', '--json']), 20000, null).then(function(res) {
 				var reportText = '';
+				if (!res) {
+					ui.addNotification(null, E('p', {}, 'Диагностика не ответила за 20 секунд. Проверьте службу и журнал /tmp/bcw_engine_repair.log, затем повторите. Если движок несовместим — нажмите 🩺 Починить движок.'), 'danger');
+					btns.forEach(function(b) { b.textContent = '📋 Скопировать диагностический отчёт'; });
+					return;
+				}
 				if (res && res.stdout) {
 					try {
 						var d = JSON.parse(res.stdout);
@@ -4245,7 +4250,42 @@ return view.extend({
 			bcwShowModal('🔍 Найдено рабочих стратегий: ' + count, body, actions);
 		}
 
-		function startScan() {
+		// issue #6: несовместимый/чужой nfqws2 больше не тупик. Helper сам
+		// запускает восстановление движка, а UI ждёт его и повторяет подбор.
+		function waitEngineRepairThenRetry(allowRetry) {
+			var tries = 0;
+			progressPhaseEl.textContent = 'Восстанавливаю совместимый движок nfqws2…';
+			progressPhaseEl.style.color = '#e5c07b';
+			progressTextEl.textContent = 'Текущий движок несовместим с прошивкой или обновлением. Идёт автоматическое восстановление — обычно 1–2 минуты, ничего нажимать не нужно.';
+			progressBarEl.style.width = '15%';
+			progressPercentEl.textContent = '15%';
+			function finishWithError(text) {
+				resetScanUI();
+				ui.addNotification(null, E('p', {}, text), 'danger');
+			}
+			function poll() {
+				fs.exec(HELPER_BIN, ['engine_repair_status']).then(function(res) {
+					var st = parseHelperJson(res) || {};
+					if (st.state === 'done') {
+						ui.addNotification(null, E('p', {}, '✓ Движок восстановлен — запускаю подбор заново'), 'info');
+						if (allowRetry !== false) { startScan(true); } else { resetScanUI(); }
+						return;
+					}
+					if (st.state === 'error') {
+						finishWithError('Не удалось восстановить движок: ' + (st.error || st.message || 'неизвестная ошибка') + '. Выполните blockcheckw-helper engine_repair по SSH или откройте Диагностика → журнал проверки.');
+						return;
+					}
+					if (++tries < 90) { setTimeout(poll, 2000); return; }
+					finishWithError('Восстановление движка не завершилось за 3 минуты. Проверьте /tmp/bcw_engine_repair.log и повторите поиск.');
+				}).catch(function() {
+					if (++tries < 90) { setTimeout(poll, 2000); return; }
+					finishWithError('Не удалось получить статус восстановления движка. Проверьте службу и повторите поиск.');
+				});
+			}
+			poll();
+		}
+
+		function startScan(repairRetried) {
 			var domain = '';
 			if (currentTarget === 'domains') {
 				domain = customDomainInput.value.trim();
@@ -4315,6 +4355,17 @@ return view.extend({
 								ui.addNotification(null, E('p', {}, 'Подбор уже идёт — продолжаем следить за прогрессом.'), 'info');
 								isRunning = true;
 								startPolling();
+								return;
+							}
+							if (parsed.repairing) {
+								ui.addNotification(null, E('p', {}, parsed.error || 'Движок nfqws2 восстанавливается…'), 'info');
+								waitEngineRepairThenRetry(!repairRetried);
+								return;
+							}
+							// Старый helper (до 0.37.25) отдаёт текст без repairing.
+							if (!repairRetried && /движок|nfqws2|filter-mark/i.test(parsed.error)) {
+								ui.addNotification(null, E('p', {}, 'Движок nfqws2 несовместим — запускаю восстановление…'), 'info');
+								fs.exec(HELPER_BIN, ['engine_repair_bg']).catch(function() {}).then(function() { waitEngineRepairThenRetry(true); });
 								return;
 							}
 							ui.addNotification(null, E('p', {}, 'Ошибка запуска: ' + parsed.error), 'danger');
