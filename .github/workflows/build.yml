@@ -116,6 +116,11 @@ jobs:
           sudo apt-get install -y -qq build-essential git zlib1g-dev libssl-dev libzstd-dev lua5.4
           git clone -q --depth 1 --branch v3.0.5 https://github.com/alpinelinux/apk-tools.git /tmp/apk-tools
           cd /tmp/apk-tools
+          # The 3.0.5 index applet reads only v2 package metadata; our mkpkg
+          # packages are v3, so let index read v3 metadata (APKINDEX format
+          # is unchanged). Used only by the feed job.
+          sed -i "s/apk_pkg_read(db, arg, \&pkg, false)/apk_pkg_read(db, arg, \&pkg, true)/" src/app_index.c
+          grep -n "apk_pkg_read(db, arg" src/app_index.c
           make -j"$(nproc)" LUA=lua5.4 LUAAPK=no
           ls -l src/apk
 
