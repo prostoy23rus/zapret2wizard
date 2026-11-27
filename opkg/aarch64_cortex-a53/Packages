@@ -1,0 +1,12 @@
+Package: luci-app-blockcheckw
+Version: 0.38.7-1
+Depends: libc, luci-base, nftables, curl, coreutils-timeout, ca-bundle, kmod-nfnetlink-queue, kmod-nft-queue
+Section: luci
+Priority: optional
+Architecture: aarch64_cortex-a53
+Installed-Size: 8264
+Filename: luci-app-blockcheckw_0.38.7-1_aarch64_cortex-a53.ipk
+Size: 2697145
+SHA256sum: 1bba8ed5266242f2455024c2118e2b879e4f2419d51205fc84787368bc428b41
+Description: Zapret2Wizard 0.38.7 — автономный обход DPI (Zapret2)
+ Включает LuCI-интерфейс, helper, сканер blockcheckw и движок nfqws2.

@@ -1,0 +1,20 @@
+{
+  "arches": {
+    "aarch64_cortex-a53": {
+      "apk": 1,
+      "opkg": 1
+    },
+    "arm_cortex-a7": {
+      "apk": 1,
+      "opkg": 1
+    },
+    "x86_64": {
+      "apk": 1,
+      "opkg": 1
+    }
+  },
+  "base_url": "https://raw.githubusercontent.com/prostoy23rus/zapret2wizard/feed",
+  "generated_at": 1795801327,
+  "signed": true,
+  "tag": "v0.38.7"
+}
