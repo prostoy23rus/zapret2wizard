@@ -206,3 +206,15 @@ opkg-индекс (`feed/opkg/<arch>/Packages`) и apk-индекс (`feed/apk/<
 | После обновления | служба running (300/65300/65301), `test preset_youtube` = optimal, evidence app 0.37.34 |
 
 Публичный ключ: `release-keys/zapret2wizard-apk.pem` (SHA256 `3983f89f80d9168ec822c0721b72d48dd7d60b97103bd8eedb0e649431f5dbe1`). Приватный ключ хранится только в GitHub Actions secret `APK_SIGN_KEY` и локальном бэкапе вне репозитория.
+
+## issue #7/#9: честная проверка потока (0.37.35–0.37.36, live)
+
+| Проверка | Результат |
+|---|---|
+| `test preset_youtube` (0.37.36) | `all_ok=true`, `optimal`; эндпоинты: страница 200/943386, объёмный гейт 206/3112260, видео-хост googlevideo 200 |
+| Мёртвый `test.googlevideo.com` | NXDOMAIN (проверено router/1.1.1.1/8.8.8.8) — в 0.37.36 удалён из проверки и hostlist; primary теперь полная страница www.youtube.com |
+| Объёмный гейт | 2×3.1 МБ `base.js` с Content-Length через временный nfqws; обрыв = `volume_capped`, `all_ok=false` |
+| Регрессия обрыва | `test_cut_at_one_mib_is_not_verified`: 2 МиБ объявлено, 1 МиБ доставлено → `transfer_verified=false`, `termination=partial` |
+| Сканер кандидатов | `check` использует полную передачу (`BodyMode::Unlimited`, M=3), не 16 КБ |
+
+Граница: фактическое воспроизведение видео не заявляется (`playback: unknown`); видео-CDN-кап, не затрагивающий www, публичным статическим объектом не измеряется (test.googlevideo мёртв, videoplayback требует poToken).
