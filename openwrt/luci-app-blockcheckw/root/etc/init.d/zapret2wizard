@@ -464,6 +464,13 @@ start_service_locked() {
 	if [ "${BCW_ENGINE_ONLY:-0}" != "1" ] && [ "$canary_on" = "1" ] && [ -x /usr/bin/blockcheckw-helper ]; then
 		( unset BCW_POLICY_LOCK_HELD; sleep 15; /usr/bin/blockcheckw-helper canary_start preset_youtube "$canary_iv" >/dev/null 2>&1 ) &
 	fi
+
+	# Googlevideo dead clusters (issue #8): fast restore of the saved RST map,
+	# then a bounded background refresh. Default off; never blocks Start.
+	if [ "${BCW_ENGINE_ONLY:-0}" != "1" ] && [ -x /usr/bin/blockcheckw-helper ] && [ "$(uci -q get zapret2wizard.main.dead_clusters 2>/dev/null)" = "1" ]; then
+		/usr/bin/blockcheckw-helper dead_clusters_apply_state >/dev/null 2>&1 || true
+		( unset BCW_POLICY_LOCK_HELD; sleep 20; /usr/bin/blockcheckw-helper dead_clusters_cron_run >/dev/null 2>&1 ) &
+	fi
 }
 
 stop_service() {

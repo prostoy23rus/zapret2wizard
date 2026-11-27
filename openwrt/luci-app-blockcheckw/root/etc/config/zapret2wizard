@@ -2,6 +2,8 @@
 config zapret2wizard 'main'
 	option enabled '1'
 	option auto_dns '1'
+	option dead_clusters '0'
+	option dead_clusters_interval '60'
 	option debug '0'
 	option scripts '1'
 	option postnat '1'

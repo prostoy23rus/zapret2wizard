@@ -1,10 +1,10 @@
 {
-  "version": "0.37.37",
+  "version": "0.38.0",
   "release_date": "2026-11-24",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "fix: cmd_speedtest Lua-блок — shell-комментарии # заменены на Lua -- (в 0.37.36 speedtest падал с syntax error)",
-    "Тесты production heredoc обновлены под новый primary www.youtube.com (порог 600 КБ; кап ловится клиентской объёмной пробой base.js)"
+    "issue #8: модуль «Мёртвые кластеры googlevideo» — LuCI-тумблер, cron-скан, nft RST-правило, freeze и правило /24; по умолчанию выключен",
+    "Lua-модуль + офлайн-тесты; live-проверка на РТК (0 мёртвых), синтетическое nft-правило проверено"
   ]
 }

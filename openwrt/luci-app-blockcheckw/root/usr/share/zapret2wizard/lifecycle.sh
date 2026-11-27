@@ -132,6 +132,7 @@ bcw_lifecycle_stop_effects() {
 bcw_lifecycle_stop_effects_locked() {
     bcw_lifecycle_root || return 1
     bcw_lifecycle_table_remove zapret2wizard || return 1
+    bcw_lifecycle_table_remove dead_ggc || return 1
     rm -f "${BCW_LIFECYCLE_ROOT:-}/var/run/zapret2wizard_"*.pid || return 1
     # Scanner/engine-only stop deliberately retains DNS, canary and QUIC state.
     [ "${BCW_INTERNAL_STOP:-0}" = 1 ] || [ "${BCW_ENGINE_ONLY:-0}" = 1 ] && return 0
@@ -207,7 +208,7 @@ bcw_lifecycle_cron_cleanup() {
     [ -f "$cron" ] || return 0
     tmp="$cron.bcw.$$"
     # A generic word such as watchdog is never ownership evidence.
-    awk '!/\/usr\/bin\/blockcheckw-helper[[:space:]]+(health_tick|evolve_nightly|bypass_sync)([[:space:]]|$)/ && !/[[:space:]]#[[:space:]]bcw-(health|evolve|bypass)[[:space:]]*$/' "$cron" > "$tmp" || return 1
+    awk '!/\/usr\/bin\/blockcheckw-helper[[:space:]]+(health_tick|evolve_nightly|bypass_sync|dead_clusters_cron_run)([[:space:]]|$)/ && !/[[:space:]]#[[:space:]]bcw-(health|evolve|bypass|deadggc)[[:space:]]*$/' "$cron" > "$tmp" || return 1
     if ! cmp -s "$cron" "$tmp"; then
         cat "$tmp" > "$cron" || { rm -f "$tmp"; return 1; }
         rm -f "$tmp"
@@ -219,6 +220,7 @@ bcw_lifecycle_cleanup_locked() {
     bcw_lifecycle_root || return 1
     bcw_lifecycle_dns_cleanup && bcw_lifecycle_quic_remove &&
         bcw_lifecycle_legacy_quic_remove && bcw_lifecycle_table_remove zapret2wizard &&
+        bcw_lifecycle_table_remove dead_ggc &&
         bcw_lifecycle_cron_cleanup || { bcw_lifecycle_error "owned resource cleanup failed"; return 1; }
 }
 bcw_lifecycle_prepare_remove() { bcw_lifecycle_transaction bcw_lifecycle_prepare_remove_guarded "$@"; }

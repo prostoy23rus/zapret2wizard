@@ -218,3 +218,16 @@ opkg-индекс (`feed/opkg/<arch>/Packages`) и apk-индекс (`feed/apk/<
 | Сканер кандидатов | `check` использует полную передачу (`BodyMode::Unlimited`, M=3), не 16 КБ |
 
 Граница: фактическое воспроизведение видео не заявляется (`playback: unknown`); видео-CDN-кап, не затрагивающий www, публичным статическим объектом не измеряется (test.googlevideo мёртв, videoplayback требует poToken).
+
+## issue #8: мёртвые кластеры googlevideo (0.38.0, live)
+
+| Шаг | Результат |
+|---|---|
+| `dead_clusters_status` (выключено) | `{"enabled":false,"elements":[],"last_scan":0}` |
+| Синтетическое правило 203.0.113.0/24 | `nft list table inet dead_ggc` → set + `forward` prio -5, `reject with tcp reset` |
+| Реальный скан на РТК | 17 хостов, 17 живых, 0 мёртвых, 27 с; правило не создаётся |
+| Cron | `# bcw-deadggc` в `/etc/crontabs/root`, раз в час |
+| Служба | `test preset_youtube` = optimal, all_ok=true, служба running |
+| Freeze/правило /24 | покрыто офлайн-тестами `tools/test_dead_clusters.py` (9 тестов) |
+
+Граница: эффект «видео с первого раза» проверяется на линии с SYN-drop (AS21017); на РТК мёртвых IP не обнаружено, поэтому RST-правило не активно. Управление: LuCI-карточка или `dead_clusters_toggle 1/0`.

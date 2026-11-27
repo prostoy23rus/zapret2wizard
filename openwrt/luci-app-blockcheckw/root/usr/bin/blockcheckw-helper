@@ -7586,6 +7586,332 @@ safe_dns_restart() (
     return 1
 )
 
+# ==============================================================================
+# Googlevideo dead clusters (issue #8): SYN-drop map -> instant TCP RST.
+# Default off. Never changes the map when no alive IP was observed (freeze).
+# ==============================================================================
+DEAD_CLUSTERS_TABLE="dead_ggc"
+DEAD_CLUSTERS_DIR="/etc/zapret2wizard"
+DEAD_CLUSTERS_STATE="$DEAD_CLUSTERS_DIR/dead_clusters.meta"
+DEAD_CLUSTERS_ELEMENTS="$DEAD_CLUSTERS_DIR/dead_clusters.elements"
+DEAD_CLUSTERS_HOSTS="$DEAD_CLUSTERS_DIR/dead_ggc_hosts.txt"
+DEAD_CLUSTERS_LOCK="/var/run/bcw_dead_clusters.lock"
+DEAD_CLUSTERS_LOG="/tmp/bcw_dead_clusters.log"
+DEAD_CLUSTERS_MODULE="/usr/share/zapret2wizard/dead_clusters.lua"
+DEAD_CLUSTERS_SEED_VIDEOS="dQw4w9WgXcQ 9bZkp7q19f0 kJQP7kiw5Fk mxI7t_hpxEA aqz-KE-bpKQ jNQXAC9IVRw"
+
+dead_clusters_log() {
+    printf "%s %s\n" "$(date "+%m-%d %H:%M:%S" 2>/dev/null)" "$*" >> "$DEAD_CLUSTERS_LOG" 2>/dev/null || true
+    if [ -f "$DEAD_CLUSTERS_LOG" ] && [ "$(wc -l < "$DEAD_CLUSTERS_LOG" 2>/dev/null || echo 0)" -gt 300 ]; then
+        tail -n 200 "$DEAD_CLUSTERS_LOG" > "$DEAD_CLUSTERS_LOG.t" 2>/dev/null && mv "$DEAD_CLUSTERS_LOG.t" "$DEAD_CLUSTERS_LOG"
+    fi
+}
+
+dead_clusters_enabled() {
+    [ "$(uci -q get zapret2wizard.main.dead_clusters 2>/dev/null || echo 0)" = "1" ]
+}
+
+dead_clusters_interval() {
+    local iv=$(uci -q get zapret2wizard.main.dead_clusters_interval 2>/dev/null || echo 60)
+    case "$iv" in ""|*[!0-9]*) iv=60 ;; esac
+    [ "$iv" -ge 5 ] || iv=5
+    echo "$iv"
+}
+
+dead_clusters_element_count() {
+    [ -s "$DEAD_CLUSTERS_ELEMENTS" ] || { echo 0; return 0; }
+    grep -cE "^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?$" "$DEAD_CLUSTERS_ELEMENTS" 2>/dev/null || echo 0
+}
+
+dead_clusters_running() {
+    local pid
+    [ -d "$DEAD_CLUSTERS_LOCK" ] || return 1
+    pid=$(cat "$DEAD_CLUSTERS_LOCK/pid" 2>/dev/null || true)
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then return 0; fi
+    rm -rf "$DEAD_CLUSTERS_LOCK" 2>/dev/null || true
+    return 1
+}
+
+dead_clusters_lock_acquire() {
+    dead_clusters_running && return 1
+    mkdir -p "$DEAD_CLUSTERS_LOCK" 2>/dev/null || return 1
+    echo $$ > "$DEAD_CLUSTERS_LOCK/pid" 2>/dev/null || { rm -rf "$DEAD_CLUSTERS_LOCK"; return 1; }
+    DEAD_CLUSTERS_LOCK_HELD=1
+    return 0
+}
+
+dead_clusters_lock_release() {
+    rm -rf "$DEAD_CLUSTERS_LOCK" 2>/dev/null || true
+    DEAD_CLUSTERS_LOCK_HELD=0
+}
+
+dead_clusters_meta_reset() {
+    local meta="$1"
+    . "$meta" 2>/dev/null || true
+}
+
+cmd_dead_clusters_status() {
+    local enabled=false running=false nft_active=false
+    local last_scan=0 duration=0 alive=0 dead=0 hosts=0 pairs=0 subnets=0 singles=0 frozen=0 capped=0 error=""
+    local elems=0 elems_json="[]" interval
+    dead_clusters_enabled && enabled=true
+    dead_clusters_running && running=true
+    nft list table inet "$DEAD_CLUSTERS_TABLE" >/dev/null 2>&1 && nft_active=true
+    if [ -r "$DEAD_CLUSTERS_STATE" ]; then . "$DEAD_CLUSTERS_STATE" 2>/dev/null || true; fi
+    interval=$(dead_clusters_interval)
+    case "$last_scan" in ""|*[!0-9]*) last_scan=0 ;; esac
+    case "$duration" in ""|*[!0-9]*) duration=0 ;; esac
+    for _v in alive dead hosts pairs subnets singles frozen capped; do eval "[ -n "\$$_v" ] || $_v=0"; done
+    case "$frozen" in 0|1) ;; *) frozen=0 ;; esac
+    case "$capped" in 0|1) ;; *) capped=0 ;; esac
+    error=$(printf "%s" "${error:-}" | tr -cd "A-Za-z0-9._-")
+    if [ -s "$DEAD_CLUSTERS_ELEMENTS" ]; then
+        elems=$(dead_clusters_element_count)
+        elems_json=$(awk "BEGIN{printf \"[\"} /^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+(\\/[0-9]+)?$/ {gsub(/[^0-9.\\/]/,\"\"); printf \"%s\\\"%s\\\"\", (n++?\",\":\"\"), \$0} END{printf \"]\"}" "$DEAD_CLUSTERS_ELEMENTS" 2>/dev/null || true)
+        [ -n "$elems_json" ] || elems_json="[]"
+    fi
+    printf '{"enabled":%s,"running":%s,"nft_active":%s,"elements_count":%s,"elements":%s,"last_scan":%s,"duration":%s,"alive":%s,"dead":%s,"hosts":%s,"pairs":%s,"subnets":%s,"singles":%s,"frozen":%s,"capped":%s,"error":"%s","interval":%s}\n' \
+        "$enabled" "$running" "$nft_active" "$elems" "$elems_json" "$last_scan" "$duration" "$alive" "$dead" "$hosts" "$pairs" "$subnets" "$singles" "$frozen" "$capped" "$error" "$interval"
+}
+
+dead_clusters_apply_file() {
+    local file="$1" n nft_file="/tmp/bcw_dead_ggc.nft" line
+    n=$(grep -cE "^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?$" "$file" 2>/dev/null || true)
+    [ -n "$n" ] || n=0
+    if [ "$n" -eq 0 ]; then
+        nft delete table inet "$DEAD_CLUSTERS_TABLE" 2>/dev/null || true
+        return 0
+    fi
+    command -v nft >/dev/null 2>&1 || return 1
+    {
+        printf "table inet %s {\n" "$DEAD_CLUSTERS_TABLE"
+        printf "\tset dead {\n\t\ttype ipv4_addr\n\t\tflags interval\n\t\tauto-merge\n\t\telements = {\n"
+        while IFS= read -r line; do
+            case "$line" in *[!0-9./]*) continue ;; esac
+            printf "\t\t\t%s,\n" "$line"
+        done < "$file"
+        printf "\t\t}\n\t}\n"
+        printf "\tchain forward {\n\t\ttype filter hook forward priority -5; policy accept;\n\t\tip daddr @dead tcp dport 443 reject with tcp reset\n\t}\n}\n"
+    } > "$nft_file" || return 1
+    if ! nft -c -f "$nft_file" >/dev/null 2>&1; then
+        rm -f "$nft_file"
+        return 1
+    fi
+    nft delete table inet "$DEAD_CLUSTERS_TABLE" 2>/dev/null || true
+    if ! nft -f "$nft_file"; then
+        rm -f "$nft_file"
+        return 1
+    fi
+    rm -f "$nft_file"
+    return 0
+}
+
+dead_clusters_write_meta() {
+    local last_scan="$1" duration="$2" alive="$3" dead="$4" hosts="$5" pairs="$6" subnets="$7" singles="$8" frozen="$9" capped="${10}" error="${11}"
+    local elems tmp="$DEAD_CLUSTERS_STATE.$$"
+    elems=$(dead_clusters_element_count)
+    printf "last_scan=%s\nduration=%s\nalive=%s\ndead=%s\nhosts=%s\npairs=%s\nsubnets=%s\nsingles=%s\nelements=%s\nfrozen=%s\ncapped=%s\nerror=%s\n" \
+        "$last_scan" "$duration" "$alive" "$dead" "$hosts" "$pairs" "$subnets" "$singles" "$elems" "$frozen" "$capped" "$error" > "$tmp"
+    mv "$tmp" "$DEAD_CLUSTERS_STATE"
+}
+
+cmd_dead_clusters_apply_state() {
+    local n
+    if ! dead_clusters_enabled; then
+        nft delete table inet "$DEAD_CLUSTERS_TABLE" 2>/dev/null || true
+        echo '{"applied":false,"reason":"disabled"}'
+        return 0
+    fi
+    n=$(dead_clusters_element_count)
+    if dead_clusters_apply_file "$DEAD_CLUSTERS_ELEMENTS"; then
+        printf '{"applied":true,"elements":%s}\n' "$n"
+        return 0
+    fi
+    echo '{"applied":false,"error":"nft"}'
+    return 1
+}
+
+dead_clusters_cron_install() {
+    local cron_file="/etc/crontabs/root"
+    local line="17 * * * * /usr/bin/blockcheckw-helper dead_clusters_cron_run >/dev/null 2>&1 # bcw-deadggc"
+    mkdir -p /etc/crontabs 2>/dev/null || true
+    touch "$cron_file" 2>/dev/null || true
+    sed -i "/bcw-deadggc/d" "$cron_file" 2>/dev/null || true
+    echo "$line" >> "$cron_file"
+    /etc/init.d/cron enable >/dev/null 2>&1 || true
+    /etc/init.d/cron restart >/dev/null 2>&1 || true
+}
+
+dead_clusters_cron_remove() {
+    local cron_file="/etc/crontabs/root"
+    [ -f "$cron_file" ] || return 0
+    sed -i "/bcw-deadggc/d" "$cron_file" 2>/dev/null || true
+    /etc/init.d/cron restart >/dev/null 2>&1 || true
+}
+
+dead_clusters_resolve() {
+    local host="$1" ip="" srv
+    for srv in "" "1.1.1.1"; do
+        if [ -n "$srv" ]; then
+            ip=$(nslookup "$host" "$srv" 2>/dev/null | awk "/^Address: /{print \$2}" | grep -E "^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$" | grep -vE "^(0\.|127\.|10\.|169\.254\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)" | head -n1)
+        else
+            ip=$(nslookup "$host" 2>/dev/null | awk "/^Address: /{print \$2}" | grep -E "^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$" | grep -vE "^(0\.|127\.|10\.|169\.254\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.)" | head -n1)
+        fi
+        [ -n "$ip" ] && { printf "%s" "$ip"; return 0; }
+    done
+    return 1
+}
+
+dead_clusters_probe() {
+    local host="$1" ip="$2" attempt=1 tc
+    while [ "$attempt" -le 2 ]; do
+        tc=$(curl -4 -sS -k -o /dev/null -m 3 --connect-timeout 2 --resolve "$host:443:$ip" -w "%{time_connect}" "https://$host/" 2>/dev/null)
+        case "$tc" in ""|0|0.000000) : ;; *) return 0 ;; esac
+        [ "$attempt" -eq 1 ] && sleep 1
+        attempt=$((attempt + 1))
+    done
+    return 1
+}
+
+cmd_dead_clusters_scan_bg() {
+    dead_clusters_enabled || { echo '{"started":false,"error":"disabled"}'; return 1; }
+    if dead_clusters_running; then echo '{"started":false,"busy":true}'; return 1; fi
+    mkdir -p "$DEAD_CLUSTERS_DIR" 2>/dev/null || true
+    : >> "$DEAD_CLUSTERS_LOG" 2>/dev/null || true
+    if command -v setsid >/dev/null 2>&1; then
+        setsid /usr/bin/blockcheckw-helper dead_clusters_scan </dev/null >>"$DEAD_CLUSTERS_LOG" 2>&1 &
+    else
+        /usr/bin/blockcheckw-helper dead_clusters_scan </dev/null >>"$DEAD_CLUSTERS_LOG" 2>&1 &
+    fi
+    echo $! > /tmp/bcw_dead_clusters.pid 2>/dev/null || true
+    echo '{"started":true}'
+}
+
+cmd_dead_clusters_cron_run() {
+    dead_clusters_enabled || return 0
+    [ ! -e /var/run/bcw_service.stopped ] || return 0
+    local now last iv
+    now=$(date +%s)
+    last=$(sed -n "s/^last_scan=//p" "$DEAD_CLUSTERS_STATE" 2>/dev/null | head -n1)
+    case "$last" in ""|*[!0-9]*) last=0 ;; esac
+    iv=$(dead_clusters_interval)
+    if [ "$last" -gt 0 ] && [ $((now - last)) -lt $((iv * 60)) ]; then return 0; fi
+    cmd_dead_clusters_scan_impl
+}
+
+cmd_dead_clusters_scan_impl() {
+    dead_clusters_enabled || return 0
+    command -v curl >/dev/null 2>&1 || return 1
+    command -v lua >/dev/null 2>&1 || { dead_clusters_log "lua missing"; return 1; }
+    [ -r "$DEAD_CLUSTERS_MODULE" ] || { dead_clusters_log "module missing"; return 1; }
+    mkdir -p "$DEAD_CLUSTERS_DIR" 2>/dev/null || return 1
+    dead_clusters_log "scan start"
+    if ! dead_clusters_lock_acquire; then dead_clusters_log "scan busy"; return 0; fi
+    local tmp tmpdir started finished hosts pairs alive dead now last_scan duration
+    local alive_n=0 dead_n=0 subnets=0 singles=0 elems_n=0 frozen=0 capped=0 error=""
+    local service_stopped=0
+    [ ! -e /var/run/bcw_service.stopped ] || service_stopped=1
+    tmpdir=$(mktemp -d /tmp/bcw_dead.XXXXXX 2>/dev/null) || { dead_clusters_lock_release; return 1; }
+    tmp="$tmpdir"
+    trap "rm -rf \"$tmpdir\"; dead_clusters_lock_release" EXIT INT TERM
+    started=$(date +%s)
+    : > "$tmp/found"
+    for v in $DEAD_CLUSTERS_SEED_VIDEOS; do
+        curl -4 -sS -m 10 "https://www.youtube.com/watch?v=$v" -o "$tmp/page" 2>/dev/null || true
+        [ -s "$tmp/page" ] && lua "$DEAD_CLUSTERS_MODULE" hosts "$tmp/page" >> "$tmp/found" 2>/dev/null || true
+    done
+    touch "$DEAD_CLUSTERS_HOSTS" 2>/dev/null || true
+    { cat "$DEAD_CLUSTERS_HOSTS" 2>/dev/null; cat "$tmp/found"; } | awk "NF && !seen[\$0]++" | tail -n 256 > "$tmp/hosts"
+    mv "$tmp/hosts" "$DEAD_CLUSTERS_HOSTS" 2>/dev/null || true
+    chmod 644 "$DEAD_CLUSTERS_HOSTS" 2>/dev/null || true
+    hosts=$(grep -c . "$DEAD_CLUSTERS_HOSTS" 2>/dev/null || echo 0)
+    dead_clusters_log "hosts=$hosts"
+    if [ "$hosts" -eq 0 ]; then error="no_hosts"; frozen=1; fi
+    : > "$tmp/pairs"
+    if [ -z "$error" ]; then
+        while IFS= read -r h; do
+            [ -n "$h" ] || continue
+            ip=$(dead_clusters_resolve "$h" 2>/dev/null || true)
+            [ -n "$ip" ] && printf "%s %s\n" "$h" "$ip" >> "$tmp/pairs"
+        done < "$DEAD_CLUSTERS_HOSTS"
+        awk "NF==2 && !seen[\$2]++" "$tmp/pairs" | head -n 160 > "$tmp/pairs.u"
+        pairs=$(grep -c . "$tmp/pairs.u" 2>/dev/null || echo 0)
+        dead_clusters_log "pairs=$pairs"
+        if [ "$pairs" -eq 0 ]; then error="no_pairs"; frozen=1; fi
+    fi
+    : > "$tmp/alive"; : > "$tmp/dead"
+    if [ -z "$error" ]; then
+        local n=0
+        while IFS=" " read -r h ip; do
+            [ -n "$h" ] && [ -n "$ip" ] || continue
+            ( if dead_clusters_probe "$h" "$ip"; then echo "$ip" >> "$tmp/alive"; else echo "$ip" >> "$tmp/dead"; fi ) &
+            n=$((n + 1))
+            [ $((n % 8)) -eq 0 ] && wait
+        done < "$tmp/pairs.u"
+        wait
+        alive_n=$(sort -u "$tmp/alive" 2>/dev/null | grep -c . || true)
+        dead_n=$(sort -u "$tmp/dead" 2>/dev/null | grep -c . || true)
+        [ -n "$alive_n" ] || alive_n=0
+        [ -n "$dead_n" ] || dead_n=0
+        dead_clusters_log "alive=$alive_n dead=$dead_n"
+        if [ "$alive_n" -eq 0 ]; then error="no_alive"; frozen=1; fi
+    fi
+    if [ "$frozen" -eq 0 ] && [ -z "$error" ] && ! dead_clusters_enabled; then
+        error="disabled"
+    fi
+    if [ "$frozen" -eq 0 ] && [ -z "$error" ]; then
+        lua "$DEAD_CLUSTERS_MODULE" build "$tmp/dead" "$tmp/alive" 512 > "$tmp/build" 2>/dev/null || { error="build_failed"; frozen=1; }
+        if [ "$frozen" -eq 0 ]; then
+            alive=$(sed -n "s/^alive=//p" "$tmp/build" | head -n1); [ -n "$alive" ] && alive_n="$alive"
+            dead=$(sed -n "s/^dead=//p" "$tmp/build" | head -n1); [ -n "$dead" ] && dead_n="$dead"
+            subnets=$(sed -n "s/^subnets=//p" "$tmp/build" | head -n1); [ -n "$subnets" ] || subnets=0
+            singles=$(sed -n "s/^singles=//p" "$tmp/build" | head -n1); [ -n "$singles" ] || singles=0
+            elems_n=$(sed -n "s/^elements=//p" "$tmp/build" | head -n1); [ -n "$elems_n" ] || elems_n=0
+            capped=$(sed -n "s/^capped=//p" "$tmp/build" | head -n1); [ -n "$capped" ] || capped=0
+            sed -n "s/^element=//p" "$tmp/build" | grep -E "^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?$" > "$tmp/elements"
+            if [ "$service_stopped" -eq 1 ] || [ -e /var/run/bcw_service.stopped ]; then
+                error="service_stopped"
+            elif ! dead_clusters_apply_file "$tmp/elements"; then
+                error="nft_failed"
+            else
+                mv "$tmp/elements" "$DEAD_CLUSTERS_ELEMENTS" 2>/dev/null || true
+                chmod 644 "$DEAD_CLUSTERS_ELEMENTS" 2>/dev/null || true
+            fi
+        fi
+    fi
+    finished=$(date +%s)
+    duration=$((finished - started))
+    last_scan=$finished
+    dead_clusters_write_meta "$last_scan" "$duration" "$alive_n" "$dead_n" "$hosts" "${pairs:-0}" "$subnets" "$singles" "$frozen" "$capped" "$error"
+    dead_clusters_log "done duration=${duration}s frozen=$frozen error=${error:-none} elements=$(dead_clusters_element_count)"
+    trap - EXIT INT TERM
+    rm -rf "$tmpdir"
+    dead_clusters_lock_release
+    return 0
+}
+
+cmd_dead_clusters_toggle() {
+    local val="$1" now last iv
+    case "$val" in 1|on|true) val=1 ;; 0|off|false) val=0 ;; *) echo '{"success":false,"error":"invalid value"}'; return 1 ;; esac
+    uci -q set "zapret2wizard.main.dead_clusters=$val" || { echo '{"success":false,"error":"uci failed"}'; return 1; }
+    uci -q commit zapret2wizard >/dev/null 2>&1 || true
+    if [ "$val" = "1" ]; then
+        dead_clusters_cron_install
+        cmd_dead_clusters_apply_state >/dev/null 2>&1 || true
+        now=$(date +%s)
+        last=$(sed -n "s/^last_scan=//p" "$DEAD_CLUSTERS_STATE" 2>/dev/null | head -n1)
+        case "$last" in ""|*[!0-9]*) last=0 ;; esac
+        iv=$(dead_clusters_interval)
+        if [ "$last" -eq 0 ] || [ $((now - last)) -ge $((iv * 60)) ]; then
+            cmd_dead_clusters_scan_bg >/dev/null 2>&1 || true
+        fi
+        echo '{"success":true,"enabled":true}'
+    else
+        dead_clusters_cron_remove
+        nft delete table inet "$DEAD_CLUSTERS_TABLE" 2>/dev/null || true
+        echo '{"success":true,"enabled":false}'
+    fi
+}
 cleanup_leftovers() {
     lifecycle_load || return 1
     if bcw_lifecycle_cleanup; then
@@ -8527,6 +8853,12 @@ optimize_dns) cmd_optimize_dns ;;
     tunnel_check) shift; cmd_tunnel_check "$@" ;;
     results) shift; cmd_results "$@" ;;
     ensure_hostlists_bg) cmd_ensure_hostlists_bg ;;
+    dead_clusters_status) cmd_dead_clusters_status ;;
+    dead_clusters_toggle) shift; cmd_dead_clusters_toggle "$@" ;;
+    dead_clusters_scan_bg) cmd_dead_clusters_scan_bg ;;
+    dead_clusters_scan) cmd_dead_clusters_scan_impl ;;
+    dead_clusters_cron_run) cmd_dead_clusters_cron_run ;;
+    dead_clusters_apply_state) cmd_dead_clusters_apply_state ;;
     service) shift; cmd_service "$@" ;;
     svc_heal) _svc_heal ;;
     genome_args) shift; cmd_genome_args "$@" ;;

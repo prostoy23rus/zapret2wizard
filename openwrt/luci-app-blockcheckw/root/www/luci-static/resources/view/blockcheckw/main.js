@@ -2764,6 +2764,8 @@ return view.extend({
 			var _auditCard = buildAuditCard();
 			if (_auditCard) _auditCard.style.display = 'none';
 			dashRight.appendChild(_auditCard);
+			var _deadCard = buildDeadClustersCard();
+			if (_deadCard) dashRight.appendChild(_deadCard);
 			// «Что применяется сейчас» и результаты — внутрь того же блока целей,
 			// чтобы это был один раздел, а не отдельная карточка
 			for (var ci = 2; ci < cards.length; ci++) {
@@ -3441,6 +3443,110 @@ return view.extend({
 		}
 
 		// -------- Проверка YouTube: измерение без вмешательства --------
+		// issue #8: googlevideo dead clusters (default off) — fast TCP RST instead of
+		// 20s SYN-drop timeouts. The map is built by helper (watch pages -> DNS ->
+		// TCP:443, 2 attempts); /24 only when >=2 dead and 0 alive.
+		function buildDeadClustersCard() {
+			var sw = makeToggleSwitch(false, function(v) { setEnabled(v); }, "Фильтр мёртвых кластеров googlevideo");
+			var statusEl = E("div", { style: "font-size:12.5px;line-height:1.5;margin-bottom:6px;" }, "Загрузка состояния…");
+			var detailEl = E("div", { style: "font-size:11.5px;color:var(--bcw-text-muted);line-height:1.45;" }, "");
+			var listEl = E("div", { style: "font-family:ui-monospace,monospace;font-size:11px;color:#abb2bf;margin-top:6px;white-space:pre-wrap;max-height:110px;overflow:auto;" }, "");
+			var scanBtn = E("button", { class: "bcw-btn-secondary", style: "height:30px;font-size:12px;" }, "🔄 Пересканировать");
+			var running = false, pollTimer = null, wantPoll = null, card;
+			function fmtTs(ts) {
+				if (!ts) return "—";
+				try { return new Date(ts * 1000).toLocaleString(); } catch (e) { return String(ts); }
+			}
+			function errText(code) {
+				switch (String(code || "")) {
+					case "": return "";
+					case "no_alive": return " живых IP не найдено — карта не изменена (freeze)";
+					case "no_hosts": return " не удалось собрать хосты — карта не изменена";
+					case "no_pairs": return " DNS не дал IP — карта не изменена";
+					case "nft_failed": return " nft-правило не применилось";
+					case "service_stopped": return " служба остановлена — правило не применялось";
+					case "build_failed": return " ошибка сборки карты";
+					default: return " " + code;
+				}
+			}
+			function render(st) {
+				if (!st) { statusEl.style.color = "#e06c75"; statusEl.textContent = "✗ Нет ответа helper"; return; }
+				running = !!st.running;
+				sw.setChecked(!!st.enabled);
+				var txt;
+				if (st.running) txt = "⏳ Сканирую googlevideo-подсети…";
+				else if (!st.enabled) txt = "⚪ Выключено · по умолчанию не фильтруем";
+				else if (st.error) txt = "⚠ Включено, но" + errText(st.error);
+				else if (st.elements_count > 0) txt = "✅ Включено · мёртвых IP: " + st.dead + " · живых: " + st.alive + " · правил: " + st.elements_count;
+				else txt = "✅ Включено · мёртвых IP пока нет (" + st.alive + " живых проверено)";
+				statusEl.textContent = txt;
+				statusEl.style.color = st.error ? "#e5c07b" : (st.enabled ? "#98c379" : "#abb2bf");
+				var parts = [];
+				parts.push("таблица nft: " + (st.nft_active ? "активна" : "нет"));
+				parts.push("элементов: " + (st.elements_count || 0));
+				parts.push("подсетей /24: " + (st.subnets || 0));
+				parts.push("скан: " + fmtTs(st.last_scan));
+				if (st.duration) parts.push("за " + st.duration + " с");
+				if (st.frozen) parts.push("freeze активен");
+				detailEl.textContent = parts.join(" · ");
+				var items = st.elements || [];
+				listEl.textContent = items.length ? items.join("\n") : (st.enabled && st.elements_count === 0 ? "Активных подсетей нет — правило не создаётся." : "");
+				scanBtn.disabled = !st.enabled || st.running;
+				if (st.running) { if (pollTimer) clearTimeout(pollTimer); pollTimer = setTimeout(refresh, 4000); }
+			}
+			function watchScan() {
+				if (wantPoll) clearInterval(wantPoll);
+				var n = 0;
+				wantPoll = setInterval(function() {
+					n++;
+					refresh();
+					if (n >= 20) { clearInterval(wantPoll); wantPoll = null; }
+				}, 3000);
+			}
+			function refresh() {
+				fs.exec(HELPER_BIN, ["dead_clusters_status"]).then(function(res) {
+					var st = null; try { st = JSON.parse((res && res.stdout) || "{}"); } catch (e) {}
+					render(st);
+				}).catch(function() { render(null); });
+			}
+			function setEnabled(v) {
+				sw.classList.add("bcw-switch-busy");
+				fs.exec(HELPER_BIN, ["dead_clusters_toggle", v ? "1" : "0"]).then(function(res) {
+					sw.classList.remove("bcw-switch-busy");
+					var out = null; try { out = JSON.parse((res && res.stdout) || "{}"); } catch (e) {}
+					if (!out || !out.success) {
+						ui.addNotification(null, E("p", {}, "Не удалось переключить фильтр мёртвых кластеров: " + ((out && out.error) || "ошибка")), "warning");
+						sw.setChecked(!v);
+						return;
+					}
+					ui.addNotification(null, E("p", {}, v ? "Фильтр мёртвых кластеров включён; карта строится в фоне" : "Фильтр мёртвых кластеров выключен, RST-правило снято"), "info");
+					refresh();
+					if (v) watchScan();
+				}).catch(function() { sw.classList.remove("bcw-switch-busy"); });
+			}
+			scanBtn.addEventListener("click", function() {
+				scanBtn.disabled = true;
+				fs.exec(HELPER_BIN, ["dead_clusters_scan_bg"]).then(function(res) {
+					var out = null; try { out = JSON.parse((res && res.stdout) || "{}"); } catch (e) {}
+					if (out && out.busy) ui.addNotification(null, E("p", {}, "Скан уже выполняется"), "info");
+					refresh();
+					watchScan();
+				}).catch(function() { refresh(); });
+			});
+			card = E("div", { class: "bcw-card", id: "bcw-dead-clusters-card", style: "padding:14px;margin-top:16px;" }, [
+				E("div", { style: "display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px;" }, [
+					E("div", { style: "font-weight:bold;font-size:13px;" }, "☠️ Мёртвые кластеры googlevideo"),
+					sw
+				]),
+				E("div", { style: "font-size:11.5px;color:var(--bcw-text-muted);line-height:1.45;margin-bottom:8px;" },
+					"Если видео зависает на 15–20 с при старте и работает со второй попытки: ТСПУ дропает SYN к части googlevideo-подсетей. Модуль сам находит такие IP и мгновенно отвечает RST, чтобы плеер взял живой узел. По умолчанию выключено."),
+				statusEl, detailEl, listEl,
+				E("div", { style: "display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap;" }, [scanBtn])
+			]);
+			refresh();
+			return card;
+		}
+
 		function buildAuditCard() {
 			var auditOut = E('div', { id: 'bcw-audit-out', style: 'font-size: 12.5px; margin-top: 10px; line-height: 1.5;' });
 			var auditBtn = E('button', {

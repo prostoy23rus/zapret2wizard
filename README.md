@@ -2,7 +2,7 @@
 
 **Контроль обхода DPI/ТСПУ на OpenWrt:** движок `zapret2 (nfqws2)`, Rust-сканер стратегий и веб-интерфейс LuCI в одном комплекте. Подбирайте кандидатов под свою сеть, управляйте доменами и проверяйте результат — без установки приложений на каждом устройстве. Системные зависимости устанавливаются отдельно пакетным менеджером; после установки обычная обработка трафика не требует доступа к GitHub.
 
-[![Version](https://img.shields.io/badge/version-0.37.32-00d1b2?style=flat-square)](https://github.com/prostoy23rus/zapret2wizard/releases)
+[![Version](https://img.shields.io/badge/version-0.38.0-00d1b2?style=flat-square)](https://github.com/prostoy23rus/zapret2wizard/releases)
 [![OpenWrt](https://img.shields.io/badge/OpenWrt-23.05%20|%2024.10%20|%2025.x-blue?style=flat-square)](https://openwrt.org)
 [![Пакеты](https://img.shields.io/badge/packages-aarch64%20|%20armv7%20|%20x86__64-success?style=flat-square)](#поддерживаемые-архитектуры)
 [![License](https://img.shields.io/badge/license-MIT-yellow?style=flat-square)](<./LICENSE>)
@@ -92,6 +92,26 @@ sh /tmp/zapret2wizard-main/tools/cleanup-leftovers.sh
 Очистка удаляет только принадлежащие приложению DNS-записи, QUIC/nft-правила и cron-задачи. Старые DNS-записи без доказанной принадлежности сохраняются: их нужно проверить вручную, а не удалять по совпадению домена. Пользовательские конфигурация и списки не являются целью очистки.
 
 </details>
+
+## Мёртвые кластеры googlevideo (issue #8, по умолчанию выключено)
+
+Если на вашей линии YouTube-видео зависает на 15–20 секунд при старте и открывается
+со второй попытки, ТСПУ может молча дропать SYN к части подсетей `googlevideo.com`.
+Модуль сам строит карту таких IP и отдаёт клиенту мгновенный TCP RST — плеер быстрее
+берёт живой узел. Сервер не подменяется: выбор кластера остаётся за Google.
+
+В LuCI: **Сканер → карточка «☠️ Мёртвые кластеры googlevideo»**. Или по SSH:
+```sh
+blockcheckw-helper dead_clusters_toggle 1   # включить (карта строится в фоне)
+blockcheckw-helper dead_clusters_status     # живые/мёртвые IP, подсети, время скана
+blockcheckw-helper dead_clusters_scan_bg    # пересканировать сейчас
+blockcheckw-helper dead_clusters_toggle 0   # выключить и снять RST-правило
+```
+
+Правила безопасности: включается только вручную; `/24` блокируется лишь при
+≥2 мёртвых и 0 живых IP в подсети, одиночные мёртвые — точечно `/32`; если живых
+IP не найдено вообще (сеть/YouTube лежит), карта **не меняется** (freeze).
+Скан идёт раз в час (cron),IPv4/443; при остановке службы RST-таблица снимается.
 
 ## Как это работает
 
