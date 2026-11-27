@@ -2290,7 +2290,20 @@ EOF
                 # Приложение YouTube использует отдельный SNI youtubei.googleapis.com;
                 # если он закрыт — добавляем отдельный профиль YTApi (проверено на МТС).
                 case "$target" in
-                    preset_youtube|youtube) cmd_fix_ytapi >/dev/null 2>&1 || true ;;
+                    preset_youtube|youtube)
+                        # YTApi repair restarts the service and probes up to 5
+                        # candidates; doing it synchronously left the scan stuck
+                        # at 90% for many minutes after the strategy was already
+                        # verified. Run it detached with a hard timeout.
+                        if command -v timeout >/dev/null 2>&1 && [ ! -d /tmp/bcw_ytapi_bg.lock ]; then
+                            (
+                                sleep 5
+                                mkdir /tmp/bcw_ytapi_bg.lock 2>/dev/null || exit 0
+                                timeout 90 /usr/bin/blockcheckw-helper fix_ytapi >/dev/null 2>&1 || true
+                                rmdir /tmp/bcw_ytapi_bg.lock 2>/dev/null || true
+                            ) >/dev/null 2>&1 &
+                        fi
+                        ;;
                 esac
                 apply_info=",\"auto_applied\":true,\"tried_candidates\":$tried,\"circular_used\":$circular_used,\"circular_members\":$circular_members"
                 [ -n "$stab_single" ] && apply_info="$apply_info,\"stability_single\":\"$stab_single\""
@@ -5111,7 +5124,7 @@ cmd_fix_ytapi() {
         # одна проба может соврать на волне DPI, поэтому две попытки.
         local r i
         for i in 1 2; do
-            r=$(cmd_test preset_youtubei 2>/dev/null | tail -n 1)
+            r=$(timeout 20 /usr/bin/blockcheckw-helper test preset_youtubei 2>/dev/null | tail -n 1)
             case "$r" in *'"all_ok":true'*) return 0 ;; esac
             sleep 2
         done
@@ -5132,7 +5145,7 @@ cmd_fix_ytapi() {
         uci -q set zapret2wizard.YTApi.script="$1"
         uci -q commit zapret2wizard
         /usr/share/zapret2wizard/uci2config >/dev/null 2>&1 || true
-        /etc/init.d/zapret2wizard restart >/dev/null 2>&1 || true
+        timeout 20 /etc/init.d/zapret2wizard restart >/dev/null 2>&1 || true
         wait_dpi_ready 15
     }
     _ytapi_json() {
@@ -5207,7 +5220,7 @@ YTJSON
         uci -q set zapret2wizard.YTApi.enabled=0
         uci -q commit zapret2wizard
         /usr/share/zapret2wizard/uci2config >/dev/null 2>&1 || true
-        /etc/init.d/zapret2wizard restart >/dev/null 2>&1 || true
+        timeout 20 /etc/init.d/zapret2wizard restart >/dev/null 2>&1 || true
         wait_dpi_ready 15
     fi
     _ytapi_json 0 ""

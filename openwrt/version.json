@@ -1,11 +1,11 @@
 {
-  "version": "0.38.3",
+  "version": "0.38.4",
   "release_date": "2026-11-24",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "fix(UI): карточка мёртвых кластеров не вызывает helper во время первого рендера (setTimeout 1.2с) и не может уронить страницу (try/catch)",
-    "fix(helper): dead_clusters_toggle идемпотентен — повтор того же значения не делает uci commit/cron restart/nft, старый закэшированный UI больше не нагружает router",
-    "fix(page load): LuCI-страница открывается без ожидания модуля мёртвых кластеров"
+    "fix(scan): после авто-применения YTApi-починка запускается в фоне с timeout 90с и не держит скан на 90%",
+    "fix(scan): каждая проба YTApi ограничена 20с, перезапуски службы — 20с; стратегия уже применена, скан завершается сразу",
+    "fix(scan): фоновый YTApi-фикс защищён lock-файлом /tmp/bcw_ytapi_bg.lock"
   ]
 }
