@@ -2769,7 +2769,8 @@ return view.extend({
 			var _auditCard = buildAuditCard();
 			if (_auditCard) _auditCard.style.display = 'none';
 			dashRight.appendChild(_auditCard);
-			var _deadCard = buildDeadClustersCard();
+			var _deadCard = null;
+			try { _deadCard = buildDeadClustersCard(); } catch (e) { _deadCard = null; }
 			if (_deadCard) dashRight.appendChild(_deadCard);
 			// «Что применяется сейчас» и результаты — внутрь того же блока целей,
 			// чтобы это был один раздел, а не отдельная карточка
@@ -3548,7 +3549,9 @@ return view.extend({
 				statusEl, detailEl, listEl,
 				E("div", { style: "display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap;" }, [scanBtn])
 			]);
-			refresh();
+			// Не трогаем helper во время первого рендера: страница должна
+			// отрисоваться сразу даже на медленном rpcd/скане.
+			setTimeout(refresh, 1200);
 			return card;
 		}
 

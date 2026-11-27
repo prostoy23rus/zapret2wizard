@@ -1,10 +1,11 @@
 {
-  "version": "0.38.2",
+  "version": "0.38.3",
   "release_date": "2026-11-24",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "UI: «Найденные рабочие стратегии» всегда свёрнуты при смене пресета/домена; раскрываются только кликом",
-    "UI: пустые результаты больше не форсируют isStrategiesExpanded=true; добавлен регрессионный тест tools/test_results_spoiler_ui.js"
+    "fix(UI): карточка мёртвых кластеров не вызывает helper во время первого рендера (setTimeout 1.2с) и не может уронить страницу (try/catch)",
+    "fix(helper): dead_clusters_toggle идемпотентен — повтор того же значения не делает uci commit/cron restart/nft, старый закэшированный UI больше не нагружает router",
+    "fix(page load): LuCI-страница открывается без ожидания модуля мёртвых кластеров"
   ]
 }

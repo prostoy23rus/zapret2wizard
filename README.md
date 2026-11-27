@@ -2,7 +2,7 @@
 
 **Контроль обхода DPI/ТСПУ на OpenWrt:** движок `zapret2 (nfqws2)`, Rust-сканер стратегий и веб-интерфейс LuCI в одном комплекте. Подбирайте кандидатов под свою сеть, управляйте доменами и проверяйте результат — без установки приложений на каждом устройстве. Системные зависимости устанавливаются отдельно пакетным менеджером; после установки обычная обработка трафика не требует доступа к GitHub.
 
-[![Version](https://img.shields.io/badge/version-0.38.2-00d1b2?style=flat-square)](https://github.com/prostoy23rus/zapret2wizard/releases)
+[![Version](https://img.shields.io/badge/version-0.38.3-00d1b2?style=flat-square)](https://github.com/prostoy23rus/zapret2wizard/releases)
 [![OpenWrt](https://img.shields.io/badge/OpenWrt-23.05%20|%2024.10%20|%2025.x-blue?style=flat-square)](https://openwrt.org)
 [![Пакеты](https://img.shields.io/badge/packages-aarch64%20|%20armv7%20|%20x86__64-success?style=flat-square)](#поддерживаемые-архитектуры)
 [![License](https://img.shields.io/badge/license-MIT-yellow?style=flat-square)](<./LICENSE>)

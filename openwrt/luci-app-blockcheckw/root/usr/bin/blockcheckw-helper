@@ -7891,8 +7891,24 @@ cmd_dead_clusters_scan_impl() {
 }
 
 cmd_dead_clusters_toggle() {
-    local val="$1" now last iv
+    local val="$1" now last iv cur
     case "$val" in 1|on|true) val=1 ;; 0|off|false) val=0 ;; *) echo '{"success":false,"error":"invalid value"}'; return 1 ;; esac
+    cur=$(uci -q get zapret2wizard.main.dead_clusters 2>/dev/null || echo 0)
+    # Idempotent: an old/cached UI (or a second tab) must not hammer uci/cron/nft.
+    if [ "$cur" = "$val" ]; then
+        if [ "$val" = "1" ]; then
+            grep -q "bcw-deadggc" /etc/crontabs/root 2>/dev/null || dead_clusters_cron_install
+            if ! nft list table inet "$DEAD_CLUSTERS_TABLE" >/dev/null 2>&1 && [ -s "$DEAD_CLUSTERS_ELEMENTS" ]; then
+                cmd_dead_clusters_apply_state >/dev/null 2>&1 || true
+            fi
+            echo '{"success":true,"enabled":true,"unchanged":true}'
+        else
+            grep -q "bcw-deadggc" /etc/crontabs/root 2>/dev/null && dead_clusters_cron_remove
+            nft list table inet "$DEAD_CLUSTERS_TABLE" >/dev/null 2>&1 && nft delete table inet "$DEAD_CLUSTERS_TABLE" 2>/dev/null || true
+            echo '{"success":true,"enabled":false,"unchanged":true}'
+        fi
+        return 0
+    fi
     uci -q set "zapret2wizard.main.dead_clusters=$val" || { echo '{"success":false,"error":"uci failed"}'; return 1; }
     uci -q commit zapret2wizard >/dev/null 2>&1 || true
     if [ "$val" = "1" ]; then
