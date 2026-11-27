@@ -1,11 +1,11 @@
 {
-  "version": "0.37.33",
+  "version": "0.37.34",
   "release_date": "2026-11-24",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "feed: исправлена структура генератора (unsigned APKINDEX и подписанный packages.adb независимы) — CI снова зелёный",
-    "CI feed: host-apk копируется в host-apk/staging_dir/host (путь интерпретатора/библиотек сохранён)",
-    "0.37.33: исправление после неудачной 0.37.32"
+    "CI: apk-tools скачивается tarball-ом (codeload + GitLab fallback) вместо git clone — устранены случайные 403 на раннерах",
+    "feed: подпись packages.adb (EC) через host-apk OpenWrt; CI проверяет adbdump; unsigned APKINDEX сохранён для совместимости",
+    "0.37.34: исправление после 0.37.32/0.37.33"
   ]
 }

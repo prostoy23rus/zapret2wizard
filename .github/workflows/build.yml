@@ -113,8 +113,21 @@ jobs:
       - name: Build apk-tools (mkpkg)
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq build-essential git zlib1g-dev libssl-dev libzstd-dev lua5.4
-          git clone -q --depth 1 --branch v3.0.5 https://github.com/alpinelinux/apk-tools.git /tmp/apk-tools
+          sudo apt-get install -y -qq build-essential zlib1g-dev libssl-dev libzstd-dev lua5.4
+          # Avoid git-clone 403s seen on runners; codeload tarball is equivalent.
+          rm -rf /tmp/apk-tools-src /tmp/apk-tools /tmp/apk-tools.tar.gz
+          ok=0
+          for url in \
+            "https://codeload.github.com/alpinelinux/apk-tools/tar.gz/refs/tags/v3.0.5" \
+            "https://gitlab.alpinelinux.org/alpine/apk-tools/-/archive/v3.0.5/apk-tools-v3.0.5.tar.gz"; do
+            if curl -LfsS -m 120 -o /tmp/apk-tools.tar.gz "$url"; then ok=1; break; fi
+            echo "fetch failed: $url"
+          done
+          [ "$ok" = 1 ]
+          mkdir -p /tmp/apk-tools-src
+          tar -xzf /tmp/apk-tools.tar.gz -C /tmp/apk-tools-src
+          APKDIR=$(find /tmp/apk-tools-src -maxdepth 1 -mindepth 1 -type d | head -1)
+          ln -s "$APKDIR" /tmp/apk-tools
           cd /tmp/apk-tools
           # The 3.0.5 index applet reads only v2 package metadata; our mkpkg
           # packages are v3, so let index read v3 metadata (APKINDEX format

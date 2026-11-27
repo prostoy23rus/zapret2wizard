@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.37.34] (2026-11-27)
+
+### CI: стабильная сборка apk-tools
+
+- В CI вместо `git clone` GitHub используется tarball (`codeload.github.com`),
+  с fallback на GitLab-архив — на раннере периодически приходил 403.
+
+### feed: подпись packages.adb
+
+- Генератор feed при наличии `APK_SIGN_KEY` собирает подписанный v3-индекс
+  `packages.adb` через host-apk OpenWrt ImageBuilder (`mkndx --sign`), проверяет
+  подпись `adbdump --keys-dir`; unsigned `APKINDEX.tar.gz` остаётся для
+  совместимости.
+- Публичный ключ: `release-keys/zapret2wizard-apk.pem`; после установки в
+  `/etc/apk/keys/` apk обновляется без `--allow-untrusted`.
+
+
 ## [0.37.33] (2026-11-27)
 
 ### feed: исправления после 0.37.32
