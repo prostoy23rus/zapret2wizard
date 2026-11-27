@@ -56,6 +56,32 @@ function parseHelperJson(res) {
 	return null;
 }
 
+// ubus/uhttpd прерывает file.exec примерно через 30 с, а test/selftest
+// легально идут 45–120 с (issue #14). Запускаем их в фоне и опрашиваем статус.
+function runLongHelper(args) {
+	var base = args[0];
+	return fs.exec(HELPER_BIN, [base + '_bg'].concat(args.slice(1))).then(function(res) {
+		var started = parseHelperJson(res) || {};
+		if (!started.started) throw new Error(started.error || 'не удалось запустить');
+		var polls = 0;
+		return new Promise(function(resolve, reject) {
+			function poll() {
+				fs.exec(HELPER_BIN, [base + '_bg_status']).then(function(r) {
+					var st = parseHelperJson(r) || {};
+					if (st.running) {
+						if (++polls > 120) { reject(new Error('таймаут фоновой проверки')); return; }
+						setTimeout(poll, 2000);
+						return;
+					}
+					if (base === 'selftest') resolve({ stdout: st.output || '', code: st.code || 0 });
+					else resolve({ stdout: JSON.stringify(st.result || {}), code: st.code || 0 });
+				}).catch(reject);
+			}
+			setTimeout(poll, 500);
+		});
+	});
+}
+
 // Переключатель в стиле iOS: используется для настроек Circular и авто-применения.
 function makeToggleSwitch(checked, onChange, ariaLabel) {
 	var sw = E('span', {
@@ -5042,7 +5068,7 @@ return view.extend({
 				E('p', { class: 'spinning' }, 'Отправка проверочных сетевых запросов и замер передачи данных к ' + (pDef.label || currentTarget) + '...')
 			]);
 
-			fs.exec(HELPER_BIN, ['test', currentTarget, url]).then(function(res) {
+			runLongHelper(['test', currentTarget, url]).then(function(res) {
 				ui.hideModal();
 				var parsed = null;
 				try { parsed = JSON.parse(res.stdout); } catch(e) {}
@@ -5592,7 +5618,7 @@ return view.extend({
 				}
 			}, '📤 Отчёт для матрицы');
 			bcwShowModal('🩺 Диагностика службы', [pre], [copyBtn, matrixBtn, closeBtn]);
-			fs.exec(HELPER_BIN, ['selftest']).then(function(res) {
+			runLongHelper(['selftest']).then(function(res) {
 				pre.textContent = (res && res.stdout) ? res.stdout.trim() : 'Нет ответа от helper';
 			}).catch(function() { pre.textContent = 'Ошибка вызова helper'; });
 		}

@@ -7981,6 +7981,82 @@ cmd_dead_clusters_toggle() {
         echo '{"success":true,"enabled":false}'
     fi
 }
+# ==============================================================================
+# Long-running UI commands: ubus/uhttpd kills file.exec at ~30s, while test and
+# selftest legitimately take 45–120s. Run them detached and poll a tiny status
+# command instead (issue #14).
+# ==============================================================================
+TEST_BG_OUT="/tmp/bcw_test_bg.json"
+TEST_BG_ERR="/tmp/bcw_test_bg.err"
+TEST_BG_RC="/tmp/bcw_test_bg.rc"
+TEST_BG_DONE="/tmp/bcw_test_bg.done"
+SELFTEST_BG_OUT="/tmp/bcw_selftest_bg.txt"
+SELFTEST_BG_ERR="/tmp/bcw_selftest_bg.err"
+SELF_BG_RC="/tmp/bcw_selftest_bg.rc"
+SELF_BG_DONE="/tmp/bcw_selftest_bg.done"
+
+cmd_test_bg() {
+    rm -f "$TEST_BG_OUT" "$TEST_BG_ERR" "$TEST_BG_RC" "$TEST_BG_DONE" 2>/dev/null || true
+    local quoted="" a
+    for a in "$@"; do quoted="$quoted '$a'"; done
+    if command -v setsid >/dev/null 2>&1; then
+        setsid sh -c "timeout 180 /usr/bin/blockcheckw-helper test$quoted >$TEST_BG_OUT 2>$TEST_BG_ERR; echo \$? >$TEST_BG_RC; : >$TEST_BG_DONE" </dev/null >/dev/null 2>&1 &
+    else
+        sh -c "timeout 180 /usr/bin/blockcheckw-helper test$quoted >$TEST_BG_OUT 2>$TEST_BG_ERR; echo \$? >$TEST_BG_RC; : >$TEST_BG_DONE" </dev/null >/dev/null 2>&1 &
+    fi
+    echo '{"started":true}'
+}
+
+cmd_test_bg_status() {
+    local running=false code=0 result=null
+    [ -f "$TEST_BG_DONE" ] || running=true
+    if [ "$running" = "false" ]; then
+        code=$(cat "$TEST_BG_RC" 2>/dev/null || echo 0)
+        case "$code" in ""|*[!0-9]*) code=0 ;; esac
+        result=$(lua - "$TEST_BG_OUT" <<'LUA' 2>/dev/null
+local j = require("luci.jsonc")
+local f = io.open(arg[1], "r"); local s = f and f:read("*a") or ""
+if f then f:close() end
+local ok, d = pcall(j.parse, s)
+if ok and type(d) == "table" then print(j.stringify(d)) else print("null") end
+LUA
+        )
+        [ -n "$result" ] || result=null
+    fi
+    printf '{"running":%s,"code":%s,"result":%s}\n' "$running" "$code" "$result"
+}
+
+cmd_selftest_bg() {
+    rm -f "$SELFTEST_BG_OUT" "$SELFTEST_BG_ERR" "$SELF_BG_RC" "$SELF_BG_DONE" 2>/dev/null || true
+    if command -v setsid >/dev/null 2>&1; then
+        setsid sh -c "timeout 180 /usr/bin/blockcheckw-helper selftest >$SELFTEST_BG_OUT 2>$SELFTEST_BG_ERR; echo \$? >$SELF_BG_RC; : >$SELF_BG_DONE" </dev/null >/dev/null 2>&1 &
+    else
+        sh -c "timeout 180 /usr/bin/blockcheckw-helper selftest >$SELFTEST_BG_OUT 2>$SELFTEST_BG_ERR; echo \$? >$SELF_BG_RC; : >$SELF_BG_DONE" </dev/null >/dev/null 2>&1 &
+    fi
+    echo '{"started":true}'
+}
+
+cmd_selftest_bg_status() {
+    local running=false code=0 output=""
+    [ -f "$SELF_BG_DONE" ] || running=true
+    if [ "$running" = "false" ]; then
+        code=$(cat "$SELF_BG_RC" 2>/dev/null || echo 0)
+        case "$code" in ""|*[!0-9]*) code=0 ;; esac
+        output=$(lua - "$SELFTEST_BG_OUT" <<'LUA' 2>/dev/null
+local j = require("luci.jsonc")
+local f = io.open(arg[1], "r"); local s = f and f:read("*a") or ""
+if f then f:close() end
+print(j.stringify(s))
+LUA
+        )
+        [ -n "$output" ] || output=""
+    fi
+    if [ "$running" = "true" ]; then
+        printf '{"running":true,"code":0,"output":""}\n'
+    else
+        printf '{"running":false,"code":%s,"output":%s}\n' "$code" "$output"
+    fi
+}
 cleanup_leftovers() {
     lifecycle_load || return 1
     if bcw_lifecycle_cleanup; then
@@ -8922,6 +8998,10 @@ optimize_dns) cmd_optimize_dns ;;
     tunnel_check) shift; cmd_tunnel_check "$@" ;;
     results) shift; cmd_results "$@" ;;
     ensure_hostlists_bg) cmd_ensure_hostlists_bg ;;
+    test_bg) shift; cmd_test_bg "$@" ;;
+    test_bg_status) cmd_test_bg_status ;;
+    selftest_bg) cmd_selftest_bg ;;
+    selftest_bg_status) cmd_selftest_bg_status ;;
     dead_clusters_status) cmd_dead_clusters_status ;;
     dead_clusters_toggle) shift; cmd_dead_clusters_toggle "$@" ;;
     dead_clusters_scan_bg) cmd_dead_clusters_scan_bg ;;
