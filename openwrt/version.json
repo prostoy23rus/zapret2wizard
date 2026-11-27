@@ -1,10 +1,11 @@
 {
-  "version": "0.37.35",
+  "version": "0.37.36",
   "release_date": "2026-11-24",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "issue #7: объёмный гейт теперь проверяет и googlevideo CDN (test.googlevideo.com, 2 МБ с Content-Length) — побайтовый кап на видео-хосте больше не проходит как «optimal»",
-    "Регрессия: тест обрыва потока на 1 МиБ (2 МБ объявлено, доставлено 1 МБ) — transfer_verified=false, termination=partial"
+    "issue #7: удалён мёртвый эндпоинт test.googlevideo.com (NXDOMAIN) — «Проверить» для YouTube снова измеряет реальный поток www.youtube.com; побайтовый кап ловится объёмным гейтом base.js (3 МБ) в клиентской пробе",
+    "В hostlist убран мёртвый test.googlevideo.com; порог образца страницы приведён к реальному размеру (600 КБ)",
+    "Регрессия обрыва 1 МиБ остаётся; подпись feed и остальное без изменений"
   ]
 }

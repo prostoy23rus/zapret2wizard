@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.37.36] (2026-11-27)
+
+### issue #7: мёртвый test.googlevideo.com убран, проверка снова измеряет поток
+
+- `test.googlevideo.com` перестал резолвиться (NXDOMAIN), из-за чего
+  primary-эндпоинт «Проверить» для YouTube всегда падал на fallback
+  `dl.google.com`, а объёмный гейт googlevideo не работал.
+- Теперь primary-эндпоинт — полная страница `www.youtube.com` (Range
+  игнорируется, ~0.9 МБ; порог 600 КБ); побайтовый кап ~1 МБ на youtube.com
+  ловится клиентским объёмным гейтом `base.js` (3 МБ, 2×2 МБ) — как и раньше.
+- Из hostlist удалён мёртвый `test.googlevideo.com`; комментарии про канарейку
+  исправлены.
+- Регрессия `test_cut_at_one_mib_is_not_verified` остаётся в CI.
+
+
+
 ## [0.37.35] (2026-11-27)
 
 ### issue #7: кап на googlevideo CDN больше не выглядит «optimal»

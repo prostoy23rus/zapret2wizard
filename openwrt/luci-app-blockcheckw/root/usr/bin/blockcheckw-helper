@@ -418,7 +418,6 @@ ensure_preset_hostlist() {
             _add_domains_if_missing "$yt_file" \
                 "googlevideo.com" "youtube.com" "youtu.be" "ytimg.com" \
                 "ggpht.com" "gvt1.com" "youtubei.googleapis.com" "dl.google.com" \
-                "test.googlevideo.com" \
                 "yt3.ggpht.com" "yt4.ggpht.com" "i.ytimg.com" "i9.ytimg.com" \
                 "signaler-pa.youtube.com" "manifest.googlevideo.com" "yt3.googleusercontent.com"
             _uci_set_list_if_missing list_hosts_youtube "$yt_file"
@@ -1524,9 +1523,9 @@ cmd_start() {
         : > /tmp/bcw_scan_paused
 
         # YouTube: веб-интерфейс www.youtube.com на многих провайдерах не
-        # блокируется, а видео-CDN (rr*.googlevideo.com, test.googlevideo.com)
+        # блокируется, а видео-CDN (rr*.googlevideo.com)
         # блокируется/сбрасывается. Корни googlevideo.com и manifest отвечают
-        # даже при режущемся видео, поэтому канарейка — test.googlevideo.com.
+        # даже при режущемся видео, поэтому канарейка — живой rr*.googlevideo.com.
         # Служба уже остановлена выше, поэтому curl видит сырой ответ
         # провайдера: если CDN-канарейка недоступна (код 000) — сканируем её,
         # стратегии подбираются против реально блокируемого видео-хоста.
@@ -2851,22 +2850,12 @@ probe_youtube_video_host() {
         vol_res=$(probe_volume_gate "https://www.youtube.com$vpath" "$q" 2>/dev/null || true)
         [ -n "$vol_res" ] && vol_json="$vol_res"
     fi
-    # issue #7: кап у провайдера может быть и на googlevideo CDN, а не только
-    # на www.youtube.com. Качаем 2-МБ объект с объявленным Content-Length
-    # с test.googlevideo.com через тот же временный nfqws: обрыв ниже
-    # объявленного размера = побайтовый кап именно на видео-CDN.
-    cdn_json='{"ok":true,"skipped":"no cdn asset"}'
-    cdn_res=$(probe_volume_gate "https://test.googlevideo.com/v2/cimg/android/blobs/sha256:6fd8bdac3da660bde7bd0b6f2b6a46e1b686afb74b9a4614def32532b73f5eaa" "$q" 2>/dev/null || true)
-    [ -n "$cdn_res" ] && cdn_json="$cdn_res"
-    out=$(lua - "$out" "$vol_json" "$cdn_json" <<'EOF'
+    out=$(lua - "$out" "$vol_json" <<'EOF'
 local json = require("luci.jsonc")
 local v = json.parse(arg[1]) or {}
 local vol = json.parse(arg[2]) or {}
-local cdn = json.parse(arg[3]) or {}
 v.volume = vol
-v.cdn_volume = cdn
 if vol and vol.skipped == nil and vol.ok ~= true then v.ok = false end
-if cdn and cdn.skipped == nil and cdn.ok ~= true then v.ok = false end
 print(json.stringify(v))
 EOF
 )
@@ -2979,11 +2968,6 @@ if out and v then
     if volobj then
         out.volume = volobj
         if volobj.skipped == nil and volobj.ok ~= true then out.ok = false end
-    end
-    local cdnobj = v.cdn_volume
-    if cdnobj then
-        out.cdn_volume = cdnobj
-        if cdnobj.skipped == nil and cdnobj.ok ~= true then out.ok = false end
     end
 end
 print(json.stringify(out))
@@ -4082,7 +4066,6 @@ if out and v then
     local has_video = next(vid) ~= nil
     local vol = (vid.volume and not vid.volume.skipped) and vid.volume
         or ((v.volume and not v.volume.skipped) and v.volume or nil)
-    local cdnvol = (vid.cdn_volume and not vid.cdn_volume.skipped) and vid.cdn_volume or nil
     if type(out.endpoints) == "table" and has_video then
         table.insert(out.endpoints, {
             name = "Видео-хост googlevideo (через обход)",
@@ -4097,21 +4080,6 @@ if out and v then
             playback = vid.ok == true and "unknown" or "blocked",
             size_bytes = vid.bytes or 0,
             stall_reason = vid.ok == true and "transfer_complete" or (vid.video_error or "video_host_unreachable")
-        })
-    end
-    if type(out.endpoints) == "table" and cdnvol then
-        table.insert(out.endpoints, {
-            name = "Видео-CDN googlevideo (2×2 МБ)",
-            url = "https://" .. tostring(cdnvol.host or "test.googlevideo.com"),
-            http_code = cdnvol.code or "000",
-            accessible = cdnvol.ok == true,
-            data_sample = cdnvol.ok == true,
-            role = "bounded_data",
-            required = true,
-            verification_state = cdnvol.ok == true and "data_sample" or "unverified",
-            playback = "unknown",
-            size_bytes = cdnvol.bytes or 0,
-            stall_reason = cdnvol.ok == true and "transfer_complete" or "volume_capped"
         })
     end
     if type(out.endpoints) == "table" and vol then
@@ -4135,12 +4103,6 @@ if out and v then
         out.message = "Видео-хост googlevideo не отвечает через обход: " ..
             tostring(vid.video_error or ("код " .. (vid.code or "000"))) ..
             ". Видео не заработает, пока канал до видео-CDN режется."
-    elseif cdnvol and cdnvol.ok ~= true then
-        out.all_ok = false
-        out.overall_status = "degraded"
-        out.message = "Видео-CDN googlevideo рвётся по объёму (" ..
-            tostring(cdnvol.bytes or 0) .. " из " .. tostring(cdnvol.expected or 2097152) ..
-            " байт): это побайтовый кап провайдера на видео-CDN. Стратегии его не снимают — нужен другой путь/протокол."
     elseif vol and vol.ok ~= true then
         out.all_ok = false
         out.overall_status = "degraded"
@@ -4257,9 +4219,12 @@ local fallback_endpoint = ""
 local fallback_range = ""
 
 if preset_key == "preset_youtube" then
-    test_endpoint = "https://test.googlevideo.com/v2/cimg/android/blobs/sha256:6fd8bdac3da660bde7bd0b6f2b6a46e1b686afb74b9a4614def32532b73f5eaa"
-    test_range = "0-2097151"
-    test_name = "HTTP-образец test.googlevideo.com (не воспроизведение)"
+    # test.googlevideo.com больше не резолвится (NXDOMAIN): берём полную
+    # страницу www.youtube.com — сервер игнорирует Range и отдаёт ~1.4 МБ,
+    # побайтовый кап ~1 МБ виден как недобор до min 1.2 МБ.
+    test_endpoint = "https://www.youtube.com/"
+    test_range = ""
+    test_name = "Полная страница www.youtube.com (не воспроизведение видео)"
     fallback_endpoint = "https://dl.google.com/chrome/install/ChromeStandaloneSetup64.exe"
     fallback_range = "0-2097151"
 elseif preset_key == "preset_discord" then
@@ -4295,7 +4260,7 @@ local function do_curl(ep, rg, attempt)
     return probe.probe({url=ep, endpoint_id=ep:match("^https?://([^/]+)"), attempt_id=attempt,
         role="bounded_data", path_mode="router", range=a and {start=tonumber(a),finish=tonumber(b)} or nil,
         timeout_sec=30, max_bytes=8388608},
-        {role="bounded_data", min_bytes=1, sample_bytes=preset_key == "preset_youtube" and 1258291 or 131072, sample_seconds=0})
+        {role="bounded_data", min_bytes=1, sample_bytes=preset_key == "preset_youtube" and 600000 or 131072, sample_seconds=0})
 end
 -- Synthetic SNI/Host rewrites are not the named endpoint: probe its actual URL.
 local primary = do_curl(test_endpoint, test_range, "primary")
