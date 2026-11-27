@@ -4120,6 +4120,11 @@ return view.extend({
 		function selectTarget(targetId) {
 			currentTarget = targetId;
 
+			// Найденные стратегии всегда начинаются свёрнутыми при смене пресета:
+			// раскрываются только явным кликом по заголовку/кнопке.
+			isStrategiesExpanded = false;
+			updateSpoilerUI();
+
 			// Update chips
 			quickChipsList.forEach(function(ch) {
 				var b = chipButtonsMap[ch.id];
@@ -4708,7 +4713,7 @@ return view.extend({
 					strategiesListEl.innerHTML = '';
 					var label = (PRESET_DEFS[target] && PRESET_DEFS[target].name) || target;
 					resultsCard.style.display = 'block';
-					isStrategiesExpanded = true;
+					isStrategiesExpanded = false;
 					var titleEl = resultsCard.querySelector('.bcw-card-title');
 					if (titleEl) titleEl.textContent = 'Найденные рабочие стратегии (0)';
 					var badge = resultsCard.querySelector('.bcw-strats-count-badge');

@@ -1,10 +1,10 @@
 {
-  "version": "0.38.1",
+  "version": "0.38.2",
   "release_date": "2026-11-24",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "fix(UI): убран цикл тумблера «Мёртвые кластеры» — render/status теперь обновляют его через setSilent, не вызывая onChange",
-    "fix(UI): откат тумблера при ошибке тоже тихий; добавлен регрессионный тест tools/test_dead_clusters_ui.js в CI"
+    "UI: «Найденные рабочие стратегии» всегда свёрнуты при смене пресета/домена; раскрываются только кликом",
+    "UI: пустые результаты больше не форсируют isStrategiesExpanded=true; добавлен регрессионный тест tools/test_results_spoiler_ui.js"
   ]
 }
