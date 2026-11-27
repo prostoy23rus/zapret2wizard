@@ -582,13 +582,18 @@ return view.extend({
 			});
 		}
 
+		function getApplyAllStatus() {
+			return fs.exec(HELPER_BIN, ['apply_all_status']).then(parseHelperJson).catch(function() { return null; });
+		}
+
 		return ensureHostlists().then(function() {
 			return Promise.all([
 				checkHelperStatus(),
 				getZapretInfoRetry(3),
 				getMetrics(),
 				getDoctor(),
-				getConflicts()
+				getConflicts(),
+				getApplyAllStatus()
 			]);
 		});
 	},
@@ -599,6 +604,8 @@ return view.extend({
 		var metricsData = data[2] || { tests: {}, history: [] };
 		var doctorInfo = data[3] || null;
 		var conflictsData = data[4] || null;
+		var applyAllData = data[5] || null;
+		var batchApplyRunning = !!(applyAllData && applyAllData.running);
 		var logsData = { scanner_log: 'Загрузка логов...', zapret2_log: 'Загрузка логов...', daemons: '' };
 		var curVer = typeof zapretInfo.version === 'string' && zapretInfo.version.trim() ? zapretInfo.version.trim() : null;
 		var versionInfo = {
@@ -1340,13 +1347,14 @@ return view.extend({
 		mainLayout.appendChild(repairCard);
 
 		function renderRepairBanner() {
-			// Во время подбора служба остановлена намеренно — это не ошибка
-			if (activeScanInProgress || isRunning) {
+			// Во время подбора/перебора служба остановлена намеренно — это не ошибка
+			if (activeScanInProgress || isRunning || batchApplyRunning) {
 				repairCard.style.display = 'block';
 				repairCard.innerHTML = '';
-				repairCard.appendChild(E('div', { style: 'font-weight:600;color:#00d1b2;font-size:14px;' }, '⏳ Идёт подбор — служба временно приостановлена'));
+				repairCard.appendChild(E('div', { style: 'font-weight:600;color:#00d1b2;font-size:14px;' },
+					(activeScanInProgress || isRunning) ? '⏳ Идёт подбор — служба временно приостановлена' : '⏳ Идёт перебор стратегий — служба временно перезапускается'));
 				repairCard.appendChild(E('div', { style: 'font-size:12.5px;color:var(--bcw-text-muted);margin-top:4px;' },
-					'После завершения подбора служба поднимется автоматически.'));
+					'После завершения служба поднимется автоматически; при остановке вернётся прежняя конфигурация.'));
 				return;
 			}
 			if (!doctorInfo || doctorInfo.ok) { repairCard.style.display = 'none'; return; }
@@ -2217,24 +2225,31 @@ return view.extend({
 		function confirmBatchApply() {
 			var count = uniqueStrategiesCount || 0;
 			if (!count) return;
-			bcwShowModal('Перебрать все найденные стратегии?', [
+			var limitSelect = E('select', { class: 'cbi-input-select', style: 'width:100%;margin-top:8px;' }, [
+				E('option', { value: '10', selected: 'selected' }, '10 кандидатов — быстрый перебор (~20–40 мин)'),
+				E('option', { value: '20' }, '20 кандидатов — дольше'),
+				E('option', { value: String(count) }, 'все ' + count + ' — может занять часы')
+			]);
+			bcwShowModal('Перебрать найденные стратегии?', [
 				E('p', { style: 'font-size: 13px; line-height: 1.5;' },
-					'Для «' + batchTargetLabel() + '» будет по очереди применена и проверена каждая из ' + count +
-					' находок. Перебор остановится на первой подтверждённой стратегии; провалившиеся будут помечены в памяти как неудачные, а прежняя конфигурация сохранена.'),
+					'Для «' + batchTargetLabel() + '» найдено ' + count + ' вариантов. Будет по очереди применена и проверена выбранная часть; перебор остановится на первой подтверждённой стратегии.'),
 				E('p', { style: 'font-size: 12px; color: #e5c07b; line-height: 1.5;' },
-					'Служба будет перезапускаться при каждой попытке — обход на это время прерывается. Обычно 2–4 минуты на кандидата; прогресс виден в панели, перебор можно остановить.')
+					'Служба перезапускается при каждой попытке — обход на это время прерывается. Перебор можно остановить; при остановке/ошибке возвращается прежняя конфигурация.'),
+				limitSelect
 			], [
-				E('button', { class: 'cbi-button cbi-button-action', click: function() { ui.hideModal(); beginBatchApply(); } }, 'Начать перебор'),
+				E('button', { class: 'cbi-button cbi-button-action', click: function() { var lim = parseInt(limitSelect.value, 10) || 10; ui.hideModal(); beginBatchApply(lim); } }, 'Начать перебор'),
 				E('button', { class: 'cbi-button cbi-button-neutral', click: function() { ui.hideModal(); } }, 'Отмена')
 			]);
 		}
 
-		function beginBatchApply() {
+		function beginBatchApply(limit) {
 			btnBatchApply.disabled = true;
 			btnBatchStop.disabled = false;
 			btnBatchStop.style.display = '';
 			batchInfoEl.textContent = '⏳ Запускаю перебор…';
-			fs.exec(HELPER_BIN, ['apply_all_bg', '--target', currentTarget]).then(function(res) {
+			var batchArgs = ['apply_all_bg', '--target', currentTarget];
+			if (limit > 0) batchArgs.push('--limit', String(limit));
+			fs.exec(HELPER_BIN, batchArgs).then(function(res) {
 				var out = parseHelperJson(res) || {};
 				if (!out.success) {
 					batchInfoEl.textContent = '✗ ' + (out.error || 'не удалось запустить перебор');
@@ -2247,6 +2262,18 @@ return view.extend({
 				batchInfoEl.textContent = '✗ ошибка вызова helper';
 				btnBatchApply.disabled = false;
 			});
+		}
+
+		function initBatchFromStatus(st) {
+			if (!st || !st.running) return;
+			batchBar.style.display = 'flex';
+			btnBatchApply.disabled = true;
+			btnBatchStop.disabled = false;
+			btnBatchStop.style.display = '';
+			var i = st.index || 0, total = st.total || 0;
+			batchInfoEl.textContent = '⏳ Перебор продолжается после перезагрузки: ' + i + '/' + total +
+				(st.current ? (' · ' + truncArgs(st.current, 80)) : '');
+			pollBatchApply(0);
 		}
 
 		function pollBatchApply(iter) {
@@ -2284,6 +2311,9 @@ return view.extend({
 						batchInfoEl.textContent = '— статус перебора: ' + (done || 'неизвестен');
 					}
 					applyAllPoller = null;
+					batchApplyRunning = false;
+					if (typeof renderRepairBanner === 'function') renderRepairBanner();
+					getDoctor().then(function(d) { doctorInfo = d; if (typeof renderRepairBanner === 'function') renderRepairBanner(); }).catch(function() {});
 					setTimeout(function() {
 						getZapretInfo().then(function(info) {
 							if (!info) return;
@@ -5916,6 +5946,10 @@ return view.extend({
 		// Класс ТСПУ (если уже считался) и статус мониторинга доступности — при каждой загрузке
 		try { if (typeof loadTspuReport === 'function') loadTspuReport(); } catch (e) {}
 		try { if (typeof loadCanaryStatus === 'function') loadCanaryStatus(); } catch (e) {}
+
+		if (batchApplyRunning) {
+			setTimeout(function() { initBatchFromStatus(applyAllData); }, 50);
+		}
 
 		return container;
 	},

@@ -3099,6 +3099,25 @@ cmd_apply_status() {
 # Применяет по очереди стратегии из сохранённых результатов поиска,
 # останавливается на первой подтверждённой, провалившиеся уходят в бан.
 # Прогресс пишется в /tmp/bcw_apply_all.state для UI.
+APPLY_ALL_CFG_PKG=""
+APPLY_ALL_ORIG=""
+APPLY_ALL_SVC_WAS=""
+APPLY_ALL_FINAL=""
+
+apply_all_cleanup() {
+    # Never leave the user on the last unverified candidate: on stop/failure/
+    # interruption restore the exact config that was active before the batch.
+    if [ "$APPLY_ALL_FINAL" != "applied" ] && [ -n "$APPLY_ALL_ORIG" ] && [ -s "$APPLY_ALL_ORIG" ]; then
+        cp -f "$APPLY_ALL_ORIG" "/etc/config/$APPLY_ALL_CFG_PKG" 2>/dev/null || true
+        uci -q commit "$APPLY_ALL_CFG_PKG" >/dev/null 2>&1 || true
+        /usr/share/zapret2wizard/uci2config >/dev/null 2>&1 || true
+    fi
+    if [ "$APPLY_ALL_SVC_WAS" = "1" ] && ! _svc_running; then
+        restart_dpi_service
+    fi
+    rm -rf /var/run/bcw_applyall.lock /tmp/bcw_apply_all.current "$APPLY_ALL_ORIG" 2>/dev/null || true
+}
+
 cmd_apply_all() {
     local target="" limit=0
     while [ "$#" -gt 0 ]; do
@@ -3114,7 +3133,12 @@ cmd_apply_all() {
         echo '{"success":false,"error":"перебор уже идёт"}'; return 1
     fi
     # state-файл НЕ удаляем: UI читает финальный результат (applied/failed/stopped).
-    trap 'rm -rf /var/run/bcw_applyall.lock /tmp/bcw_apply_all.current 2>/dev/null' EXIT INT TERM
+    APPLY_ALL_CFG_PKG=$(_strategy_pkg)
+    APPLY_ALL_ORIG="/tmp/bcw_apply_all_orig.$$.uci"
+    APPLY_ALL_SVC_WAS=0
+    _svc_running && APPLY_ALL_SVC_WAS=1
+    cp -f "/etc/config/$APPLY_ALL_CFG_PKG" "$APPLY_ALL_ORIG" 2>/dev/null || APPLY_ALL_ORIG=""
+    trap 'apply_all_cleanup' EXIT INT TERM
     rm -f /tmp/bcw_apply_all.stop
     local dom=$(target_domain "$target")
     [ -n "$dom" ] || dom="$target"
@@ -3132,7 +3156,8 @@ cmd_apply_all() {
         idx=$((idx + 1))
         [ "$limit" -gt 0 ] && [ "$idx" -gt "$limit" ] && break
         if [ -f /tmp/bcw_apply_all.stop ]; then
-            printf 'target=%s\nindex=%s\ntotal=%s\nresult=stopped\nmessage=остановлено пользователем (проверено %s из %s)\n' "$target" "$idx" "$total" "$((idx - 1))" "$total" > /tmp/bcw_apply_all.state
+            printf 'target=%s\nindex=%s\ntotal=%s\nresult=stopped\nmessage=остановлено пользователем (проверено %s из %s); прежняя конфигурация восстановлена\n' "$target" "$idx" "$total" "$((idx - 1))" "$total" > /tmp/bcw_apply_all.state
+            APPLY_ALL_FINAL="stopped"
             echo "[blockcheckw-helper] apply_all: остановлено пользователем" >> "$LOG_FILE" 2>/dev/null || true
             return 0
         fi
@@ -3146,6 +3171,7 @@ cmd_apply_all() {
             [ -n "$ms" ] || ms=0
             mem put "$dom" "$(domain_ip "$dom")" "$cand" 1 "$ms" >/dev/null 2>&1 || true
             printf 'target=%s\nindex=%s\ntotal=%s\nresult=applied\nmessage=применена и проверена (кандидат %s из %s)\n' "$target" "$idx" "$total" "$idx" "$total" > /tmp/bcw_apply_all.state
+            APPLY_ALL_FINAL="applied"
             rm -f /tmp/bcw_apply_all.current
             echo "[blockcheckw-helper] apply_all: успех на кандидате $idx/$total" >> "$LOG_FILE" 2>/dev/null || true
             return 0
@@ -3155,7 +3181,8 @@ cmd_apply_all() {
 $args_list
 APPLYLIST
     rm -f /tmp/bcw_apply_all.current
-    printf 'target=%s\nindex=%s\ntotal=%s\nresult=failed\nmessage=ни одна из %s не подтвердилась; прежняя конфигурация сохранена\n' "$target" "$total" "$total" "$total" > /tmp/bcw_apply_all.state
+    APPLY_ALL_FINAL="failed"
+    printf 'target=%s\nindex=%s\ntotal=%s\nresult=failed\nmessage=ни одна из %s не подтвердилась; прежняя конфигурация восстановлена\n' "$target" "$total" "$total" "$total" > /tmp/bcw_apply_all.state
     echo "[blockcheckw-helper] apply_all: ни одна из $total не подтвердилась" >> "$LOG_FILE" 2>/dev/null || true
     return 0
 }
