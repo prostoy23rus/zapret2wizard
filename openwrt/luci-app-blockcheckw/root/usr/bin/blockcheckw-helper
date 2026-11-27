@@ -2295,13 +2295,26 @@ EOF
                         # candidates; doing it synchronously left the scan stuck
                         # at 90% for many minutes after the strategy was already
                         # verified. Run it detached with a hard timeout.
-                        if command -v timeout >/dev/null 2>&1 && [ ! -d /tmp/bcw_ytapi_bg.lock ]; then
-                            (
-                                sleep 5
-                                mkdir /tmp/bcw_ytapi_bg.lock 2>/dev/null || exit 0
-                                timeout 90 /usr/bin/blockcheckw-helper fix_ytapi >/dev/null 2>&1 || true
-                                rmdir /tmp/bcw_ytapi_bg.lock 2>/dev/null || true
-                            ) >/dev/null 2>&1 &
+                        if command -v timeout >/dev/null 2>&1; then
+                            # Stale lock from a detached worker whose parent died.
+                            if [ -d /tmp/bcw_ytapi_bg.lock ]; then
+                                _ypid=$(cat /tmp/bcw_ytapi_bg.lock/pid 2>/dev/null)
+                                [ -n "$_ypid" ] && kill -0 "$_ypid" 2>/dev/null || rm -rf /tmp/bcw_ytapi_bg.lock
+                            fi
+                            if [ ! -d /tmp/bcw_ytapi_bg.lock ]; then
+                                _ytapi_bg_cmd='
+                                    sleep 5
+                                    mkdir /tmp/bcw_ytapi_bg.lock 2>/dev/null || exit 0
+                                    echo $$ > /tmp/bcw_ytapi_bg.lock/pid
+                                    trap "rm -rf /tmp/bcw_ytapi_bg.lock 2>/dev/null" EXIT INT TERM
+                                    timeout 90 /usr/bin/blockcheckw-helper fix_ytapi >/dev/null 2>&1 || true
+                                '
+                                if command -v setsid >/dev/null 2>&1; then
+                                    setsid /bin/sh -c "$_ytapi_bg_cmd" </dev/null >/dev/null 2>&1 &
+                                else
+                                    nohup /bin/sh -c "$_ytapi_bg_cmd" </dev/null >/dev/null 2>&1 &
+                                fi
+                            fi
                         fi
                         ;;
                 esac
