@@ -136,7 +136,9 @@ class Production(unittest.TestCase):
             self.assertEqual(r['endpoints'][0]['data_sample_min_bytes'],262144)
             self.assertTrue(r['endpoints'][0]['data_sample'])
             s=self.run_lua('cmd_speedtest',['preset_youtube','',str(PRESETS)],{'*':{'size':size}})
-            self.assertFalse(s['success']); self.assertFalse(s['attempts']['success'])
+            # 0.37.36: primary — полная страница www.youtube.com (порог 600 КБ),
+            # побайтовый кап ловится клиентской объёмной пробой base.js.
+            self.assertTrue(s['success']); self.assertTrue(s['attempts']['success'])
 
     def test_complete_under_256k_main_page_still_insufficient(self):
         r=self.check({'size':200000})
@@ -161,10 +163,10 @@ class Production(unittest.TestCase):
 
     def test_primary_failure_fallback_success_stays_failure(self):
         r=self.run_lua('cmd_speedtest',['preset_youtube','',str(PRESETS)],
-                      {'test.googlevideo.com':{'rc':18,'size':980000,'length':2097152},'*':{'size':2097152}})
+                      {'www.youtube.com':{'rc':18,'size':980000,'length':2097152},'*':{'size':2097152}})
         self.assertFalse(r['success']); self.assertFalse(r['primary']['transfer_verified'])
         self.assertTrue(r['fallback']['transfer_verified']); self.assertEqual(r['size_bytes'],980000)
-        self.assertIn('test.googlevideo.com',r['test_endpoint'])
+        self.assertIn('www.youtube.com',r['test_endpoint'])
         self.assertEqual(r['speed_cap_bytes_per_sec'],279620)
 
     def test_unknown_metrics_have_explicit_false_knownness(self):

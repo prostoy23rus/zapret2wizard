@@ -4219,9 +4219,9 @@ local fallback_endpoint = ""
 local fallback_range = ""
 
 if preset_key == "preset_youtube" then
-    # test.googlevideo.com больше не резолвится (NXDOMAIN): берём полную
-    # страницу www.youtube.com — сервер игнорирует Range и отдаёт ~1.4 МБ,
-    # побайтовый кап ~1 МБ виден как недобор до min 1.2 МБ.
+    -- test.googlevideo.com больше не резолвится (NXDOMAIN): берём полную
+    -- страницу www.youtube.com — сервер игнорирует Range и отдаёт ~0.9 МБ,
+    -- побайтовый кап ~1 МБ виден как недобор до порога образца.
     test_endpoint = "https://www.youtube.com/"
     test_range = ""
     test_name = "Полная страница www.youtube.com (не воспроизведение видео)"
