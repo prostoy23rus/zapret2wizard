@@ -192,3 +192,17 @@ Zapret2Wizard не должен и не может применять desync к 
 | Восстановление | строка feed удалена, `apk update` чистый; пакет 0.37.31-r3 остался |
 
 opkg-индекс (`feed/opkg/<arch>/Packages`) и apk-индекс (`feed/apk/<arch>/APKINDEX.tar.gz`) генерируются CI на каждый тег; база feed: `https://raw.githubusercontent.com/prostoy23rus/zapret2wizard/feed`. Пакеты пока без подписи (`--allow-untrusted`), подпись — следующий шаг.
+
+## Подписанный feed: доверие apk (0.37.34, live)
+
+Проверено 2026-11-27 на Routerich AX3000, OpenWrt 25.12.6, aarch64 (apk).
+
+| Шаг | Результат |
+|---|---|
+| Публичный ключ в `/etc/apk/keys/zapret2wizard-apk.pem` | 178 байт, EC P-256 |
+| `apk adbdump --keys-dir /etc/apk/keys packages.adb` | `# sig v00 h04 ...: OK` |
+| `apk update` **без** `--allow-untrusted` | подпись индекса проверена, 11183 пакета |
+| `apk add --upgrade zapret2wizard` **без** `--allow-untrusted` | 0.37.31-r3 → **0.37.34-r3** из подписанного feed |
+| После обновления | служба running (300/65300/65301), `test preset_youtube` = optimal, evidence app 0.37.34 |
+
+Публичный ключ: `release-keys/zapret2wizard-apk.pem` (SHA256 `3983f89f80d9168ec822c0721b72d48dd7d60b97103bd8eedb0e649431f5dbe1`). Приватный ключ хранится только в GitHub Actions secret `APK_SIGN_KEY` и локальном бэкапе вне репозитория.
