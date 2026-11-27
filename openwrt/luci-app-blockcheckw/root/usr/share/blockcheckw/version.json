@@ -1,11 +1,11 @@
 {
-  "version": "0.37.32",
+  "version": "0.37.33",
   "release_date": "2026-11-24",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "feed: packages.adb подписывается EC-ключом (секрет APK_SIGN_KEY), публичный ключ release-keys/zapret2wizard-apk.pem; apk обновляется без --allow-untrusted после установки ключа",
-    "CI: host-apk из OpenWrt ImageBuilder для mkndx --sign; проверка подписи adbdump в job; fallback без секрета — unsigned",
-    "docs/README: установка ключа и прямая ссылка на packages.adb"
+    "feed: исправлена структура генератора (unsigned APKINDEX и подписанный packages.adb независимы) — CI снова зелёный",
+    "CI feed: host-apk копируется в host-apk/staging_dir/host (путь интерпретатора/библиотек сохранён)",
+    "0.37.33: исправление после неудачной 0.37.32"
   ]
 }

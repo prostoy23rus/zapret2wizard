@@ -208,7 +208,8 @@ jobs:
           mkdir -p /tmp/ib host-apk
           zstd -dc /tmp/ib.tar.zst | tar -xf - -C /tmp/ib --wildcards "*/staging_dir/host/bin/*" "*/staging_dir/host/lib/*"
           ROOT=$(find /tmp/ib -maxdepth 1 -type d | tail -1)
-          cp -a "$ROOT/staging_dir/host" host-apk/
+          mkdir -p host-apk/staging_dir
+          cp -a "$ROOT/staging_dir/host" host-apk/staging_dir/
           host-apk/staging_dir/host/bin/apk --version
 
       - name: Generate feed (opkg Packages + apk APKINDEX/packages.adb)

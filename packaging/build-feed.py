@@ -213,6 +213,66 @@ def main():
             copied.append(dst)
         if args.no_apk_index:
             print("apk %s: %d package(s), APKINDEX skipped" % (arch, len(copied)), file=sys.stderr)
+        else:
+            index_path = os.path.join(repo_dir, "APKINDEX.tar.gz")
+            cmd = [args.apk_tools, "--allow-untrusted", "index", "-o", index_path, "--rewrite-arch", arch, "--no-warnings"] + copied
+            proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            if proc.returncode != 0:
+                sys.stderr.write(proc.stdout or "")
+                print("apk index failed for " + arch, file=sys.stderr)
+                return 3
+            print("apk %s: %d package(s), APKINDEX ok" % (arch, len(copied)))
+        if args.apk_sign_key:
+            if not args.apk_host:
+                print("--apk-sign-key requires --apk-host", file=sys.stderr)
+                return 4
+            adb_path = os.path.join(repo_dir, "packages.adb")
+            cmd = [args.apk_host, "mkndx", "--allow-untrusted", "--sign", args.apk_sign_key,
+                   "--output", adb_path, "--pkgname-spec", "${name}-${version}.apk"] + copied
+            proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            if proc.returncode != 0:
+                sys.stderr.write(proc.stdout or "")
+                print("signed packages.adb failed for " + arch, file=sys.stderr)
+                return 5
+            if args.apk_sign_pub:
+                import tempfile
+                with tempfile.TemporaryDirectory() as kd:
+                    shutil.copy2(args.apk_sign_pub, os.path.join(kd, "zapret2wizard-apk.pem"))
+                    dump = subprocess.run([args.apk_host, "adbdump", "--keys-dir", kd, adb_path],
+                                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                    sig_line = [l for l in (dump.stdout or "").splitlines() if l.startswith("# sig ")]
+                    if dump.returncode != 0 or not sig_line or ": OK" not in sig_line[-1]:
+                        sys.stderr.write(dump.stdout or "")
+                        print("signed packages.adb verification failed for " + arch, file=sys.stderr)
+                        return 6
+            print("apk %s: signed packages.adb (%d package(s))" % (arch, len(copied)))
+        summary["arches"].setdefault(arch, {})["opkg"] = len(entries)
+        print("opkg %s: %d package(s)" % (arch, len(entries)))
+
+    by_arch = {}
+    for name in apks:
+        m = APK_RE.match(name)
+        if not m:
+            print("skip unexpected apk name: " + name, file=sys.stderr)
+            continue
+        arch = m.group("arch")
+        by_arch.setdefault(arch, []).append(os.path.join(dist, name))
+
+    for arch, files in sorted(by_arch.items()):
+        repo_dir = os.path.join(out, "apk", arch)
+        os.makedirs(repo_dir, exist_ok=True)
+        copied = []
+        for path in files:
+            m = APK_RE.match(os.path.basename(path))
+            if not m:
+                continue
+            # apk derives the download name as <name>-<version>.apk (repository
+            # artifacts are not named with underscores/arch like release assets).
+            dst = os.path.join(repo_dir, m.group("name") + "-" + m.group("version") + ".apk")
+            shutil.copy2(path, dst)
+            copied.append(dst)
+        if args.no_apk_index:
+            print("apk %s: %d package(s), APKINDEX skipped" % (arch, len(copied)), file=sys.stderr)
         if args.apk_sign_key:
             if not args.apk_host:
                 print("--apk-sign-key requires --apk-host", file=sys.stderr)
