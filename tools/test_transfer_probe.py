@@ -68,6 +68,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.wfile.flush()
             self.close_connection = True
             return
+        if path == "/cut":
+            # issue #7: announced 2 MiB, but the "DPI" cuts the flow at 1 MiB.
+            self.send_response(200)
+            self.send_header("Content-Length", "2097152")
+            self.end_headers()
+            chunk = b"x" * 65536
+            for _ in range(16):
+                self.wfile.write(chunk)
+            self.wfile.flush()
+            self.close_connection = True
+            return
         if path == "/close":
             self.send_response(200)
             self.send_header("Connection", "close")
@@ -142,6 +153,13 @@ class TransferProbe(unittest.TestCase):
     def test_redirect_final_headers(self):
         r = self.probe("/redirect")
         self.assertEqual((r["http_code"], r["bytes_received"], r["completeness"]), ("200", "4", "complete"))
+
+    def test_cut_at_one_mib_is_not_verified(self):
+        # TSPU byte cap: 2 MiB announced, only 1 MiB delivered, then RST/close.
+        r = self.probe("/cut", max_bytes=8388608, timeout_sec=5)
+        self.assertEqual((r["curl_exit"], r["bytes_received"], r["termination"]), ("18", "1048576", "partial"))
+        self.assertEqual(r["transfer_verified"], "false")
+        self.assertNotEqual(r["completeness"], "complete")
 
     def test_partial_exit_preserved(self):
         r = self.probe("/partial")

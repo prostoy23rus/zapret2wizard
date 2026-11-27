@@ -1,11 +1,10 @@
 {
-  "version": "0.37.34",
+  "version": "0.37.35",
   "release_date": "2026-11-24",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "CI: apk-tools скачивается tarball-ом (codeload + GitLab fallback) вместо git clone — устранены случайные 403 на раннерах",
-    "feed: подпись packages.adb (EC) через host-apk OpenWrt; CI проверяет adbdump; unsigned APKINDEX сохранён для совместимости",
-    "0.37.34: исправление после 0.37.32/0.37.33"
+    "issue #7: объёмный гейт теперь проверяет и googlevideo CDN (test.googlevideo.com, 2 МБ с Content-Length) — побайтовый кап на видео-хосте больше не проходит как «optimal»",
+    "Регрессия: тест обрыва потока на 1 МиБ (2 МБ объявлено, доставлено 1 МБ) — transfer_verified=false, termination=partial"
   ]
 }
