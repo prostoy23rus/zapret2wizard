@@ -75,12 +75,17 @@ function makeToggleSwitch(checked, onChange, ariaLabel) {
 			}
 		}
 	}, [E('span', { class: 'bcw-switch-dot' })]);
-	function set(v) {
+	function paint(v) {
 		sw.classList.toggle('on', !!v);
 		sw.setAttribute('aria-checked', v ? 'true' : 'false');
+	}
+	function set(v) {
+		paint(v);
 		if (onChange) onChange(!!v);
 	}
 	sw.setChecked = set;
+	// Silent state sync: render/status polling must never re-fire onChange.
+	sw.setSilent = paint;
 	return sw;
 }
 
@@ -3472,7 +3477,7 @@ return view.extend({
 			function render(st) {
 				if (!st) { statusEl.style.color = "#e06c75"; statusEl.textContent = "✗ Нет ответа helper"; return; }
 				running = !!st.running;
-				sw.setChecked(!!st.enabled);
+				sw.setSilent(!!st.enabled);
 				var txt;
 				if (st.running) txt = "⏳ Сканирую googlevideo-подсети…";
 				else if (!st.enabled) txt = "⚪ Выключено · по умолчанию не фильтруем";
@@ -3516,7 +3521,7 @@ return view.extend({
 					var out = null; try { out = JSON.parse((res && res.stdout) || "{}"); } catch (e) {}
 					if (!out || !out.success) {
 						ui.addNotification(null, E("p", {}, "Не удалось переключить фильтр мёртвых кластеров: " + ((out && out.error) || "ошибка")), "warning");
-						sw.setChecked(!v);
+						sw.setSilent(!v);
 						return;
 					}
 					ui.addNotification(null, E("p", {}, v ? "Фильтр мёртвых кластеров включён; карта строится в фоне" : "Фильтр мёртвых кластеров выключен, RST-правило снято"), "info");

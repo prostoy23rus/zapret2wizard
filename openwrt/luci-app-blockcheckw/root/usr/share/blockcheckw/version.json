@@ -1,10 +1,10 @@
 {
-  "version": "0.38.0",
+  "version": "0.38.1",
   "release_date": "2026-11-24",
   "repo": "prostoy23rus/zapret2wizard",
   "branch": "main",
   "changelog": [
-    "issue #8: модуль «Мёртвые кластеры googlevideo» — LuCI-тумблер, cron-скан, nft RST-правило, freeze и правило /24; по умолчанию выключен",
-    "Lua-модуль + офлайн-тесты; live-проверка на РТК (0 мёртвых), синтетическое nft-правило проверено"
+    "fix(UI): убран цикл тумблера «Мёртвые кластеры» — render/status теперь обновляют его через setSilent, не вызывая onChange",
+    "fix(UI): откат тумблера при ошибке тоже тихий; добавлен регрессионный тест tools/test_dead_clusters_ui.js в CI"
   ]
 }
